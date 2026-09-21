@@ -7,4 +7,5 @@ urlpatterns = [
     # eventual reverse-proxy split (design decision #1) needs no path
     # rewriting — only a routing-rule flip per slice.
     path("api/", include("apps.catalog.urls")),
+    path("api/", include("apps.fitment.urls")),
 ]

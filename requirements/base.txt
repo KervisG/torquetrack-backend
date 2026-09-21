@@ -4,3 +4,4 @@ psycopg[binary]>=3.2,<3.3
 django-environ>=0.11,<0.12
 requests>=2.32,<3
 stripe>=11,<12
+weasyprint>=70,<71

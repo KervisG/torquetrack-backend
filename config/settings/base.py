@@ -84,6 +84,17 @@ DATABASES = {
 if env.bool("DATABASE_SSL", default=False):
     DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
 
+# Design decision #5 (auth): `ScryptLegacyHasher` verifies the existing
+# Next.js `scrypt$salt$hash` rows and rehashes to PBKDF2 (Django's default)
+# on next successful login. Django's OWN `ScryptPasswordHasher` also uses
+# `algorithm = "scrypt"` but a different 6-part encoding — it is
+# deliberately NOT listed here to avoid colliding with `ScryptLegacyHasher`
+# for that same algorithm name (see `apps/accounts/hashers.py`).
+PASSWORD_HASHERS = [
+    "django.contrib.auth.hashers.PBKDF2PasswordHasher",
+    "apps.accounts.hashers.ScryptLegacyHasher",
+]
+
 AUTH_PASSWORD_VALIDATORS = [
     {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
     {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},

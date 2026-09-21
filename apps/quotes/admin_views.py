@@ -1,13 +1,10 @@
-"""Admin quote actions (task 6.3): convert/preview/reopen/send, matching
-`app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`.
+"""Admin quote actions (task 6.3): convert/preview/reopen/send, plus
+list/create/delete (task 7.6, closing the scope gap flagged by Phase 6),
+matching `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`,
+`app/api/admin/quotes/route.ts`, and `app/api/admin/quotes/[id]/route.ts`.
 
 RBAC-gated via `HasTorqueTrackPermission` + `AdminSessionAuthentication`
-(Phase 6 prerequisite, see `apps/accounts/authentication.py`). List/create
-(`GET/POST admin/quotes`) and delete (`DELETE admin/quotes/[id]`) are read
-for context but are NOT implemented here — they are not named by this
-phase's task 6.3 ("admin `quotes` convert/preview/reopen/send routes")
-and are not claimed by any other phase's task list either; flagged as a
-scope gap in apply-progress rather than silently expanded into here.
+(Phase 6 prerequisite, see `apps/accounts/authentication.py`).
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,9 +13,12 @@ from apps.accounts.authentication import AdminSessionAuthentication
 from apps.accounts.permissions import HasTorqueTrackPermission
 from apps.quotes.admin_services import (
     convert_quote_to_order,
+    delete_or_archive_quote,
     ensure_public_token,
+    list_admin_quotes,
     reopen_quote,
     send_quote_email,
+    upsert_admin_quote,
 )
 from apps.quotes.models import Quote
 
@@ -84,4 +84,41 @@ class QuoteSendView(_AdminQuoteActionView):
         result = send_quote_email(quote, request.user.username)
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))
+        return Response(result)
+
+
+class AdminQuoteListCreateView(APIView):
+    """`GET/POST /api/admin/quotes` (task 7.6): list (`quotes.view`) and
+    create/update (`quotes.create`) share one URL, so the required
+    permission depends on the request method — `HasTorqueTrackPermission`
+    reads `required_permission` before the handler runs, hence the
+    property (evaluated once `self.request` exists in `initial()`)."""
+
+    authentication_classes = [AdminSessionAuthentication]
+    permission_classes = [HasTorqueTrackPermission]
+
+    @property
+    def required_permission(self):
+        return "quotes.create" if self.request.method == "POST" else "quotes.view"
+
+    def get(self, request):
+        return Response(list_admin_quotes())
+
+    def post(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        result = upsert_admin_quote(body, request.user.username)
+        if "error" in result:
+            return Response({"error": result["error"]}, status=result.get("status", 400))
+        return Response(result)
+
+
+class QuoteDeleteView(_AdminQuoteActionView):
+    required_permission = "quotes.delete"
+
+    def delete(self, request, quote_id):
+        quote = self._get_quote(quote_id)
+        if quote is None:
+            return Response({"error": "Quote not found"}, status=404)
+
+        result = delete_or_archive_quote(quote, request.user.username)
         return Response(result)

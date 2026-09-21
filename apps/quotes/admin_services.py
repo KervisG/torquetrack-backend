@@ -16,9 +16,15 @@ from django.utils import timezone
 
 from apps.backoffice.models import ActivityLog
 from apps.checkout.models import Order
-from apps.checkout.services import next_order_number, random_id
+from apps.checkout.services import money, next_order_number, random_id
 from apps.quotes.models import Quote
-from apps.quotes.services import quote_token, render_quote_html, send_email, serialize_quote
+from apps.quotes.services import (
+    next_quote_number,
+    quote_token,
+    render_quote_html,
+    send_email,
+    serialize_quote,
+)
 
 
 def ensure_public_token(quote: Quote) -> str:
@@ -146,3 +152,160 @@ def send_quote_email(quote: Quote, actor_username: str) -> dict:
     quote.save(update_fields=["status", "data", "updated_at"])
 
     return {"ok": True, "url": url, "emailId": sent.get("id")}
+
+
+# --- list/create/delete (task 7.6), pinned against
+# `app/api/admin/quotes/route.ts` and `app/api/admin/quotes/[id]/route.ts` --
+
+
+def _num(value, default: float = 0.0) -> float:
+    """Mirror JS `Number(x)`, falling back to `default` on `None`/parse
+    failure (the `||default` half of each legacy expression is applied by
+    the caller, matching JS's per-expression falsy-zero fallback)."""
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _quote_totals(payload: dict) -> dict:
+    """Mirror `app/api/admin/quotes/route.ts`'s inline `totals()` helper."""
+    items = payload.get("items") or []
+
+    def qty(item):
+        value = item.get("quantity")
+        if value is None:
+            value = item.get("qty")
+        return _num(value, 1.0) or 1.0
+
+    def unit_price(item):
+        value = item.get("unitPrice")
+        if value is None:
+            value = item.get("price")
+        return _num(value, 0.0)
+
+    subtotal = money(sum(unit_price(item) * qty(item) for item in items))
+    core = money(sum((_num(item.get("coreCharge"), 0.0)) * qty(item) for item in items))
+    shipping = money(payload.get("shipping"))
+    tax = money(payload.get("tax"))
+    return {
+        "subtotal": subtotal,
+        "core": core,
+        "shipping": shipping,
+        "tax": tax,
+        "total": money(subtotal + core + shipping + tax),
+    }
+
+
+def list_admin_quotes() -> list[dict]:
+    """`GET /api/admin/quotes` — expires stale quotes in place, then returns
+    every non-archived quote ordered by `created_at`."""
+    Quote.objects.filter(
+        status__in=["BUILDING", "ACTIVE", "CONTACTED"], expires_at__lt=timezone.now()
+    ).update(status="EXPIRED")
+
+    quotes = Quote.objects.select_related("customer").order_by("created_at")
+    return [serialize_quote(quote) for quote in quotes if not (quote.data or {}).get("archived")]
+
+
+def upsert_admin_quote(payload: dict, actor_username: str) -> dict:
+    """`POST /api/admin/quotes` — creates a new quote, or updates an
+    existing one when `payload["id"]` is present (preserving its `number`/
+    `created_at`/`expires_at`)."""
+    totals = _quote_totals(payload)
+    status = payload.get("status") or "ACTIVE"
+    customer_id = payload.get("customerId") or None
+    quote_data = {**payload, "totals": totals, "createdBy": actor_username}
+    now = timezone.now()
+
+    quote_id = payload.get("id")
+    if quote_id:
+        quote = Quote.objects.filter(pk=quote_id).first()
+        if quote is None:
+            return {"error": "Quote not found", "status": 404}
+
+        number = quote.number
+        created_at = quote.created_at
+        expires_at = quote.expires_at
+        quote.customer_id = customer_id
+        quote.status = status
+        quote.data = quote_data
+        quote.updated_at = now
+        quote.save(update_fields=["customer_id", "status", "data", "updated_at"])
+        updated = True
+    else:
+        quote_id = random_id("QID")
+        number = next_quote_number()
+        created_at = now
+        expires_at = now + timezone.timedelta(days=30)
+        Quote.objects.create(
+            id=quote_id,
+            number=number,
+            customer_id=customer_id,
+            status=status,
+            data=quote_data,
+            created_at=created_at,
+            expires_at=expires_at,
+            updated_at=now,
+        )
+        updated = False
+
+    return {
+        "updated": updated,
+        "quote": {
+            **payload,
+            "id": quote_id,
+            "number": number,
+            "totals": totals,
+            "createdAt": created_at,
+            "expiresAt": expires_at,
+        },
+    }
+
+
+def delete_or_archive_quote(quote: Quote, actor_username: str) -> dict:
+    """`DELETE /api/admin/quotes/[id]` — archives (never deletes) a quote
+    already linked to an Order, to preserve the financial/CRM trail; hard-
+    deletes otherwise."""
+    data = quote.data or {}
+    order_number = data.get("orderNumber")
+
+    if order_number:
+        quote.data = {
+            **data,
+            "archived": True,
+            "archivedAt": timezone.now().isoformat(),
+            "archivedBy": actor_username,
+        }
+        quote.updated_at = timezone.now()
+        quote.save(update_fields=["data", "updated_at"])
+        ActivityLog.objects.create(
+            actor_id=actor_username,
+            action="QUOTE_ARCHIVED",
+            entity_type="QUOTE",
+            entity_id=quote.pk,
+            data={"number": quote.number, "orderNumber": order_number},
+            created_at=timezone.now(),
+        )
+        return {
+            "ok": True,
+            "archived": True,
+            "quoteNumber": quote.number,
+            "orderNumber": order_number,
+        }
+
+    number = quote.number
+    status = quote.status
+    quote_id = quote.pk
+    quote.delete()
+    ActivityLog.objects.create(
+        actor_id=actor_username,
+        action="QUOTE_DELETED",
+        entity_type="QUOTE",
+        entity_id=quote_id,
+        data={"number": number, "status": status},
+        created_at=timezone.now(),
+    )
+    return {"ok": True, "archived": False, "deletedQuote": number}

@@ -128,3 +128,12 @@ REST_FRAMEWORK = {
         "rest_framework.authentication.SessionAuthentication",
     ],
 }
+
+# Phase 5 (checkout/webhook) integration env vars, names verified against
+# real `process.env.*` usage in `docs/migration/phase-0-infra-env-validation.md`
+# (Stripe and TaxJar tables) — not assumed.
+STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
+STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
+SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="")
+APP_URL = env("APP_URL", default="http://localhost:3000")

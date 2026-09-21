@@ -1,0 +1,37 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: torquetrack
+      POSTGRES_PASSWORD: torquetrack
+      POSTGRES_DB: torquetrack
+    ports:
+      - "5435:5432"
+    volumes:
+      - torquetrack_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U torquetrack"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - .:/app
+    ports:
+      - "8010:8000"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.dev
+      DATABASE_URL: postgres://torquetrack:torquetrack@db:5432/torquetrack
+      DATABASE_SSL: "false"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  torquetrack_pgdata:
+    # Starts empty. Stage A models are managed=False and bind to the existing
+    # Neon schema (design decision #2/#3): restore a Neon dump into this
+    # volume manually before Phase 2 model-binding tests need real data.

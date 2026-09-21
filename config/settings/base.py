@@ -1,0 +1,107 @@
+"""Shared Django settings for all environments.
+
+Environment variable names for the integrations shared with the existing
+Next.js app (Stripe, TaxJar, EasyPost, Resend, RingCentral, DATABASE_URL,
+DATABASE_SSL) are verified against real source usage in
+`docs/migration/phase-0-infra-env-validation.md` (Phase 0 output) and MUST
+stay in sync with that document.
+"""
+from pathlib import Path
+
+import environ
+
+BASE_DIR = Path(__file__).resolve().parent.parent.parent
+
+env = environ.Env()
+env_file = BASE_DIR / ".env"
+if env_file.exists():
+    environ.Env.read_env(env_file)
+
+SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
+
+INSTALLED_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    "rest_framework",
+    "apps.accounts",
+    "apps.customers",
+    "apps.catalog",
+    "apps.fitment",
+    "apps.cart",
+    "apps.checkout",
+    "apps.quotes",
+    "apps.backoffice",
+    "apps.shipping",
+    "apps.tax",
+    "apps.vin",
+    "apps.integrations",
+]
+
+MIDDLEWARE = [
+    "django.middleware.security.SecurityMiddleware",
+    "django.contrib.sessions.middleware.SessionMiddleware",
+    "django.middleware.common.CommonMiddleware",
+    "django.middleware.csrf.CsrfViewMiddleware",
+    "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "django.contrib.messages.middleware.MessageMiddleware",
+    "django.middleware.clickjacking.XFrameOptionsMiddleware",
+]
+
+ROOT_URLCONF = "config.urls"
+
+TEMPLATES = [
+    {
+        "BACKEND": "django.template.backends.django.DjangoTemplates",
+        "DIRS": [],
+        "APP_DIRS": True,
+        "OPTIONS": {
+            "context_processors": [
+                "django.template.context_processors.debug",
+                "django.template.context_processors.request",
+                "django.contrib.auth.context_processors.auth",
+                "django.contrib.messages.context_processors.messages",
+            ],
+        },
+    },
+]
+
+WSGI_APPLICATION = "config.wsgi.application"
+ASGI_APPLICATION = "config.asgi.application"
+
+# DATABASE_URL / DATABASE_SSL are shared with the existing Next.js app during
+# the strangler migration (design decision #2: one Neon Postgres for both
+# stacks). Default points at the local Docker Compose `db` service.
+DATABASES = {
+    "default": env.db(
+        "DATABASE_URL",
+        default="postgres://torquetrack:torquetrack@localhost:5435/torquetrack",
+    ),
+}
+if env.bool("DATABASE_SSL", default=False):
+    DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
+
+AUTH_PASSWORD_VALIDATORS = [
+    {"NAME": "django.contrib.auth.password_validation.UserAttributeSimilarityValidator"},
+    {"NAME": "django.contrib.auth.password_validation.MinimumLengthValidator"},
+    {"NAME": "django.contrib.auth.password_validation.CommonPasswordValidator"},
+    {"NAME": "django.contrib.auth.password_validation.NumericPasswordValidator"},
+]
+
+LANGUAGE_CODE = "en-us"
+TIME_ZONE = "UTC"
+USE_I18N = True
+USE_TZ = True
+
+STATIC_URL = "static/"
+
+DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+REST_FRAMEWORK = {
+    "DEFAULT_AUTHENTICATION_CLASSES": [
+        "rest_framework.authentication.SessionAuthentication",
+    ],
+}

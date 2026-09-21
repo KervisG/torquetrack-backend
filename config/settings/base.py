@@ -138,6 +138,10 @@ TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="")
 APP_URL = env("APP_URL", default="http://localhost:3000")
 
+# Phase 7 (shipping/rates) — EasyPost, name verified against
+# `docs/migration/phase-0-infra-env-validation.md` (Phase 0 output).
+EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
+
 # Phase 6 (quotes/PDF) — Resend email, names verified against
 # `docs/migration/phase-0-infra-env-validation.md` (Phase 0 output).
 RESEND_API_KEY = env("RESEND_API_KEY", default="")

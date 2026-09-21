@@ -137,3 +137,10 @@ STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="")
 APP_URL = env("APP_URL", default="http://localhost:3000")
+
+# Phase 6 (quotes/PDF) — Resend email, names verified against
+# `docs/migration/phase-0-infra-env-validation.md` (Phase 0 output).
+RESEND_API_KEY = env("RESEND_API_KEY", default="")
+FROM_EMAIL = env("FROM_EMAIL", default="")
+SALES_EMAIL = env("SALES_EMAIL", default="")
+REPLY_TO_EMAIL = env("REPLY_TO_EMAIL", default="")

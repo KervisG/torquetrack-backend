@@ -1,0 +1,159 @@
+{% comment %}
+Visually equivalent (not pixel-identical) port of `lib/quote.ts`'s
+`quoteHtml()` template (design decision #8, task 6.2). Used for three
+renders: the public `GET /api/quote/public/<token>` HTML page (screen
+media, interactive checkout button), the WeasyPrint PDF (WeasyPrint
+renders as print media by default, which the `@media print` rule below
+already uses to hide the action buttons — no separate "PDF-only" template
+needed), and the admin "send" email body.
+{% endcomment %}
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width">
+<title>TorqueTrack Quote {{ quote.number }}</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #050b0d; color: #f5f7f8; font-family: Arial, sans-serif; }
+  .page { max-width: 1050px; margin: auto; padding: 38px; }
+  .head { display: flex; justify-content: space-between; gap: 25px; align-items: center; border-bottom: 1px solid #25414a; padding-bottom: 25px; }
+  .brand { display: flex; align-items: center; gap: 18px; }
+  .tt { width: 82px; height: 82px; border-radius: 20px; background: #42ee8a; color: #06100b; display: grid; place-items: center; font-weight: 900; font-size: 36px; }
+  .name { font-size: 34px; font-weight: 900; }
+  .sub { letter-spacing: 7px; color: #cbd5d9; }
+  .green { color: #42ee8a; }
+  .hero { display: grid; grid-template-columns: 1.4fr .6fr; gap: 24px; padding: 34px 0; }
+  .hero h1 { font-size: 42px; margin: 0 0 12px; }
+  .card { border: 1px solid #36515a; border-radius: 10px; background: #091318; padding: 18px; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .label { color: #42ee8a; font-weight: 800; }
+  .row { display: grid; grid-template-columns: 1.7fr .8fr .35fr .65fr .65fr .7fr; gap: 8px; padding: 13px; border-bottom: 1px solid #29414a; }
+  .row.headrow { background: #063c28; color: #42ee8a; font-weight: 800; border-radius: 8px 8px 0 0; }
+  .totals { margin-left: auto; width: min(420px, 100%); padding-top: 18px; }
+  .totalrow { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #29414a; }
+  .grand { background: #42ee8a; color: #06100b; padding: 13px; font-size: 24px; font-weight: 900; border-radius: 8px; margin-top: 8px; }
+  .actions { display: flex; gap: 12px; margin: 25px 0; }
+  .btn { display: inline-block; padding: 15px 24px; border-radius: 8px; text-decoration: none; font-weight: 900; background: #42ee8a; color: #06100b; }
+  .footer { border-top: 1px solid #42ee8a; margin-top: 30px; padding-top: 22px; color: #c7d1d5; }
+  .notes { line-height: 1.6; }
+  @media print {
+    body { background: #050b0d !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    .actions { display: none; }
+    .page { padding: 18px; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header class="head">
+    <div class="brand">
+      <div class="tt">TT</div>
+      <div><div class="name">Torque<span class="green">Track</span></div><div class="sub">DIESEL PARTS</div></div>
+    </div>
+    <div><b>OEM + AFTERMARKET DIESEL COMPONENTS</b><br><span class="green"><b>Find it. Price it. Ship it fast.</b></span></div>
+  </header>
+
+  <section class="hero">
+    <div>
+      <p>Hello {{ greeting_name }},</p>
+      <h1>Thank You for Choosing <span class="green">TorqueTrack!</span></h1>
+      <p>Attached you&rsquo;ll find your quote <b class="green">{{ quote.number }}</b> for review. You can proceed with checkout, request changes, or contact us.</p>
+    </div>
+    <div class="card">
+      <div class="label">QUOTE</div>
+      <p>
+        <b>Quote #</b> {{ quote.number }}<br>
+        <b>Date</b> {{ quote.createdAt|date:"m/d/Y" }}<br>
+        <b>Valid Until</b> {% if quote.expiresAt %}{{ quote.expiresAt|date:"m/d/Y" }}{% else %}30 days{% endif %}<br>
+        <b>Sales Rep</b> {{ quote.createdBy|default:"TorqueTrack Team" }}
+      </p>
+    </div>
+  </section>
+
+  <section class="grid">
+    <div class="card">
+      <div class="label">CUSTOMER INFORMATION</div>
+      <p>
+        <b>Name:</b> {{ customer.name|default:"" }}<br>
+        <b>Company:</b> {{ customer.company|default:"" }}<br>
+        <b>Email:</b> {{ customer.email|default:"" }}<br>
+        <b>Phone:</b> {{ customer.phone|default:"" }}<br>
+        <b>Address:</b> {{ customer.address1|default:"" }}{% if customer.city %}, {{ customer.city }}{% endif %}{% if customer.state %}, {{ customer.state }}{% endif %}{% if customer.zip %}, {{ customer.zip }}{% endif %}
+      </p>
+    </div>
+    <div class="card">
+      <div class="label">VEHICLE INFORMATION</div>
+      <p>
+        <b>Year:</b> {{ vehicle.year|default:"" }}<br>
+        <b>Make:</b> {{ vehicle.make|default:"" }}<br>
+        <b>Model:</b> {{ vehicle.model|default:"" }}<br>
+        <b>Engine:</b> {{ vehicle.engine|default:"" }}<br>
+        <b>VIN:</b> {{ vehicle.vin|default:"" }}
+      </p>
+    </div>
+  </section>
+
+  <section style="margin-top:16px" class="card">
+    <div class="row headrow"><span>DESCRIPTION</span><span>PART #</span><span>QTY</span><span>PRICE</span><span>CORE</span><span>TOTAL</span></div>
+    {% for item in items %}
+    <div class="row">
+      <span>{{ item.title }}</span>
+      <span>{{ item.partNumber }}</span>
+      <span>{{ item.quantity }}</span>
+      <span>${{ item.unitPrice|floatformat:2 }}</span>
+      <span>${{ item.coreCharge|floatformat:2 }}</span>
+      <span>${{ item.lineTotal|floatformat:2 }}</span>
+    </div>
+    {% endfor %}
+  </section>
+
+  <div class="grid" style="margin-top:16px">
+    <div class="card notes">
+      <div class="label">NOTES</div>
+      &bull; Prices are subject to change without notice.<br>
+      &bull; Availability is based on current stock at time of purchase.<br>
+      &bull; Core charge is refundable upon receipt and inspection of the old unit.<br>
+      &bull; Shipping costs are estimated.<br>
+      &bull; This quote is not a guarantee of item availability.<br>
+      &bull; Please contact us with any questions.
+    </div>
+    <div class="totals">
+      <div class="totalrow"><span>Subtotal</span><b>${{ totals.subtotal|floatformat:2 }}</b></div>
+      <div class="totalrow"><span>Core Charge</span><b>${{ totals.core|floatformat:2 }}</b></div>
+      <div class="totalrow"><span>Shipping</span><b>${{ totals.shipping|floatformat:2 }}</b></div>
+      <div class="totalrow"><span>Tax</span><b>${{ totals.tax|floatformat:2 }}</b></div>
+      <div class="grand"><span>Total (USD)</span><span style="float:right">${{ totals.total|floatformat:2 }}</span></div>
+    </div>
+  </div>
+
+  <div class="actions">
+    <button class="btn" style="border:0;cursor:pointer" onclick="checkoutQuote()">View / Checkout Quote &rarr;</button>
+    <a class="btn" style="background:transparent;color:#42ee8a;border:1px solid #42ee8a" href="{{ public_url }}/pdf">Download PDF</a>
+  </div>
+
+  <footer class="footer">
+    <div class="brand">
+      <div class="tt" style="width:58px;height:58px;font-size:25px;border-radius:12px">TT</div>
+      <div><b>Torque<span class="green">Track</span> Diesel Parts</b><br>teams@torquetrackdiesel.com &bull; Sarasota, FL<br>www.torquetrackdiesel.com</div>
+    </div>
+    <p style="letter-spacing:4px;text-align:center">FIND IT. PRICE IT. SHIP IT FAST.</p>
+  </footer>
+</main>
+<script>
+async function checkoutQuote(){
+  const b = document.querySelector('.actions .btn');
+  if (b) b.textContent = 'Opening secure checkout...';
+  try {
+    const r = await fetch(location.pathname + '/checkout', { method: 'POST' });
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Checkout unavailable');
+    location.href = j.url;
+  } catch (e) {
+    if (b) { b.textContent = e && e.message || 'Checkout unavailable'; b.style.background = '#7f1d1d'; b.style.color = '#fff'; }
+  }
+}
+</script>
+{% if print_mode %}<script>window.onload = () => window.print();</script>{% endif %}
+</body>
+</html>

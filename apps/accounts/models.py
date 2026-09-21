@@ -25,3 +25,19 @@ class User(models.Model):
 
     def __str__(self) -> str:
         return self.username
+
+
+class TorqueTrackPermission(models.Model):
+    """Marker model with no real database table (`managed = False`, no
+    `db_table` — Django never creates one). It exists ONLY so the 26
+    legacy permission strings from `lib/permissions.ts` have a single,
+    named `ContentType` to hang their Django `Permission` codenames on
+    (design decision #6, task 3.3) — the standard pattern for permissions
+    that are not tied to any one real model. See
+    `apps/accounts/migrations/0002_rbac_permissions.py`.
+    """
+
+    class Meta:
+        managed = False
+        default_permissions = ()
+        verbose_name = "TorqueTrack permission"

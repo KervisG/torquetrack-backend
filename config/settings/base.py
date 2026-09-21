@@ -47,6 +47,13 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    # Design decision #5 (auth/RBAC): dual session scopes equivalent to
+    # the frozen Next.js app's tt_admin/tt_customer cookies. Additive to
+    # the generic single-cookie SessionMiddleware above (kept for Django's
+    # own admin site and any future generic use); these two attach
+    # `request.admin_session` / `request.customer_session` independently.
+    "apps.accounts.sessions.AdminSessionMiddleware",
+    "apps.accounts.sessions.CustomerSessionMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -110,6 +117,11 @@ USE_TZ = True
 STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Design decision #5 (auth): 7-day default expiry for both admin and
+# customer session scopes (`apps/accounts/sessions.py`), matching
+# `lib/auth.ts`'s `newSession(kind, subjectId, days=7)`.
+SESSION_COOKIE_AGE = 7 * 24 * 60 * 60
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [

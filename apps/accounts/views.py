@@ -1,15 +1,17 @@
-"""`admin/users`, `admin/users/[id]` (task 7.1), matching
+"""`admin/users` y `admin/users/[id]` (task 7.1), matching
 `app/api/admin/users/route.ts` and `app/api/admin/users/[id]/route.ts`.
 
-Unlike other Phase 7 admin views (`AdminSessionAuthentication` +
-`HasTorqueTrackPermission`, collapsing "no session" and "no permission"
-into one 403), these two views check manually to preserve the legacy
-401-vs-403 split (see the test module's docstring for why).
+El login, el logout y la lectura de sesión viven en `apps/auth/`.
+
+A diferencia del resto de las admin views de la fase 7
+(`AdminSessionAuthentication` + `HasTorqueTrackPermission`, que colapsan
+"sin sesión" y "sin permiso" en un solo 403), estas chequean a mano para
+conservar la distinción 401 vs 403 del legado (ver el docstring del módulo
+de tests).
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.authentication import AdminSessionAuthentication
 from apps.accounts.permissions import has_torquetrack_permission, is_active_admin_user
 from apps.accounts.services import (
     create_admin_user,
@@ -17,6 +19,7 @@ from apps.accounts.services import (
     list_admin_users,
     update_admin_user,
 )
+from apps.auth.authentication import AdminSessionAuthentication
 
 
 class _AdminUsersManageView(APIView):

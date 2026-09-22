@@ -9,12 +9,12 @@ per-field `hasPermission()` checks (403), not a single static
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.authentication import AdminSessionAuthentication
 from apps.accounts.permissions import (
     HasTorqueTrackPermission,
     has_torquetrack_permission,
     is_active_admin_user,
 )
+from apps.auth.authentication import AdminSessionAuthentication
 from apps.checkout.admin_services import (
     create_admin_payment_link,
     delete_admin_order,

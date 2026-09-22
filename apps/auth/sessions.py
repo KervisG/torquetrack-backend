@@ -34,6 +34,8 @@ from importlib import import_module
 from django.conf import settings
 from django.contrib.sessions.backends.base import UpdateError
 from django.contrib.sessions.exceptions import SessionInterrupted
+from django.contrib.sessions.models import Session
+from django.utils import timezone
 from django.utils.cache import patch_vary_headers
 from django.utils.deprecation import MiddlewareMixin
 from django.utils.http import http_date
@@ -125,3 +127,27 @@ class CustomerSessionMiddleware(_NamedCookieSessionMiddleware):
 
     cookie_name = "tt_customer"
     request_attr = "customer_session"
+
+
+def revoke_admin_sessions(user_id: str) -> None:
+    """Port de `delete from sessions where kind='admin' and subject_id=$1`.
+
+    Lo llama `apps/accounts/services.py` al desactivar o borrar un empleado.
+
+    `AdminSessionAuthentication` ya revalida `active=True` contra la fila en
+    cada request, así que no es esto lo que corta el acceso de un empleado
+    recién desactivado; borrar la fila evita que una reactivación posterior
+    resucite una sesión vieja que debería haber muerto.
+
+    Recorre las sesiones vivas en vez de filtrar por `user_id` en SQL porque
+    `session_data` es un blob firmado y serializado, no columnas
+    consultables. La tabla solo guarda sesiones activas de staff y clientes,
+    y esto corre únicamente al desactivar o borrar un usuario.
+
+    NOTA: no toca la tabla `sessions` legada (tokens hasheados) que el
+    Next.js congelado sigue usando; mientras los dos stacks estén vivos,
+    desactivar a alguien acá no lo expulsa de allá.
+    """
+    for session in Session.objects.filter(expire_date__gt=timezone.now()):
+        if session.get_decoded().get("user_id") == user_id:
+            session.delete()

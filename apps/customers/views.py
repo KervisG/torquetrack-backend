@@ -9,8 +9,8 @@ specific permission string. See the test module's docstring.
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.authentication import AdminSessionAuthentication
 from apps.accounts.permissions import HasTorqueTrackPermission, is_active_admin_user
+from apps.auth.authentication import AdminSessionAuthentication
 from apps.customers.services import (
     create_portal_invite,
     delete_admin_customer,

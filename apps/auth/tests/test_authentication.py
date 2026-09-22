@@ -5,8 +5,8 @@ import pytest
 from django.db import connection
 from rest_framework.test import APIRequestFactory
 
-from apps.accounts.authentication import AdminSessionAuthentication
 from apps.accounts.models import User
+from apps.auth.authentication import AdminSessionAuthentication
 
 
 def _insert_user(user_id, role="authorized", permissions=None, active=True):

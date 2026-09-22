@@ -6,6 +6,7 @@ logic (that lands per app starting in Phase 2).
 from django.conf import settings
 
 EXPECTED_APPS = {
+    "apps.auth",
     "apps.accounts",
     "apps.customers",
     "apps.catalog",

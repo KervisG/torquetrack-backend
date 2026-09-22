@@ -9,7 +9,7 @@ from django.http import HttpResponse
 from django.test import RequestFactory, override_settings
 from django.utils import timezone
 
-from apps.accounts.sessions import AdminSessionMiddleware, CustomerSessionMiddleware
+from apps.auth.sessions import AdminSessionMiddleware, CustomerSessionMiddleware
 
 pytestmark = pytest.mark.django_db
 

@@ -14,7 +14,7 @@ import hashlib
 import pytest
 from django.contrib.auth.hashers import check_password, make_password
 
-from apps.accounts.hashers import ScryptLegacyHasher
+from apps.auth.hashers import ScryptLegacyHasher
 
 _REAL_SALT = "a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4"
 

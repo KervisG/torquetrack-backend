@@ -1,10 +1,14 @@
 # TorqueTrack Diesel — backend (Django + DRF)
 
 Strangler-migration target for the existing Next.js app (frozen, untouched at
-the repo root). See `docs/migration/` for the full migration design and
-`config/settings/{base,dev,prod}.py` for environment wiring. `apps/` currently
-holds empty app skeletons (Phase 1); models/views/serializers land per app in
-later phases.
+the repo root). See `config/settings/{base,dev,prod}.py` for environment
+wiring.
+
+`apps/` holds 11 working apps covering the catalog, cart, checkout, quotes,
+shipping, tax, VIN, fitment, customers, accounts and backoffice, plus
+`integrations`, still an empty placeholder. The customer-portal API and
+production hardening are not done yet, so this is not a drop-in replacement
+for the Next.js app.
 
 ## Local dev (Docker)
 

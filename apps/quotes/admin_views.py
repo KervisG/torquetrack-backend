@@ -9,8 +9,8 @@ RBAC-gated via `HasTorqueTrackPermission` + `AdminSessionAuthentication`
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.authentication import AdminSessionAuthentication
 from apps.accounts.permissions import HasTorqueTrackPermission
+from apps.auth.authentication import AdminSessionAuthentication
 from apps.quotes.admin_services import (
     convert_quote_to_order,
     delete_or_archive_quote,

@@ -2,11 +2,13 @@
 near-verbatim ports of `app/api/admin/users/route.ts` and
 `app/api/admin/users/[id]/route.ts`.
 
+Verificar credenciales no es de acá: eso vive en `apps/auth/services.py`.
+
 New/updated passwords are hashed with Django's own `make_password` (which
 uses the FIRST-listed `PASSWORD_HASHERS` entry, PBKDF2 — design decision
 #5's "preferred hasher going forward"), not the legacy `ScryptLegacyHasher`
 — that hasher exists only to VERIFY rows the frozen Next.js app already
-wrote, never to encode new ones (see `apps/accounts/hashers.py`'s module
+wrote, never to encode new ones (see `apps/auth/hashers.py`'s module
 docstring).
 """
 from __future__ import annotations
@@ -21,6 +23,7 @@ from apps.accounts.permissions import (
     DEFAULT_EMPLOYEE_PERMISSIONS,
     normalize_permissions,
 )
+from apps.auth.sessions import revoke_admin_sessions
 from apps.backoffice.models import ActivityLog
 
 
@@ -135,7 +138,7 @@ def update_admin_user(user_id: str, payload: dict, actor_username: str) -> dict:
         )
         permissions_for_log = permissions
         if payload.get("active") is False:
-            _revoke_admin_sessions(user_id)
+            revoke_admin_sessions(user_id)
 
     ActivityLog.objects.create(
         actor_id=actor_username,
@@ -164,7 +167,7 @@ def delete_admin_user(user_id: str, actor_user_id: str, actor_username: str) -> 
         return {"error": "The primary Admin account cannot be deleted", "status": 403}
 
     username = target.username
-    _revoke_admin_sessions(user_id)
+    revoke_admin_sessions(user_id)
     target.delete()
     ActivityLog.objects.create(
         actor_id=actor_username,
@@ -175,16 +178,6 @@ def delete_admin_user(user_id: str, actor_user_id: str, actor_username: str) -> 
         created_at=timezone.now(),
     )
     return {"ok": True}
-
-
-def _revoke_admin_sessions(user_id: str) -> None:
-    """`delete from sessions where kind='admin' and subject_id=$1` — the
-    legacy hashed-token `sessions` table has no Stage A binding yet
-    (Django's own session engine backs `tt_admin`/`tt_customer` instead,
-    design decision #5), so there is no live table to delete rows from
-    for this port; matches the fact that no login view exists yet to
-    populate that table in the first place (see
-    `apps/accounts/authentication.py`'s module docstring)."""
 
 
 def _random_id(prefix: str) -> str:

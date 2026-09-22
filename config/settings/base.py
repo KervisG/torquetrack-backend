@@ -27,6 +27,7 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
+    "apps.auth",
     "apps.accounts",
     "apps.customers",
     "apps.catalog",
@@ -52,8 +53,8 @@ MIDDLEWARE = [
     # the generic single-cookie SessionMiddleware above (kept for Django's
     # own admin site and any future generic use); these two attach
     # `request.admin_session` / `request.customer_session` independently.
-    "apps.accounts.sessions.AdminSessionMiddleware",
-    "apps.accounts.sessions.CustomerSessionMiddleware",
+    "apps.auth.sessions.AdminSessionMiddleware",
+    "apps.auth.sessions.CustomerSessionMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -99,7 +100,7 @@ if env.bool("DATABASE_SSL", default=False):
 # for that same algorithm name (see `apps/accounts/hashers.py`).
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
-    "apps.accounts.hashers.ScryptLegacyHasher",
+    "apps.auth.hashers.ScryptLegacyHasher",
 ]
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -127,6 +128,12 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
+    # Solo el scope del login de admin: el resto de los endpoints sigue sin
+    # tope para no desviarse del contrato legado en esta fase
+    # (`apps/accounts/throttling.py`).
+    "DEFAULT_THROTTLE_RATES": {
+        "admin_login": env("ADMIN_LOGIN_THROTTLE_RATE", default="10/min"),
+    },
 }
 
 # Phase 5 (checkout/webhook) integration env vars, names verified against

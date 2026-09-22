@@ -1,11 +1,11 @@
 """RED/GREEN evidence for `AdminSessionAuthentication` (Phase 6 task 6.3
-prerequisite — see `apps/accounts/authentication.py` module docstring).
+prerequisite — see `apps/auth/authentication.py`).
 """
 import pytest
 from django.db import connection
 from rest_framework.test import APIRequestFactory
 
-from apps.accounts.models import User
+from apps.auth.models import User
 from apps.auth.authentication import AdminSessionAuthentication
 
 

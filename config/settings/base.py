@@ -28,7 +28,6 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "apps.auth",
-    "apps.accounts",
     "apps.customers",
     "apps.catalog",
     "apps.fitment",
@@ -97,10 +96,10 @@ if env.bool("DATABASE_SSL", default=False):
 # on next successful login. Django's OWN `ScryptPasswordHasher` also uses
 # `algorithm = "scrypt"` but a different 6-part encoding — it is
 # deliberately NOT listed here to avoid colliding with `ScryptLegacyHasher`
-# for that same algorithm name (see `apps/accounts/hashers.py`).
+# for that same algorithm name (see `apps/auth/utils/hashers.py`).
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
-    "apps.auth.hashers.ScryptLegacyHasher",
+    "apps.auth.utils.hashers.ScryptLegacyHasher",
 ]
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -120,7 +119,7 @@ STATIC_URL = "static/"
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
 # Design decision #5 (auth): 7-day default expiry for both admin and
-# customer session scopes (`apps/accounts/sessions.py`), matching
+# customer session scopes (`apps/auth/sessions.py`), matching
 # `lib/auth.ts`'s `newSession(kind, subjectId, days=7)`.
 SESSION_COOKIE_AGE = 7 * 24 * 60 * 60
 
@@ -130,9 +129,10 @@ REST_FRAMEWORK = {
     ],
     # Solo el scope del login de admin: el resto de los endpoints sigue sin
     # tope para no desviarse del contrato legado en esta fase
-    # (`apps/accounts/throttling.py`).
+    # (`apps/auth/utils/throttling.py`).
     "DEFAULT_THROTTLE_RATES": {
         "admin_login": env("ADMIN_LOGIN_THROTTLE_RATE", default="10/min"),
+        "register": env("REGISTER_THROTTLE_RATE", default="10/min"),
     },
 }
 

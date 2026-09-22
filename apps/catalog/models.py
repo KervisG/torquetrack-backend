@@ -11,6 +11,10 @@ class Product(models.Model):
     class Meta:
         managed = False
         db_table = "products"
+        permissions = [
+            ("edit_pricing", "Can edit pricing"),
+            ("view_costs", "Can view costs"),
+        ]
 
     def __str__(self) -> str:
         return self.id

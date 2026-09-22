@@ -21,6 +21,9 @@ class ActivityLog(models.Model):
     class Meta:
         managed = False
         db_table = "activity_logs"
+        permissions = [
+            ("view_dashboard", "Can view dashboard"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.action}:{self.entity_id}"

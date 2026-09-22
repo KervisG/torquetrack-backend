@@ -19,7 +19,7 @@ from django.core.management import call_command
 
 from tests.stage_a_tables import STAGE_A_TABLES
 
-STAGE_A_APPS = ["accounts", "customers", "catalog", "cart", "checkout", "quotes"]
+STAGE_A_APPS = ["tt_auth", "customers", "catalog", "cart", "checkout", "quotes"]
 
 
 @pytest.mark.django_db

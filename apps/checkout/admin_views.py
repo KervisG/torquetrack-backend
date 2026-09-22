@@ -9,7 +9,7 @@ per-field `hasPermission()` checks (403), not a single static
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import (
+from apps.auth.permissions import (
     HasTorqueTrackPermission,
     has_torquetrack_permission,
     is_active_admin_user,

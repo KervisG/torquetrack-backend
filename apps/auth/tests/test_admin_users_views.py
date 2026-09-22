@@ -1,23 +1,16 @@
-"""`admin/users`, `admin/users/[id]` (task 7.1), pinned against
-`app/api/admin/users/route.ts` and `app/api/admin/users/[id]/route.ts`.
+"""`/api/admin/users/` y `/api/admin/users/[id]/`.
 
-Unlike the other Phase 7 admin routes (which collapse "no session" and
-"no permission" into one 403, matching `requirePermission()`), the legacy
-users routes call `requireAdmin()` (401 Unauthorized when no valid
-session) and `hasPermission()` (403 Forbidden when a valid session lacks
-`users.manage`) as two SEPARATE checks — preserved here verbatim rather
-than folded into the shared 403-only pattern.
+Separa 401 (sin sesión) de 403 (sesión sin `users.manage`).
 """
 import json
 from importlib import import_module
 
 import pytest
 from django.conf import settings
-from django.contrib.auth.hashers import check_password
 from django.db import connection
 from rest_framework.test import APIClient
 
-from apps.accounts.models import User
+from apps.auth.models import EmployeeRole, User
 from apps.backoffice.models import ActivityLog
 
 
@@ -45,9 +38,6 @@ def _admin_client(user_id):
     client = APIClient()
     client.cookies["tt_admin"] = store.session_key
     return client
-
-
-# --- list (GET) -------------------------------------------------------------
 
 
 @pytest.mark.django_db
@@ -80,75 +70,14 @@ def test_list_returns_admin_first_then_by_created_at():
     assert body[0]["id"] == "usr_admin"
 
 
-# --- create (POST) -----------------------------------------------------------
-
-
 @pytest.mark.django_db
-def test_create_returns_400_without_username_or_password():
+def test_post_is_not_allowed():
     _insert_user("usr_creator", role="admin")
     client = _admin_client("usr_creator")
 
-    response = client.post("/api/admin/users/", {"username": "nopass"}, format="json")
+    response = client.post("/api/admin/users/", {"email": "nopass@example.com"}, format="json")
 
-    assert response.status_code == 400
-
-
-@pytest.mark.django_db
-def test_create_defaults_permissions_and_hashes_password():
-    _insert_user("usr_creator2", role="admin")
-    client = _admin_client("usr_creator2")
-
-    response = client.post(
-        "/api/admin/users/",
-        {"username": "newemployee", "password": "s3cret-pass", "name": "New Employee"},
-        format="json",
-    )
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["user"]["role"] == "authorized"
-    assert body["user"]["active"] is True
-    assert "dashboard.view" in body["user"]["permissions"]
-
-    user = User.objects.get(username="newemployee")
-    assert user.role == "authorized"
-    assert check_password("s3cret-pass", user.password_hash)
-    assert ActivityLog.objects.filter(action="USER_CREATED", entity_id=user.pk).exists()
-
-
-@pytest.mark.django_db
-def test_create_uses_submitted_permissions_when_present():
-    _insert_user("usr_creator3", role="admin")
-    client = _admin_client("usr_creator3")
-
-    response = client.post(
-        "/api/admin/users/",
-        {
-            "username": "scoped",
-            "password": "s3cret-pass",
-            "permissions": ["orders.view", "not-a-real-permission"],
-        },
-        format="json",
-    )
-
-    assert response.status_code == 200
-    assert response.json()["user"]["permissions"] == ["orders.view"]
-
-
-@pytest.mark.django_db
-def test_create_returns_409_on_duplicate_username():
-    _insert_user("usr_creator4", role="admin")
-    _insert_user("usr_existing", username="taken")
-    client = _admin_client("usr_creator4")
-
-    response = client.post(
-        "/api/admin/users/", {"username": "taken", "password": "s3cret-pass"}, format="json"
-    )
-
-    assert response.status_code == 409
-
-
-# --- update (PUT) -------------------------------------------------------
+    assert response.status_code == 405
 
 
 @pytest.mark.django_db
@@ -175,24 +104,20 @@ def test_update_rejects_deactivating_the_primary_admin():
 
 
 @pytest.mark.django_db
-def test_update_non_admin_replaces_permissions_and_can_deactivate():
+def test_update_non_admin_can_deactivate():
     _insert_user("usr_updater3", role="admin")
     _insert_user("usr_target_emp", role="authorized", permissions=["dashboard.view"])
     client = _admin_client("usr_updater3")
 
     response = client.put(
         "/api/admin/users/usr_target_emp/",
-        {"permissions": ["orders.view"], "active": False},
+        {"active": False},
         format="json",
     )
 
     assert response.status_code == 200
     user = User.objects.get(pk="usr_target_emp")
-    assert user.permissions == ["orders.view"]
     assert user.active is False
-
-
-# --- delete (DELETE) ---------------------------------------------------------
 
 
 @pytest.mark.django_db
@@ -226,6 +151,7 @@ def test_delete_removes_employee_and_logs_activity():
 
     assert response.status_code == 200
     assert not User.objects.filter(pk="usr_employee_to_delete").exists()
+    assert not EmployeeRole.objects.filter(user_id="usr_employee_to_delete").exists()
     assert ActivityLog.objects.filter(
         action="USER_DELETED", entity_id="usr_employee_to_delete"
     ).exists()

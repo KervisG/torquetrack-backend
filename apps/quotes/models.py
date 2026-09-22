@@ -27,6 +27,10 @@ class Quote(models.Model):
     class Meta:
         managed = False
         db_table = "quotes"
+        permissions = [
+            ("send_quote", "Can send quotes"),
+            ("convert_quote", "Can convert quotes"),
+        ]
 
     def __str__(self) -> str:
         return self.number

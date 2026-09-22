@@ -4,12 +4,12 @@ matching `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`,
 `app/api/admin/quotes/route.ts`, and `app/api/admin/quotes/[id]/route.ts`.
 
 RBAC-gated via `HasTorqueTrackPermission` + `AdminSessionAuthentication`
-(Phase 6 prerequisite, see `apps/accounts/authentication.py`).
+(Phase 6 prerequisite, see `apps/auth/authentication.py`).
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import HasTorqueTrackPermission
+from apps.auth.permissions import HasTorqueTrackPermission
 from apps.auth.authentication import AdminSessionAuthentication
 from apps.quotes.admin_services import (
     convert_quote_to_order,

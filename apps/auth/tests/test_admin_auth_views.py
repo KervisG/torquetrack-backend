@@ -1,16 +1,6 @@
-"""`admin/login`, `admin/logout`, `admin/session`, pinned against
-`app/api/admin/login/route.ts`, `app/api/admin/logout/route.ts` and
-`app/api/admin/session/route.ts`.
+"""`/api/admin/login/`, `/api/admin/logout/` y `/api/admin/session/`.
 
-These are the first endpoints that ISSUE the `tt_admin` cookie; until now
-`AdminSessionMiddleware` (task 3.2) and `AdminSessionAuthentication` (task
-6.3) were only exercised by tests that built a `SessionStore` by hand.
-
-Two guards here are deliberate deviations from the legacy contract rather
-than ports of it, and both are asserted so a later refactor cannot silently
-drop them: the login must NOT rehash a legacy scrypt row (doing so locks the
-employee out of the still-live Next.js admin), and the login is rate
-limited (the legacy route has no limit at all).
+El login no rehashea filas scrypt y está limitado por IP.
 """
 import json
 from importlib import import_module
@@ -22,9 +12,9 @@ from django.core.cache import cache
 from django.db import connection
 from rest_framework.test import APIClient
 
-from apps.accounts.models import User
-from apps.auth.hashers import ScryptLegacyHasher
-from apps.auth.throttling import AdminLoginRateThrottle
+from apps.auth.models import User
+from apps.auth.utils.hashers import ScryptLegacyHasher
+from apps.auth.utils.throttling import AdminLoginRateThrottle
 
 LEGACY_SALT = "0123456789abcdef0123456789abcdef"
 PASSWORD = "diesel-pass-123"
@@ -40,7 +30,7 @@ def _clear_throttle_history():
 
 
 def _legacy_hash(password=PASSWORD):
-    """Hash con el formato `scrypt$salt$hash` que escribe `lib/auth.ts`."""
+    """Hash con el formato `scrypt$salt$hash`."""
     return ScryptLegacyHasher().encode(password, LEGACY_SALT)
 
 
@@ -90,7 +80,7 @@ def test_login_returns_401_for_unknown_username():
     )
 
     assert response.status_code == 401
-    assert response.json() == {"error": "Incorrect username or password"}
+    assert response.json() == {"error": "Incorrect email or password"}
 
 
 @pytest.mark.django_db
@@ -145,7 +135,12 @@ def test_login_accepts_legacy_scrypt_hash_and_sets_the_admin_cookie():
     assert response.status_code == 200
     assert response.json() == {
         "ok": True,
-        "user": {"id": "usr_login_ok", "username": "employee", "role": "authorized"},
+        "user": {
+            "id": "usr_login_ok",
+            "email": "employee",
+            "username": "employee",
+            "role": "authorized",
+        },
     }
     cookie = response.cookies["tt_admin"]
     assert cookie.value
@@ -168,9 +163,7 @@ def test_login_matches_username_case_insensitively():
 
 @pytest.mark.django_db
 def test_login_does_not_rehash_the_legacy_scrypt_row():
-    """Un rehash a PBKDF2 dejaría el hash ilegible para `verifyPassword` de
-    `lib/auth.ts` y expulsaría al empleado del admin de Next.js en
-    producción."""
+    """Un rehash a PBKDF2 dejaría ilegibles las filas que aún verifican scrypt."""
     stored = _legacy_hash()
     _insert_user("usr_login_keep", username="employee", password_hash=stored)
 
@@ -243,7 +236,10 @@ def test_session_reports_wildcard_permissions_for_the_admin_role():
         "authenticated": True,
         "user": {
             "id": "usr_sess_admin",
+            "email": "owner",
             "username": "owner",
+            "firstName": "Owner",
+            "lastName": "",
             "name": "Owner",
             "role": "admin",
             "permissions": ["*"],

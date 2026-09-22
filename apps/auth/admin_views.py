@@ -1,20 +1,12 @@
-"""`admin/users` y `admin/users/[id]` (task 7.1), matching
-`app/api/admin/users/route.ts` and `app/api/admin/users/[id]/route.ts`.
+"""`/api/admin/users/` y `/api/admin/users/[id]/`.
 
-El login, el logout y la lectura de sesión viven en `apps/auth/`.
-
-A diferencia del resto de las admin views de la fase 7
-(`AdminSessionAuthentication` + `HasTorqueTrackPermission`, que colapsan
-"sin sesión" y "sin permiso" en un solo 403), estas chequean a mano para
-conservar la distinción 401 vs 403 del legado (ver el docstring del módulo
-de tests).
+Estas views separan 401 (sin sesión) de 403 (sin `users.manage`).
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import has_torquetrack_permission, is_active_admin_user
-from apps.accounts.services import (
-    create_admin_user,
+from apps.auth.permissions import has_torquetrack_permission, is_active_admin_user
+from apps.auth.admin_services import (
     delete_admin_user,
     list_admin_users,
     update_admin_user,
@@ -26,7 +18,7 @@ class _AdminUsersManageView(APIView):
     authentication_classes = [AdminSessionAuthentication]
 
     def _require_admin(self, request):
-        """Returns `None` on success, or the error `Response` to return."""
+        """Devuelve `None` si pasa, o el `Response` de error."""
         if not is_active_admin_user(request.user):
             return Response({"error": "Unauthorized"}, status=401)
         if not has_torquetrack_permission(request.user, "users.manage"):
@@ -40,16 +32,6 @@ class AdminUsersView(_AdminUsersManageView):
         if denied is not None:
             return denied
         return Response(list_admin_users())
-
-    def post(self, request):
-        denied = self._require_admin(request)
-        if denied is not None:
-            return denied
-        body = request.data if isinstance(request.data, dict) else {}
-        result = create_admin_user(body, request.user.username)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
 
 
 class AdminUserDetailView(_AdminUsersManageView):

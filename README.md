@@ -5,7 +5,7 @@ the repo root). See `config/settings/{base,dev,prod}.py` for environment
 wiring.
 
 `apps/` holds 11 working apps covering the catalog, cart, checkout, quotes,
-shipping, tax, VIN, fitment, customers, accounts and backoffice, plus
+shipping, tax, VIN, fitment, customers, auth and backoffice, plus
 `integrations`, still an empty placeholder. The customer-portal API and
 production hardening are not done yet, so this is not a drop-in replacement
 for the Next.js app.

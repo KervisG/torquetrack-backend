@@ -1,20 +1,12 @@
-# Design decision #6 (RBAC, task 3.3): map the 26 permission strings from
-# `lib/permissions.ts` `PERMISSIONS` 1:1 onto Django `Permission` codenames
-# (dots -> underscores, e.g. `products.edit` -> `products_edit`), anchored
-# on the `accounts.torquetrackpermission` ContentType (see
-# `0002_torquetrackpermission.py`), plus an `employee_default` Group
-# holding exactly the 15 strings from `DEFAULT_EMPLOYEE_PERMISSIONS`.
-#
-# Both lists were read directly from `lib/permissions.ts` in this session
-# (not from the design doc's paraphrase) to guarantee the 1:1 mapping.
+# Los 26 strings de `lib/permissions.ts` pasan a Permission de Django
+# (punto → guion bajo), anclados en el ContentType
+# `tt_auth.torquetrackpermission`, más el grupo `employee_default`.
 from django.db import migrations
 
-CONTENT_TYPE_APP_LABEL = "accounts"
+CONTENT_TYPE_APP_LABEL = "tt_auth"
 CONTENT_TYPE_MODEL = "torquetrackpermission"
 DEFAULT_GROUP_NAME = "employee_default"
 
-# (codename, human-readable name) — codename = permission string with
-# "." replaced by "_"; name is a short admin-UI label, not from the source.
 PERMISSION_CODENAMES = [
     ("dashboard_view", "Can view dashboard"),
     ("products_view", "Can view products"),
@@ -111,7 +103,7 @@ def remove_permissions_and_default_group(apps, schema_editor):
 class Migration(migrations.Migration):
 
     dependencies = [
-        ("accounts", "0002_torquetrackpermission"),
+        ("tt_auth", "0002_torquetrackpermission"),
         ("auth", "0001_initial"),
         ("contenttypes", "0001_initial"),
     ]

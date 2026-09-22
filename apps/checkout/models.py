@@ -28,6 +28,12 @@ class Order(models.Model):
     class Meta:
         managed = False
         db_table = "orders"
+        permissions = [
+            ("change_status", "Can change order status"),
+            ("cancel_order", "Can cancel orders"),
+            ("manage_cores", "Can manage cores"),
+            ("manage_returns", "Can manage returns"),
+        ]
 
     def __str__(self) -> str:
         return self.number
@@ -54,6 +60,11 @@ class Payment(models.Model):
     class Meta:
         managed = False
         db_table = "payments"
+        permissions = [
+            ("take_payment", "Can take payments"),
+            ("refund_payment", "Can refund payments"),
+            ("view_transaction_id", "Can view payment transaction IDs"),
+        ]
 
     def __str__(self) -> str:
         return self.id

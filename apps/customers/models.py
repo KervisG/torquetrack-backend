@@ -21,6 +21,9 @@ class Customer(models.Model):
     class Meta:
         managed = False
         db_table = "customers"
+        permissions = [
+            ("review_tax_exemption", "Can review tax exemptions"),
+        ]
 
     def __str__(self) -> str:
         return self.email or self.id

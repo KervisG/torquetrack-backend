@@ -5,7 +5,7 @@ matching `app/api/admin/dashboard/route.ts` and
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import HasTorqueTrackPermission
+from apps.auth.permissions import HasTorqueTrackPermission
 from apps.auth.authentication import AdminSessionAuthentication
 from apps.backoffice.services import get_dashboard_counts, list_recent_activity
 

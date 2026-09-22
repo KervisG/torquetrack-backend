@@ -1,6 +1,4 @@
-"""Dual Django session scopes for admin vs. customer logins (design decision
-#5), mirroring the frozen Next.js app's `tt_admin` / `tt_customer` cookies
-(`lib/auth.ts`: `ADMIN_COOKIE` / `CUSTOMER_COOKIE`, `newSession()`).
+"""Dos cookies de sesión: `tt_admin` y `tt_customer`.
 
 Django's built-in `django.contrib.sessions.middleware.SessionMiddleware`
 supports exactly ONE cookie name per process (it always reads
@@ -57,8 +55,7 @@ class _NamedCookieSessionMiddleware(MiddlewareMixin):
 
     @property
     def cookie_secure(self):
-        # "secure-in-prod" (design decision #5), mirroring `lib/auth.ts`'s
-        # `secure: process.env.NODE_ENV === "production"`.
+        # Cookie segura solo fuera de DEBUG.
         return not settings.DEBUG
 
     def process_request(self, request):
@@ -114,7 +111,7 @@ class _NamedCookieSessionMiddleware(MiddlewareMixin):
 
 class AdminSessionMiddleware(_NamedCookieSessionMiddleware):
     """Backs `request.admin_session`, cookie `tt_admin` — employees/admins
-    (Stage A `apps.accounts.models.User`, design decision #5)."""
+    (Stage A `apps.auth.models.User`)."""
 
     cookie_name = "tt_admin"
     request_attr = "admin_session"
@@ -132,7 +129,7 @@ class CustomerSessionMiddleware(_NamedCookieSessionMiddleware):
 def revoke_admin_sessions(user_id: str) -> None:
     """Port de `delete from sessions where kind='admin' and subject_id=$1`.
 
-    Lo llama `apps/accounts/services.py` al desactivar o borrar un empleado.
+    Lo llama `apps/auth/admin_services.py` al desactivar o borrar un empleado.
 
     `AdminSessionAuthentication` ya revalida `active=True` contra la fila en
     cada request, así que no es esto lo que corta el acceso de un empleado
@@ -144,9 +141,7 @@ def revoke_admin_sessions(user_id: str) -> None:
     consultables. La tabla solo guarda sesiones activas de staff y clientes,
     y esto corre únicamente al desactivar o borrar un usuario.
 
-    NOTA: no toca la tabla `sessions` legada (tokens hasheados) que el
-    Next.js congelado sigue usando; mientras los dos stacks estén vivos,
-    desactivar a alguien acá no lo expulsa de allá.
+    No toca la tabla `sessions` de tokens hasheados.
     """
     for session in Session.objects.filter(expire_date__gt=timezone.now()):
         if session.get_decoded().get("user_id") == user_id:

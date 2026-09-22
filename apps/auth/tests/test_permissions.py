@@ -1,24 +1,13 @@
-"""RED/GREEN evidence for `HasTorqueTrackPermission` (design decision #6,
-task 3.3): role=admin bypasses every check; a non-admin without the
-required permission gets 403; a non-admin with the required permission
-gets through.
-
-`apps.accounts.models.User` is a Stage A `managed = False` binding over
-the existing `users` table (`role`, `permissions` jsonb column) — it is
-NOT a Django `AbstractBaseUser`/`PermissionsMixin` subclass (that
-conversion is out of this phase's scope; no login views exist yet). So
-`HasTorqueTrackPermission` deliberately checks `role`/`permissions` on
-that Stage A row directly (mirroring `lib/auth.ts`'s `hasPermission()`
-exactly), not Django's `user.has_perm()` machinery — documented as a
-deviation from the literal design wording in apply-progress.
+"""`HasTorqueTrackPermission`: admin pasa todo; empleado sin el permiso
+recibe 403; con el permiso pasa.
 """
 import pytest
 from rest_framework.response import Response
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.views import APIView
 
-from apps.accounts.models import User
-from apps.accounts.permissions import HasTorqueTrackPermission
+from apps.auth.models import User
+from apps.auth.permissions import HasTorqueTrackPermission
 
 
 class _TakePaymentView(APIView):

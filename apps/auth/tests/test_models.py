@@ -1,13 +1,12 @@
-"""Stage A binding tests for the `users` table (design decision #3).
-
-`User` is `managed = False`: these tests prove Django can read a row shaped
-like production data (written here via raw SQL, the same way the frozen
-Next.js app writes it) without any schema mutation on Django's side.
+"""Binding Stage A de `users`: Django lee una fila escrita con SQL crudo
+sin mutar el esquema.
 """
+import json
+
 import pytest
 from django.db import connection
 
-from apps.accounts.models import User
+from apps.auth.models import User
 
 
 def _insert_user(user_id, username, permissions):
@@ -25,8 +24,6 @@ def _insert_user(user_id, username, permissions):
 
 @pytest.mark.django_db
 def test_reads_authorized_employee_with_permission_list():
-    import json
-
     _insert_user("usr_1", "ana.torres", json.dumps(["products.edit", "carts.view"]))
 
     user = User.objects.get(pk="usr_1")
@@ -39,8 +36,6 @@ def test_reads_authorized_employee_with_permission_list():
 
 @pytest.mark.django_db
 def test_reads_admin_role_bypassing_permission_list():
-    import json
-
     _insert_user("usr_admin", "admin.root", json.dumps([]))
     with connection.cursor() as cursor:
         cursor.execute("update users set role = %s where id = %s", ["admin", "usr_admin"])

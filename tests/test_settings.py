@@ -7,7 +7,6 @@ from django.conf import settings
 
 EXPECTED_APPS = {
     "apps.auth",
-    "apps.accounts",
     "apps.customers",
     "apps.catalog",
     "apps.fitment",

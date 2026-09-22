@@ -4,7 +4,7 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.permissions import HasTorqueTrackPermission
+from apps.auth.permissions import HasTorqueTrackPermission
 from apps.auth.authentication import AdminSessionAuthentication
 from apps.catalog.admin_services import deactivate_admin_product, upsert_admin_product
 

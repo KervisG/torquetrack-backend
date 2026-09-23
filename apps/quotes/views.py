@@ -1,12 +1,5 @@
-"""Vistas de `POST /api/quote/request`, `GET /api/quote/public/<token>`
-(HTML heredado), `GET /api/quote/public/<token>/details/` (JSON de la página
-`/quote/<token>` del SPA, que es lo que enlaza el correo) y
-`POST /api/quote/public/<token>/checkout`.
-
-Las dos rutas públicas por token son `AllowAny` a propósito: el control de
-acceso es poseer un token imposible de adivinar, no una sesión. Lo fija
-`apps/quotes/tests/test_public_views.py`.
-"""
+"""Las rutas públicas por token son `AllowAny`: el control de acceso es poseer
+un token imposible de adivinar, no una sesión."""
 from django.http import HttpResponse
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -43,8 +36,6 @@ class QuoteRequestView(APIView):
 
 
 class PublicQuoteView(APIView):
-    """`GET /api/quote/public/<token>`: devuelve directamente la página HTML
-    interactiva de la cotización (`text/html`, no JSON)."""
 
     permission_classes = [AllowAny]
 
@@ -53,10 +44,8 @@ class PublicQuoteView(APIView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
         if is_expired(quote):
-            # Un token vencido se rechaza en todas las rutas públicas, no solo
-            # en el checkout (ver test_public_views.py). El chequeo de
-            # vencimiento es de solo lectura y nunca cambia `status`, así que
-            # la cotización no se reabre sola.
+            # El chequeo es de solo lectura y nunca cambia `status`: la
+            # cotización no se reabre sola.
             return Response({"error": "This quote has expired"}, status=410)
 
         print_mode = request.GET.get("print") == "1"
@@ -69,8 +58,6 @@ class PublicQuoteView(APIView):
 
 
 class PublicQuoteDetailsView(APIView):
-    """`GET /api/quote/public/<token>/details/`: misma regla de acceso y de
-    vencimiento que la página HTML, en JSON y solo con los datos del cliente."""
 
     permission_classes = [AllowAny]
 

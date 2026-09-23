@@ -1,6 +1,3 @@
-"""`POST /api/activate/`: el invitado que recibió el enlace del portal crea
-su cuenta (User sin Role) con el email del Customer y queda vinculado.
-"""
 import hashlib
 
 import pytest

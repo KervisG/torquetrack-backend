@@ -1,5 +1,3 @@
-"""Tests de `GET /api/admin/carts`."""
-
 import pytest
 from django.utils import timezone
 

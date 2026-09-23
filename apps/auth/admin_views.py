@@ -1,7 +1,4 @@
-"""`/api/admin/users/`, `/api/admin/users/[id]/` y `/api/admin/roles/`.
-
-Separan 401 (sin sesión de staff) de 403 (staff sin `users.manage`).
-"""
+"""Separan 401 (sin sesión de staff) de 403 (staff sin `users.manage`)."""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

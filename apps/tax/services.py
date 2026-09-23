@@ -1,17 +1,4 @@
-"""Cálculo del impuesto de venta y reglas de `POST tax/estimate`.
-
-`calculate_sales_tax` es la única implementación del cálculo; el checkout la
-importa de aquí. La llamada HTTP a TaxJar vive en el adaptador
-`apps.integrations.tax.taxjar`, pero la política fiscal es de este dominio:
-la tabla estática de respaldo por estado, llamar a TaxJar solo con zip de
-destino y, si TaxJar falla o no está configurado, estimar con la tabla en
-lugar de cortar la compra.
-
-La exención de `estimate_tax` sale solo de la sesión (`linked_customer`, la
-misma resolución que usa el checkout). El body nunca elige cliente: con un
-`customerId` cualquiera podría pedir una estimación exenta ajena y enterarse
-del estado fiscal de ese cliente.
-"""
+"""Impuesto de venta: la única implementación del cálculo, que también usa el checkout."""
 from __future__ import annotations
 
 from django.conf import settings
@@ -20,7 +7,7 @@ from apps.checkout.services import linked_customer, money
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.tax import taxjar
 
-# Tasas estáticas de respaldo cuando TaxJar no está disponible (19 estados).
+# Tasas de respaldo cuando TaxJar no está disponible.
 FALLBACK_TAX_RATES = {
     "FL": 0.06, "GA": 0.04, "TX": 0.0625, "CA": 0.0725, "NY": 0.04,
     "NJ": 0.06625, "PA": 0.06, "IL": 0.0625, "NC": 0.0475, "SC": 0.06,
@@ -40,8 +27,6 @@ EXEMPT_ESTIMATE = {
 def calculate_sales_tax(
     *, subtotal, core_charge, shipping, state, zip_code, city=None, address1=None
 ) -> dict:
-    """Impuesto de venta del destino: TaxJar cuando hay zip de destino y
-    responde; si no, la tabla estática de respaldo."""
     subtotal = money(subtotal)
     core_charge = money(core_charge)
     shipping = money(shipping)
@@ -84,8 +69,7 @@ def calculate_sales_tax(
 
 
 def _coalesce(payload: dict, *keys: str, default=0):
-    """Mirror JS `??` (nullish coalescing): only fall through on a missing
-    key or an explicit `None`, never on another falsy value like `0`."""
+    """Solo pasa a la siguiente clave si falta o es `None`: un `0` explícito se respeta."""
     for key in keys:
         if key in payload and payload[key] is not None:
             return payload[key]
@@ -93,9 +77,9 @@ def _coalesce(payload: dict, *keys: str, default=0):
 
 
 def estimate_tax(payload: dict, user) -> dict:
-    """Estimación para el checkout del storefront. Normaliza los alias del
-    endpoint público (`amount`/`subtotal`, `core`/`coreCharge` y los
-    respaldos `address.{state,zip,city,address1}`)."""
+    """La exención sale solo de la sesión: con un `customerId` en el body
+    cualquiera podría pedir una estimación exenta ajena y enterarse del estado
+    fiscal de ese cliente."""
     profile = linked_customer(user)
     if profile is not None and profile.tax_status == "VERIFIED":
         return dict(EXEMPT_ESTIMATE)

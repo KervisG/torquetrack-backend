@@ -1,8 +1,5 @@
-"""Agregados de solo lectura para `GET /api/admin/dashboard`.
-
-`dashboard` no tiene modelos: solo lee pedidos, cotizaciones y carritos de
-sus apps dueñas y nunca escribe.
-"""
+"""`dashboard` no tiene modelos: solo lee pedidos, cotizaciones y carritos de
+sus apps dueñas y nunca escribe."""
 from __future__ import annotations
 
 from datetime import UTC, datetime, time, timedelta

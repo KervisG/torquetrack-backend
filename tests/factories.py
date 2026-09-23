@@ -1,9 +1,5 @@
-"""Helpers de arrange compartidos para cuentas, roles y sesiones.
-
-`users` y `customers` ya son tablas administradas por Django, así que se
-arman con el ORM. Los permisos se piden con el string del catálogo
-(`products.view`) y se traducen al `Permission` del modelo de dominio.
-"""
+"""Los permisos se piden con el string del catálogo (`products.view`) y se
+traducen al `Permission` del modelo de dominio."""
 from importlib import import_module
 
 from django.conf import settings
@@ -100,10 +96,6 @@ def session_client(user_id, *, enforce_csrf=False):
 
 
 def activity_count(**filters) -> int:
-    """Cuenta filas de `activity_logs` que cumplen `filters`.
-
-    Los tests de otras apps assertean la bitácora con este helper para no
-    importar `ActivityLog`: fuera de `apps/audit` solo se usa
-    `record_activity` (ver `tests/test_audit_boundary.py`).
-    """
+    """Existe para que los tests de otras apps no importen `ActivityLog`: fuera
+    de `apps/audit` solo se usa `record_activity`."""
     return ActivityLog.objects.filter(**filters).count()

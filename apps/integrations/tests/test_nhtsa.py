@@ -1,9 +1,5 @@
-"""Adaptador de NHTSA vPIC (`apps.integrations.vehicles.nhtsa`).
-
-La llamada HTTP se mockea con `responses`. Los nombres de campo y el
-envoltorio `{Results: [...]}` copian el formato real de
-`DecodeVinValuesExtended` (documentación de https://vpic.nhtsa.dot.gov).
-"""
+"""Los nombres de campo y el envoltorio `{Results: [...]}` copian el formato
+real de `DecodeVinValuesExtended`."""
 import pytest
 import responses
 from requests.exceptions import ConnectionError as RequestsConnectionError

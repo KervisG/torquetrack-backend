@@ -1,8 +1,3 @@
-"""`SessionUserAuthentication`: puente de `request.session` a `request.user`.
-
-Nunca devuelve `None`: sin sesión válida resuelve a `AnonymousUser`, así las
-permission classes responden 403 y no el 401 por defecto de DRF.
-"""
 import pytest
 from django.contrib.sessions.backends.db import SessionStore
 from rest_framework.request import Request

@@ -1,12 +1,4 @@
-"""Reglas de negocio de admin de cotizaciones: acciones convert/preview/
-reopen/send y listado, alta y baja.
-
-Separado de `apps/quotes/services.py` (reglas públicas de `quote/request` y
-`quote/public/<token>`). Reutiliza `serialize_quote`, `render_quote_html`
-y `quote_token` de `services.py`, y `next_order_number`/
-`random_id` de `apps.checkout.services`, en lugar de duplicarlos. El correo
-con el PDF sale por el adaptador `apps.integrations.email.resend`.
-"""
+"""Reglas de negocio de las cotizaciones en el panel de administración."""
 from __future__ import annotations
 
 from django.conf import settings
@@ -33,8 +25,6 @@ _SYSTEM_QUOTE_KEYS = ("publicToken", "orderNumber", "lastEmailedAt", "lastEmaile
 
 
 def ensure_public_token(quote: Quote) -> str:
-    """`POST /api/admin/quotes/[id]/preview`: genera (o reutiliza) el token
-    del magic link y devuelve la URL de la página `/quote/<token>` del SPA."""
     data = quote.data or {}
     token = data.get("publicToken")
     if not token:
@@ -46,8 +36,7 @@ def ensure_public_token(quote: Quote) -> str:
 
 
 def reopen_quote(quote: Quote) -> None:
-    """`POST /api/admin/quotes/[id]/reopen`: acción explícita de admin y la
-    ÚNICA forma de reactivar una cotización vencida; nada la reabre de forma
+    """Única forma de reactivar una cotización vencida: nada la reabre de forma
     automática."""
     quote.status = "ACTIVE"
     quote.expires_at = timezone.now() + timezone.timedelta(days=30)
@@ -56,7 +45,6 @@ def reopen_quote(quote: Quote) -> None:
 
 
 def convert_quote_to_order(quote: Quote, actor_email: str) -> dict:
-    """`POST /api/admin/quotes/[id]/convert`."""
     if quote.status == "EXPIRED":
         return {"error": "Reopen this quote before converting it.", "status": 400}
 
@@ -102,7 +90,6 @@ def convert_quote_to_order(quote: Quote, actor_email: str) -> dict:
 
 
 def send_quote_email(quote: Quote, actor_email: str) -> dict:
-    """`POST /api/admin/quotes/[id]/send`."""
     serialized = serialize_quote(quote)
     customer = serialized.get("customer") or {}
     email = str(customer.get("email") or "").strip()
@@ -113,7 +100,7 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
     if not resend.is_configured():
         return {"error": "Email provider not configured", "status": 502}
 
-    url = ensure_public_token(quote)  # guarda el token en quote.data si faltaba
+    url = ensure_public_token(quote)  # también guarda el token si faltaba
     public_token = (quote.data or {}).get("publicToken")
     quote_dict = serialize_quote(quote)
     html = render_quote_html(quote_dict, public_url=url, pdf_url=public_quote_pdf_url(public_token))
@@ -158,13 +145,12 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
     return {"ok": True, "url": url, "emailId": sent.get("id")}
 
 
-# --- listado, alta y baja: `admin/quotes` y `admin/quotes/[id]` ---
+# --- listado, alta y baja ---
 
 
 def _num(value, default: float = 0.0) -> float:
-    """Convierte `value` a número con la semántica de JS `Number(x)` y
-    devuelve `default` ante `None` o un valor no parseable. El respaldo para
-    cero u otros falsy (`|| default`) lo aplica cada llamador."""
+    """`default` solo ante `None` o un valor no numérico: el respaldo para el
+    cero lo aplica cada llamador."""
     if value is None:
         return default
     try:
@@ -174,7 +160,6 @@ def _num(value, default: float = 0.0) -> float:
 
 
 def _quote_totals(payload: dict) -> dict:
-    """Calcula subtotal, cores, envío, impuesto y total de la cotización."""
     items = payload.get("items") or []
 
     def qty(item):
@@ -203,8 +188,7 @@ def _quote_totals(payload: dict) -> dict:
 
 
 def list_admin_quotes() -> list[dict]:
-    """`GET /api/admin/quotes` — expires stale quotes in place, then returns
-    every non-archived quote ordered by `created_at`."""
+    """Marca `EXPIRED` en la base las cotizaciones vencidas antes de listar."""
     Quote.objects.filter(
         status__in=["BUILDING", "ACTIVE", "CONTACTED"], expires_at__lt=timezone.now()
     ).update(status="EXPIRED")
@@ -214,9 +198,7 @@ def list_admin_quotes() -> list[dict]:
 
 
 def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
-    """`POST /api/admin/quotes` — creates a new quote, or updates an
-    existing one when `payload["id"]` is present (preserving its `number`/
-    `created_at`/`expires_at`)."""
+    """Al actualizar se conservan `number`, `created_at` y `expires_at`."""
     totals = _quote_totals(payload)
     status = payload.get("status") or "ACTIVE"
     customer_id = payload.get("customerId") or None
@@ -275,9 +257,8 @@ def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
 
 
 def delete_or_archive_quote(quote: Quote, actor_email: str) -> dict:
-    """`DELETE /api/admin/quotes/[id]` — archives (never deletes) a quote
-    already linked to an Order, to preserve the financial/CRM trail; hard-
-    deletes otherwise."""
+    """Una cotización ya convertida en pedido se archiva, nunca se borra, para
+    conservar el rastro financiero."""
     data = quote.data or {}
     order_number = data.get("orderNumber")
 

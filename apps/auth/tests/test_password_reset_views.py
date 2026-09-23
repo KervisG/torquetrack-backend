@@ -1,19 +1,5 @@
-"""`/api/password-reset/` y `/api/password-reset/confirm/`.
-
-El pedido siempre responde 200 con el mismo body, exista o no la cuenta,
-para no revelar qué correos están registrados. El token viaja solo en el
-correo; en la base queda su hash SHA-256, es de un solo uso y vence.
-
-El correo sale fuera del request (`run_in_background`), así que el tiempo de
-respuesta tampoco depende de si hay cuenta: con cuenta solo se suma el
-INSERT del token, no la llamada a Resend.
-
-Mocking: Resend se falsea en su adaptador,
-`apps.integrations.email.resend.send_email` (`tests/fakes.py`). Los
-caminos que no deben mandar correo lo parchean con una función que lanza
-`AssertionError`. `run_in_background` se reemplaza por una ejecución en línea
-salvo en los tests que prueban el hilo.
-"""
+"""Ni el body ni el tiempo de respuesta pueden revelar qué correos tienen
+cuenta: el pedido siempre responde lo mismo y el correo sale fuera del request."""
 import pytest
 from django.contrib.auth.hashers import check_password
 from django.contrib.sessions.models import Session
@@ -179,8 +165,7 @@ def test_request_with_invalid_email_still_returns_the_neutral_body(body, monkeyp
 
 @pytest.mark.django_db
 def test_request_without_email_provider_still_returns_200(settings, monkeypatch):
-    # Adaptador real sin key: devuelve `sent: False` sin llamar a la red
-    # (`apps/integrations/tests/test_resend.py`).
+    # Adaptador real sin key: devuelve `sent: False` sin llamar a la red.
     settings.RESEND_API_KEY = ""
     settings.FROM_EMAIL = ""
     create_user("U_PAT", email="pat@example.com")

@@ -1,10 +1,3 @@
-"""Modelos de checkout: `orders`, `payments` y `document_sequences`.
-
-`Order.customer` y `Payment.order` quedan en NULL si se borra el registro
-al que apuntan, igual que el `on delete set null` del esquema heredado.
-`DocumentSequence` guarda el último número emitido de cada serie (`O<n>`,
-`Q<n>`) para que la numeración no dependa de un `max()+1` con carrera.
-"""
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone

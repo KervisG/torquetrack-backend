@@ -1,8 +1,3 @@
-"""`Customer` es el perfil comercial. Las credenciales viven solo en `User`;
-el vínculo es 1:1 y opcional (los clientes invitados no tienen cuenta).
-
-Los certificados de exención siguen en base64 dentro de `data`.
-"""
 import json
 
 import pytest

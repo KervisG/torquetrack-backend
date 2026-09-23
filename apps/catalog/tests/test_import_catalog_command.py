@@ -1,9 +1,5 @@
-"""Tests del comando `import_catalog`, que carga el catálogo semilla de
-`apps/catalog/data/` (`products.json` y `applications.json`).
-
-Se corre contra los archivos reales del repositorio, no contra copias
-reducidas: el test también protege que esos JSON sigan siendo importables.
-"""
+"""Se corre contra los JSON reales de la semilla, no contra copias reducidas:
+también protege que sigan siendo importables."""
 
 import json
 from io import StringIO

@@ -1,9 +1,6 @@
-"""Usuarios y roles del panel (`/api/admin/users/`, `/api/admin/roles/`).
-
-Solo quien tiene `users.manage` llega aquí. El Role se identifica por
-`slug`. Dos reglas evitan escalar privilegios por encima del propio Role:
-nadie sin acceso total concede acceso total, ni edita a quien lo tiene.
-"""
+"""Usuarios y roles del panel. Dos reglas evitan escalar privilegios por encima
+del propio Role: nadie sin acceso total concede acceso total, ni edita a quien
+lo tiene."""
 from __future__ import annotations
 
 from django.contrib.auth.hashers import make_password
@@ -91,7 +88,6 @@ def _log(actor: User, action: str, user_id: str, data: dict) -> None:
 
 
 def list_admin_roles() -> list[dict]:
-    """`GET /api/admin/roles/`."""
     return [
         {"id": role.pk, **serialize_role(role)}
         for role in Role.objects.order_by("-full_access", "name")
@@ -99,7 +95,6 @@ def list_admin_roles() -> list[dict]:
 
 
 def list_admin_users() -> list[dict]:
-    """`GET /api/admin/users/` — acceso total, luego staff, luego clientes."""
     users = User.objects.select_related("role").order_by(
         Case(
             When(role__full_access=True, then=0),
@@ -114,10 +109,7 @@ def list_admin_users() -> list[dict]:
 
 
 def create_admin_user(payload: dict, actor: User) -> dict:
-    """`POST /api/admin/users/` — correo, contraseña, nombre, apellidos y Role.
-
-    El id lo genera el servidor; un `id` en el body se ignora.
-    """
+    """El id lo genera el servidor; un `id` en el body se ignora."""
     email = parse_email(payload.get("email"))
     password = payload.get("password")
     first_name = str(payload.get("firstName") or "").strip()
@@ -170,11 +162,7 @@ def _is_last_full_access_user(target: User) -> bool:
 
 
 def update_admin_user(user_id: str, payload: dict, actor: User) -> dict:
-    """`PUT /api/admin/users/[id]/` — email, nombres, contraseña, `active` y
-    `role` (slug, o `null` para quitar el acceso al panel).
-
-    Cambiar el Role, la contraseña o desactivar corta sus sesiones vivas.
-    """
+    """Cambiar el Role, la contraseña o desactivar corta sus sesiones vivas."""
     target = User.objects.select_related("role").filter(pk=user_id).first()
     if target is None:
         return {"error": "User not found", "status": 404}
@@ -270,8 +258,8 @@ def update_admin_user(user_id: str, payload: dict, actor: User) -> dict:
 
 
 def delete_admin_user(user_id: str, actor: User) -> dict:
-    """`DELETE /api/admin/users/[id]/`. El Customer vinculado se conserva
-    (`on_delete=SET_NULL`) para no perder el historial de pedidos."""
+    """El Customer vinculado se conserva (`SET_NULL`) para no perder el
+    historial de pedidos."""
     if user_id == actor.pk:
         return {"error": "You cannot delete your own account", "status": 400}
 
@@ -295,14 +283,9 @@ ADMIN_ROLE_SLUG = "admin"
 
 
 def bootstrap_admin(email, password: str | None) -> tuple[dict, int]:
-    """Crea o asciende a `email` al Role `admin` (acceso total), activo y con
-    el email verificado. Devuelve `({"user", "action"}, status)` o
-    `({"error"}, status)`.
-
-    Es la puerta de entrada cuando todavía no hay nadie con `users.manage`,
+    """Es la puerta de entrada cuando todavía no hay nadie con `users.manage`,
     así que no pide actor ni registra actividad. Es idempotente: sin
-    `password` no toca la contraseña de una cuenta existente. Todo cambio de
-    Role, de contraseña o una reactivación cierra las sesiones abiertas.
+    `password` no toca la contraseña de una cuenta existente.
     """
     normalized = parse_email(email)
     if normalized is None:

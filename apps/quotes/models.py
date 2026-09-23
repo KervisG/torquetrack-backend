@@ -1,9 +1,4 @@
-"""Modelo de cotizaciones (`quotes`).
-
-`customer` apunta a `customers.Customer` y queda en NULL si se borra el
-perfil. Los tokens del enlace público viven dentro de `data`. `number` lo
-asigna `next_quote_number` y la base garantiza que es único.
-"""
+"""El token del enlace público vive dentro de `data`."""
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone

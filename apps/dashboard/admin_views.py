@@ -1,4 +1,3 @@
-"""Vista de `GET /api/admin/dashboard`."""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

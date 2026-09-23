@@ -1,9 +1,4 @@
-"""Settings de Django comunes a todos los entornos.
-
-Las integraciones (Stripe, TaxJar, EasyPost, Resend, RingCentral) y la base
-de datos (DATABASE_URL, DATABASE_SSL) se configuran por variables de entorno;
-`env.example` lista los nombres esperados.
-"""
+"""Todo lo configurable sale de variables de entorno; `env.example` las lista."""
 from pathlib import Path
 
 import environ
@@ -73,8 +68,6 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# DATABASE_URL / DATABASE_SSL apuntan al Postgres de la app. Por defecto se
-# usa el servicio `db` de Docker Compose local.
 DATABASES = {
     "default": env.db(
         "DATABASE_URL",
@@ -84,12 +77,9 @@ DATABASES = {
 if env.bool("DATABASE_SSL", default=False):
     DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
 
-# Cache compartido en Postgres (tabla `django_cache`, la crea la migración
-# `tt_auth.0010_cache_table`). Los contadores de los throttles viven aquí y
-# tienen que verse desde todos los workers y sobrevivir a un deploy; un
-# LocMemCache es por proceso y se vacía al reiniciar. `CACHE_URL` permite
-# cambiar de backend sin tocar código (p. ej. `redis://host:6379/1`); vacío
-# cuenta como no definida.
+# Los contadores de los throttles tienen que verse desde todos los workers y
+# sobrevivir a un deploy: un LocMemCache es por proceso y se vacía al
+# reiniciar. Un `CACHE_URL` vacío cuenta como no definido.
 CACHES = {
     "default": env.cache_url_config(env("CACHE_URL", default="") or "dbcache://django_cache"),
 }
@@ -114,17 +104,11 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Una sola sesión para clientes y staff (`apps/auth/sessions.py`), con 7 días
-# de vida, httpOnly y SameSite=Lax. Las cookies usan los nombres por defecto
-# de Django (`sessionid`, `csrftoken`); producción les agrega el prefijo
-# `__Host-` en `prod.py`.
+# Producción les agrega el prefijo `__Host-` a los nombres de las cookies.
 SESSION_COOKIE_AGE = 7 * 24 * 60 * 60
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 
-# El SPA recibe el token CSRF en el body de `/api/session/`, login, registro y
-# activación, y lo manda en `X-CSRFToken` en cada request que muta. Así no
-# depende del nombre de la cookie, que cambia entre entornos.
 # El proxy de Vite reescribe el Host, así que el origen del SPA tiene que
 # figurar como confiable o Django rechaza el `Origin`.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=["http://localhost:5173"])
@@ -133,7 +117,6 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
-    # Scopes de los endpoints públicos de cuenta (`apps/auth/utils/throttling.py`).
     # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
     "DEFAULT_THROTTLE_RATES": {
         "login": env("LOGIN_THROTTLE_RATE", default="10/min"),
@@ -148,24 +131,17 @@ REST_FRAMEWORK = {
     },
 }
 
-# Key de `request.META` con la IP real del cliente para los throttles por IP
-# (en producción, `HTTP_CF_CONNECTING_IP`). Solo es confiable si el origen
-# acepta tráfico exclusivamente desde Cloudflare (allowlist en el firewall o
-# Cloudflare Tunnel); si no, cualquiera puede falsificar el header. Vacío usa
-# `REMOTE_ADDR`.
+# Key de `request.META` con la IP real del cliente. Solo es confiable si el
+# origen acepta tráfico exclusivamente desde Cloudflare; si no, cualquiera
+# puede falsificar el header. Vacío usa `REMOTE_ADDR`.
 CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
 
-# Integraciones de checkout y webhook: Stripe y TaxJar.
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="")
 APP_URL = env("APP_URL", default="http://localhost:5173")
-
-# Cotización de envíos: EasyPost.
 EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
-
-# Emails de cotizaciones, restablecer contraseña y verificar el email: Resend.
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
 FROM_EMAIL = env("FROM_EMAIL", default="")
 SALES_EMAIL = env("SALES_EMAIL", default="")

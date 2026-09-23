@@ -1,7 +1,3 @@
-"""Tests mínimos de settings: prueban que el proyecto Django arranca y que
-todas las apps están registradas, sin cubrir lógica de negocio (cada app
-tiene sus propios tests).
-"""
 import importlib
 import logging
 import sys
@@ -44,11 +40,8 @@ VALID_SECRET_KEY = "k7#Qz!v2Lp9@Xr4$Wm8^Tn3&Hs6*Jd1(Fb5)Gc0-Ye_Ua+Io=Pe"
 
 
 def _load_prod(monkeypatch, **environ):
-    """Importa `config.settings.prod` de nuevo con el entorno dado.
-
-    `prod.py` valida el entorno al importarse, así que cada test lo recarga
-    en lugar de reusar el módulo cacheado.
-    """
+    """`prod.py` valida el entorno al importarse, así que cada test lo recarga
+    en vez de reusar el módulo cacheado."""
     for name in ("DJANGO_SECRET_KEY", "RESEND_API_KEY", "FROM_EMAIL", "APP_URL"):
         monkeypatch.delenv(name, raising=False)
     for name, value in environ.items():
@@ -194,8 +187,7 @@ def test_cache_can_be_overridden_with_cache_url(monkeypatch, restore_base_settin
 
 
 def test_app_url_defaults_to_the_vite_spa(monkeypatch, restore_base_settings):
-    # Los enlaces de los correos y el retorno de Stripe van al SPA de Vite; el
-    # puerto 3000 era la app de Next.js congelada.
+    # Los enlaces de los correos y el retorno de Stripe van al SPA de Vite.
     monkeypatch.delenv("APP_URL", raising=False)
     base = _load_base(monkeypatch)
 

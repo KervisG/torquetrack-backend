@@ -1,10 +1,5 @@
-"""Excepciones tipadas que lanzan los adaptadores de `apps/integrations`.
-
-Las apps de dominio las traducen a su respuesta (un 502, un 503, una tabla
-de respaldo) sin conocer los errores propios de `requests` ni del SDK de
-cada proveedor. `ProviderNotConfigured` hereda de `ProviderError` para que un
-dominio que trata igual "sin key" y "proveedor caído" capture una sola clase.
-"""
+"""`ProviderNotConfigured` hereda de `ProviderError` para que un dominio que
+trata igual "sin key" y "proveedor caído" capture una sola clase."""
 
 
 class ProviderError(Exception):

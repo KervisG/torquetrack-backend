@@ -1,10 +1,5 @@
-"""`Customer` es el perfil comercial: nombre, empresa, teléfono, dirección y
-datos fiscales dentro de `data`. Pedidos y cotizaciones apuntan aquí.
-
-Las credenciales viven solo en `apps.auth.User`. `user` es opcional: un
-cliente de checkout invitado no tiene cuenta. Los certificados de exención
-siguen en base64 dentro de `data`.
-"""
+"""Perfil comercial; las credenciales viven solo en `apps.auth.User` y un
+cliente invitado no tiene cuenta."""
 from django.db import models
 from django.db.models import Q
 from django.db.models.functions import Now

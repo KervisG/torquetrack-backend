@@ -1,12 +1,3 @@
-"""Tests de `admin/customers`, `admin/customers/[id]`,
-`admin/customers/[id]/tax-exemption`, `admin/customers/[id]/tax-status` y
-`admin/customers/portal-invite`.
-
-`tax-exemption` (GET) devuelve el tax ID completo y el certificado, así que
-exige lo mismo que `tax-status` (POST): `tax_exemptions.review`. Los dos
-responden 401 sin sesión de staff (incluida la sesión de un cliente) y 403
-sin el permiso.
-"""
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -106,9 +97,6 @@ def test_create_new_customer_without_id():
 
     assert response.status_code == 200
     body = response.json()
-    # `reusedExistingCustomer` solo refleja "no se envió id Y había email":
-    # es verdadero aquí aunque ninguna fila existente coincidió (ver el
-    # docstring de `upsert_admin_customer`).
     assert body["reusedExistingCustomer"] is True
     customer = Customer.objects.get(pk=body["customer"]["id"])
     assert customer.email == "brand-new@example.com"

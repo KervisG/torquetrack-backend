@@ -1,28 +1,23 @@
-"""Lógica pura de compatibilidad (fitment) entre producto y vehículo.
-
-No tiene I/O. Los mensajes de `reasons`/`warnings` usan a propósito los
-valores crudos, sin normalizar, de los campos de producto y vehículo.
-"""
+"""Compatibilidad entre producto y vehículo, sin I/O. Los mensajes de
+`reasons`/`warnings` muestran los valores tal como los escribió el catálogo o
+el decodificador, sin normalizar."""
 import re
 
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
 def _text(value) -> str:
-    """Mirror JS `String(v ?? "").trim().toLowerCase()`."""
     return str(value if value is not None else "").strip().lower()
 
 
 def _num(value):
-    """Mirror JS `num()`: first decimal number found in the string form, or
-    `None` (JS `null`) if there isn't one."""
+    """Primer número del texto (`"6.7L Power Stroke"` -> 6.7), o `None`."""
     match = _NUMBER_RE.search(str(value if value is not None else ""))
     return float(match.group(0)) if match else None
 
 
 def _js_number_or(raw, fallback=0):
-    """Mirror JS `Number(raw || fallback)`: falsy `raw` (None/0/""/False)
-    uses `fallback`; otherwise coerce `raw` to a number."""
+    """`None`, `False`, `""` y `0` usan `fallback`, igual que un texto que no es número."""
     if raw in (None, False, "", 0, 0.0):
         return fallback
     try:
@@ -32,8 +27,7 @@ def _js_number_or(raw, fallback=0):
 
 
 def _fmt(number) -> str:
-    """Render a computed number the way a JS template literal would:
-    whole numbers with no trailing `.0`."""
+    """Los enteros se muestran sin `.0` (`2010`, no `2010.0`)."""
     if number == int(number):
         return str(int(number))
     return str(number)

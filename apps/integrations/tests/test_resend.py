@@ -1,9 +1,3 @@
-"""Adaptador de Resend (`apps.integrations.email.resend`).
-
-Mocking: `requests.post` se parchea en el módulo del adaptador, que es el
-único lugar del backend que habla con la API REST de Resend. Nunca se usa
-una key real.
-"""
 import pytest
 import requests
 

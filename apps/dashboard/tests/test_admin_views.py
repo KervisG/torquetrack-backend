@@ -1,8 +1,3 @@
-"""Tests de `GET /api/admin/dashboard` (exige `dashboard.view`).
-
-Solo lectura: arma pedidos, carritos y cotizaciones con el ORM y assertea
-los contadores. No hay proveedores que mockear.
-"""
 
 import pytest
 from django.contrib.auth.models import Permission

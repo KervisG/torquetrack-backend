@@ -1,10 +1,5 @@
-"""Adaptador de TaxJar: una llamada a `POST /v2/taxes`.
-
-Solo hace la llamada y mapea el bloque `tax`. La tabla estática de respaldo
-por estado y la regla "si TaxJar falla, estimar con la tabla" son política
-fiscal del negocio y viven en `apps.tax.services`; aquí cualquier fallo se
-reporta como `ProviderError` para que el dominio decida.
-"""
+"""Cualquier fallo se reporta como `ProviderError`: el respaldo con la tabla
+por estado lo decide `apps.tax`."""
 from __future__ import annotations
 
 import requests

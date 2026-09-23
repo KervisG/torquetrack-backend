@@ -1,9 +1,4 @@
-"""Adaptador de EasyPost: crea un shipment y devuelve sus tarifas.
-
-Solo mapea cada tarifa a un dict plano con tipos de Python. Elegir la
-tarifa ground, la de 2 días y la overnight, derivar el paquete del producto
-y convertir libras a onzas son reglas de `apps.shipping.services`.
-"""
+"""Solo mapea tarifas: elegirlas y armar el paquete es regla de `apps.shipping`."""
 from __future__ import annotations
 
 import base64
@@ -33,9 +28,8 @@ def _rate(raw: dict) -> dict:
 
 
 def get_rates(*, to_address, from_address, parcel) -> dict:
-    """Devuelve `{"shipment_id", "rates": [...]}`. Un error de EasyPost se
-    lanza como `ProviderError` con el mensaje del proveedor, que el dominio
-    muestra tal cual al cliente."""
+    """El `ProviderError` lleva el mensaje de EasyPost, que el dominio muestra
+    tal cual al cliente."""
     if not is_configured():
         raise ProviderNotConfigured("EASYPOST_API_KEY is not set")
 

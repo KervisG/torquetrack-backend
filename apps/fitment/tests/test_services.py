@@ -1,14 +1,5 @@
-"""Tests de `check_product_fitment`.
-
-Reglas fijadas:
-- Marca: alias `"chevrolet / gmc"`/`"chevrolet/gmc"`, `"ram"` exacto como
-  alias de `dodge` y, si no, coincidencia por subcadena en cualquier sentido.
-- Rango de años: solo se chequea cuando el año del vehículo, `yearFrom` y
-  `yearTo` del producto son todos verdaderos; si alguno falta, se omite.
-- Motor: `abs(pe - ve) > 0.15` sobre el PRIMER número que encuentra la regex
-  en cada string crudo (`engineFamily` cae a `engine`); los mensajes de
-  warning y reason usan los valores CRUDOS, no los números parseados.
-"""
+"""El motor se compara con una tolerancia de 0.15 sobre el primer número de
+cada texto; los mensajes muestran los valores crudos, no los números."""
 from apps.fitment.services import check_product_fitment
 
 

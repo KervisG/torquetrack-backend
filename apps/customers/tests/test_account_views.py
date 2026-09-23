@@ -1,9 +1,3 @@
-"""Autoservicio del cliente: `/api/account/`, `/api/account/orders/`,
-`/api/account/quotes/` y `/api/account/tax-exemption/`.
-
-Exigen una sesión con un `Customer` vinculado: 401 sin sesión y 404 si la
-cuenta no tiene perfil comercial. Cada cliente ve solo lo suyo.
-"""
 import base64
 
 import pytest

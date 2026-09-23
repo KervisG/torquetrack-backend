@@ -1,10 +1,3 @@
-"""Vistas de admin de cotizaciones: acciones convert/preview/reopen/send
-(`admin/quotes/[id]/*`) más listado, alta y baja (`admin/quotes` y
-`admin/quotes/[id]`).
-
-Protegidas con `HasTorqueTrackPermission` + `SessionUserAuthentication`
-(ver `apps/auth/authentication.py`).
-"""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -45,9 +38,8 @@ class QuoteConvertView(_AdminQuoteActionView):
 
 
 class QuotePreviewView(_AdminQuoteActionView):
-    """Pese al nombre de la ruta, genera o reutiliza el token público del
-    magic link y devuelve su URL: no renderiza ningún cuerpo de vista
-    previa."""
+    """Pese al nombre de la ruta no renderiza nada: devuelve la URL del enlace
+    público y crea su token si faltaba."""
 
     required_permission = "quotes.view"
 
@@ -87,11 +79,10 @@ class QuoteSendView(_AdminQuoteActionView):
 
 
 class AdminQuoteListCreateView(APIView):
-    """`GET/POST /api/admin/quotes`: el listado (`quotes.view`) y el alta o
-    edición (`quotes.create`) comparten URL, así que el permiso exigido
-    depende del método. `HasTorqueTrackPermission` lee `required_permission`
-    antes del handler; por eso es una property, evaluada cuando
-    `self.request` ya existe en `initial()`."""
+    """El listado y el alta comparten URL, así que el permiso depende del
+    método: `required_permission` es una property porque
+    `HasTorqueTrackPermission` la lee en `initial()`, cuando `self.request` ya
+    existe."""
 
     authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]

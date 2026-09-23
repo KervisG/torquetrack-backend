@@ -1,9 +1,3 @@
-"""Tests de `GET /api/admin/activity` (exige `activity.view`).
-
-El body usa claves camelCase (`actorId`, `entityType`, `entityId`,
-`createdAt`) como el resto de la API. Las filas se arman con
-`record_activity` y con el ORM cuando el test necesita fijar la fecha.
-"""
 import pytest
 from django.utils import timezone
 

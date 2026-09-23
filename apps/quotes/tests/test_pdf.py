@@ -1,11 +1,5 @@
-"""Tests de `GET /api/quote/public/<token>/pdf`.
-
-El PDF se genera con WeasyPrint sobre la plantilla `quotes/quote.html`.
-Estos tests verifican que el archivo generado sea un PDF bien formado y no
-vacío, y que los datos de origen (líneas, totales, cliente y vehículo) pasen
-por `render_quote_html`/`serialize_quote`, las mismas funciones de la vista
-HTML pública. No se compara píxel a píxel ni el layout.
-"""
+"""No se compara el layout: solo que el PDF sea válido y salga de los mismos
+datos que la vista HTML pública."""
 
 import pytest
 from django.utils import timezone
@@ -76,16 +70,12 @@ def test_pdf_endpoint_denies_expired_token(client):
 
     assert response.status_code == 410
     quote = Quote.objects.get(pk="quo_pdf_1")
-    assert quote.status == "ACTIVE"  # no auto-reopen
+    assert quote.status == "ACTIVE"  # no se reabre sola
 
 
 @pytest.mark.django_db
 @requires_weasyprint
 def test_pdf_source_data_matches_quote_line_items_and_totals():
-    """Demuestra que el PDF y la vista HTML pública comparten la misma fuente
-    de datos (`serialize_quote`): no compara píxeles, sino que las líneas,
-    los totales y los datos de cliente y vehículo son la misma entrada para
-    ambos renders."""
     from apps.quotes.pdf import render_quote_pdf_bytes
     from apps.quotes.services import serialize_quote
 

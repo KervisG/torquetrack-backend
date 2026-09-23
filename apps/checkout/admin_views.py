@@ -1,10 +1,6 @@
-"""Vistas de `admin/orders`.
-
-`PATCH`/`DELETE` no usan `HasTorqueTrackPermission` a propósito: exigen una
-sesión de staff (`is_staff_user`, 401) más uno o varios chequeos de permiso
-por campo (`has_torquetrack_permission`, 403), en lugar de un único
-`required_permission` estático. Ver el docstring del módulo de tests.
-"""
+"""`PATCH`/`DELETE` no usan `HasTorqueTrackPermission`: el permiso exigido
+depende del campo que cambia, así que la sesión de staff (401) y cada permiso
+(403) se chequean por separado."""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

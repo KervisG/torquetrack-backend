@@ -1,7 +1,3 @@
-"""Tests de los modelos `Order` y `Payment` (tablas `orders` y `payments`).
-`Payment.order` es FK a `Order`; `Order.customer` es FK a
-`apps.customers.Customer`.
-"""
 from decimal import Decimal
 
 import pytest

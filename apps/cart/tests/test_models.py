@@ -1,8 +1,3 @@
-"""Tests del modelo `Cart` (tabla `carts`).
-
-Solo prueban la lectura y escritura del modelo; el upsert por UUID y el
-borrado del carrito vacío se prueban en `test_views.py` y `test_services.py`.
-"""
 
 import pytest
 

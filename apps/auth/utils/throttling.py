@@ -1,7 +1,4 @@
-"""Rate limit de los endpoints públicos de cuenta: login, registro,
-activación del portal, restablecer contraseña y verificar el email.
-
-Un login sin tope es fuerza bruta gratis contra el hash, y un registro o
+"""Un login sin tope es fuerza bruta gratis contra el hash, y un registro o
 una activación sin tope sirven para crear cuentas en masa o adivinar tokens.
 Un pedido de reset sin tope convierte el formulario en un cañón de correos
 contra la casilla de un tercero.
@@ -13,9 +10,7 @@ from rest_framework.throttling import SimpleRateThrottle
 
 
 def get_client_ip(request):
-    """IP del cliente para agrupar intentos.
-
-    Nunca se lee `X-Forwarded-For`: sin un proxy de confianza lo escribe el
+    """Nunca se lee `X-Forwarded-For`: sin un proxy de confianza lo escribe el
     propio cliente, y rotarlo abriría una cuota nueva en cada request. Solo se
     acepta el header que `CLIENT_IP_HEADER` declara como confiable (en
     producción, el que inyecta Cloudflare); si no está, manda `REMOTE_ADDR`.

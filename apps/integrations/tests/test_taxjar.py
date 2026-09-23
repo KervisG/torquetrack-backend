@@ -1,10 +1,3 @@
-"""Adaptador de TaxJar (`apps.integrations.tax.taxjar`).
-
-Mocking: `requests.post` se parchea en el módulo del adaptador. La política
-de respaldo (tabla estática por estado) no vive aquí sino en
-`apps.tax.services`, así que estos tests solo prueban el request, el mapeo de
-la respuesta y las excepciones tipadas.
-"""
 import pytest
 import requests
 

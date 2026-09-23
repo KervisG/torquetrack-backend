@@ -1,7 +1,4 @@
-"""Tests de los modelos `Product` y `Application`. Las formas del JSON copian
-filas reales del catálogo semilla (`apps/catalog/data/products.json` y
-`apps/catalog/data/applications.json`), no formas inventadas.
-"""
+"""Las formas del JSON copian filas reales del catálogo semilla."""
 
 import pytest
 

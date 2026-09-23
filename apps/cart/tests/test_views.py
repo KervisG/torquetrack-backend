@@ -1,9 +1,4 @@
-"""Tests de `POST /api/cart/sync`.
-
-Contrato: upsert por UUID del cliente, `stage` se normaliza a mayúsculas
-(`status = "ACTIVE"` para el stage `"CART"`; si no, `status = stage`) y un
-array `items` vacío o ausente borra la fila en lugar de hacer upsert.
-"""
+"""Un array `items` vacío o ausente borra el carrito en vez de guardarlo."""
 
 import pytest
 from rest_framework.test import APIClient

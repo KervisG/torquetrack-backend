@@ -1,5 +1,3 @@
-"""Tests de `POST /api/fitment/check`."""
-
 import pytest
 from rest_framework.test import APIClient
 
@@ -85,8 +83,6 @@ def test_inactive_product_is_silently_excluded_from_results():
 
     assert response.status_code == 200
     body = response.json()
-    # Comportamiento intencional del contrato: `all([])` es verdadero, así
-    # que una lista de resultados vacía se reporta como compatible.
     assert body == {"compatible": True, "results": []}
 
 

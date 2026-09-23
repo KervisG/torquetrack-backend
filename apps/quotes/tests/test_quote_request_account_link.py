@@ -1,12 +1,5 @@
-"""`POST /api/quote/request/` con una sesión de cliente.
-
-Una cuenta con `Customer` vinculado pide la cotización como ese perfil (sin
-resolver el cliente por el email del body), con el email de la cuenta, y
-el perfil no se reescribe con el nombre o teléfono del body. El pedido
-invitado sigue cubierto en `test_public_views.py`.
-
-Resend queda sin configurar (`RESEND_API_KEY = ""`): ningún correo sale.
-"""
+"""Una cuenta con `Customer` vinculado pide la cotización como ese perfil: el
+body no cambia el email ni reescribe el perfil."""
 
 import pytest
 

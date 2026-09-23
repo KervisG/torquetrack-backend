@@ -1,8 +1,3 @@
-"""Tests de `PUT/DELETE /api/admin/products/[id]`.
-
-La colección `admin/products` (GET/POST) no está implementada y no se cubre
-aquí.
-"""
 
 import pytest
 from django.utils import timezone

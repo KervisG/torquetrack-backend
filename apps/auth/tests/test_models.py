@@ -1,6 +1,3 @@
-"""`User` es la cuenta: email único guardado en minúsculas, contraseña y un
-Role opcional. Sin Role es un cliente; con Role es staff.
-"""
 import re
 
 import pytest

@@ -1,8 +1,4 @@
-"""Modelo del carrito (`carts`).
-
-El `id` es el UUID que genera el cliente; `cart/sync` hace upsert por ese id
-y borra el carrito cuando queda vacío.
-"""
+"""El `id` es el UUID que genera el cliente."""
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone

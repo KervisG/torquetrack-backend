@@ -1,10 +1,6 @@
-"""Vistas de `admin/customers`.
-
-`tax-exemption` (GET) devuelve el tax ID completo y el certificado, y
-`tax-status` (POST) deja al cliente comprar sin impuestos: los dos exigen
-`tax_exemptions.review`. Separan el 401 (sin sesión de staff) del 403 (sin
-permiso) para no cambiar lo que ya recibe el panel.
-"""
+"""`tax-exemption` (GET) devuelve el tax ID completo y el certificado, y
+`tax-status` (POST) deja al cliente comprar sin impuestos: por eso los dos
+exigen `tax_exemptions.review`."""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

@@ -3,7 +3,6 @@ from django.urls import include, path
 
 urlpatterns = [
     path("admin/", admin.site.urls),
-    # Todas las apps publican su API bajo el prefijo común `/api/`.
     path("api/", include("apps.catalog.urls")),
     path("api/", include("apps.fitment.urls")),
     path("api/", include("apps.vin.urls")),

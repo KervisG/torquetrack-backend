@@ -1,13 +1,3 @@
-"""`python manage.py create_admin --email ... [--password ...]`.
-
-Arranque del primer staff: crea el `User` o asciende uno existente al Role
-`admin` (acceso total), con el email marcado como verificado. Es idempotente:
-correrlo dos veces no duplica nada ni pisa la contraseña si no se pasa una.
-
-Mocking: el prompt de contraseña se falsea en su call site,
-`apps.auth.management.commands.create_admin.getpass`. No hay proveedores
-externos: el comando no manda correos.
-"""
 import pytest
 from django.contrib.auth.hashers import check_password
 from django.contrib.sessions.models import Session

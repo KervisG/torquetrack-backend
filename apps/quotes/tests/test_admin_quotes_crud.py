@@ -1,6 +1,3 @@
-"""Tests del listado, alta y baja de cotizaciones en admin
-(`admin/quotes` y `admin/quotes/[id]`).
-"""
 
 import pytest
 from django.utils import timezone

@@ -1,15 +1,3 @@
-"""Tests de `admin/orders`, `admin/orders/[id]`,
-`admin/orders/[id]/payment-link` y `admin/orders/[id]/take-payment`.
-
-`PATCH`/`DELETE admin/orders/[id]` hacen dos chequeos SEPARADOS: sesión de
-staff (401 sin sesión) y permiso (403 sin permiso), donde el permiso exigido
-depende del cambio pedido. El listado, payment-link y take-payment usan en
-cambio `HasTorqueTrackPermission` con un único `required_permission`.
-
-Las APIs reales de Stripe y de Resend nunca se llaman: se parchean sus
-adaptadores, `apps.integrations.payments.stripe.create_checkout_session` y
-`apps.integrations.email.resend.send_email` (`tests/fakes.py`).
-"""
 
 import pytest
 from django.utils import timezone
@@ -437,7 +425,7 @@ def test_take_payment_creates_payment_and_logs_activity_without_status_change(mo
 
     assert response.status_code == 200
     order = Order.objects.get(pk="ord_1")
-    assert order.status == "OPEN"  # unchanged, unlike payment-link
+    assert order.status == "OPEN"  # a diferencia del link de pago
     payment = Payment.objects.get(order=order)
     assert payment.data["source"] == "EMPLOYEE_TAKE_PAYMENT"
     assert payment.data["employee"] == "usr_take3@example.com"

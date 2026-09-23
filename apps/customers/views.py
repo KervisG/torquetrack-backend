@@ -1,9 +1,3 @@
-"""Endpoints públicos del cliente: autoservicio en `/api/account/**` y la
-activación del portal en `/api/activate/`.
-
-El autoservicio exige una sesión (401) con un `Customer` vinculado (404).
-Los endpoints de staff viven en `admin_views.py`.
-"""
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -52,8 +46,6 @@ class _AccountView(APIView):
 
 
 class AccountView(_AccountView):
-    """`GET/PATCH /api/account/`."""
-
     def get(self, request):
         denied = self._denied(request)
         if denied is not None:
@@ -71,8 +63,6 @@ class AccountView(_AccountView):
 
 
 class AccountOrdersView(_AccountView):
-    """`GET /api/account/orders/`."""
-
     def get(self, request):
         denied = self._denied(request)
         if denied is not None:
@@ -81,8 +71,6 @@ class AccountOrdersView(_AccountView):
 
 
 class AccountQuotesView(_AccountView):
-    """`GET /api/account/quotes/`."""
-
     def get(self, request):
         denied = self._denied(request)
         if denied is not None:
@@ -91,8 +79,6 @@ class AccountQuotesView(_AccountView):
 
 
 class AccountTaxExemptionView(_AccountView):
-    """`POST /api/account/tax-exemption/`."""
-
     def post(self, request):
         denied = self._denied(request)
         if denied is not None:
@@ -104,8 +90,6 @@ class AccountTaxExemptionView(_AccountView):
 
 
 class ActivateAccountView(APIView):
-    """`POST /api/activate/` — `{token, password}` del enlace de invitación."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ActivateRateThrottle]

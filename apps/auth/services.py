@@ -58,7 +58,7 @@ def password_error(password: str, user: User) -> str | None:
 
 
 def authenticate_user(email, password) -> User | None:
-    """`POST /api/login/`. Clientes y staff entran por el mismo lado."""
+    """Clientes y staff entran por el mismo lado."""
     normalized = str(email or "").strip().lower()
     user = (
         User.objects.select_related("role").filter(email=normalized, active=True).first()
@@ -79,7 +79,7 @@ def authenticate_user(email, password) -> User | None:
 
 
 def serialize_session_user(user: User) -> dict:
-    """Forma del usuario en `/api/session/`, `/api/login/` y `/api/register/`."""
+    """Forma compartida por las respuestas de sesión, login y registro."""
     first_name, last_name = user.given_names()
     role = user.role if user.role_id is not None else None
     return {
@@ -107,12 +107,8 @@ def create_account(
     role: Role | None = None,
     display_name: str | None = None,
 ) -> dict:
-    """Crea el `User` con la contraseña ya validada. Lo usan el registro,
-    la activación del portal y el alta de staff.
-
-    Devuelve `{"user": user}` o `{"error", "status"}`. Debe correr dentro de
-    la transacción de quien lo llama si hay más filas que crear juntas.
-    """
+    """Devuelve `{"user": user}` o `{"error", "status"}`. Debe correr dentro de
+    la transacción de quien lo llama si hay más filas que crear juntas."""
     candidate = User(
         id=random_id("U"),
         email=email,
@@ -139,10 +135,7 @@ def create_account(
 
 
 def register_customer(payload: dict) -> dict:
-    """`POST /api/register/` — cuenta sin Role más un Customer nuevo, y el
-    correo de verificación.
-
-    El registro no toca un Customer invitado con el mismo email: el correo
+    """El registro no toca un Customer invitado con el mismo email: el correo
     todavía no está verificado y adueñarse de ese perfil le daría a
     cualquiera el historial de otra persona. Ese historial se vincula recién
     en `verify_email`, cuando el enlace prueba que la persona controla la
@@ -273,21 +266,18 @@ def _deliver_account_email(user_id: str, email: str, subject: str, html: str) ->
 
 
 def _send_account_email(user: User, subject: str, html: str) -> None:
-    """Manda el correo por Resend fuera del request.
-
-    La respuesta no puede depender del envío: en el reset, esperar a Resend
-    solo cuando la cuenta existe revelaría qué correos están registrados por
-    el tiempo de respuesta. Por eso el hilo recibe el correo ya armado y no
-    toca la base; un fallo o un proveedor sin configurar solo se registra.
-    Quien llama ya confirmó el token (autocommit o después del `atomic`),
-    así que el enlace nunca apunta a una fila revertida.
+    """La respuesta no puede depender del envío: en el reset, esperar a Resend
+    solo cuando la cuenta existe revelaría por el tiempo de respuesta qué
+    correos están registrados. Por eso el hilo recibe el correo ya armado y no
+    toca la base. Quien llama ya confirmó el token, así que el enlace nunca
+    apunta a una fila revertida.
     """
     run_in_background(_deliver_account_email, user.pk, user.email, subject, html)
 
 
 def request_password_reset(payload: dict) -> dict:
-    """`POST /api/password-reset/`. Siempre devuelve el mismo body, exista o
-    no la cuenta, para no permitir enumerar correos."""
+    """Siempre devuelve el mismo body, exista o no la cuenta, para no permitir
+    enumerar correos."""
     email = parse_email(payload.get("email"))
     user = User.objects.filter(email=email, active=True).first() if email else None
     if user is not None:
@@ -308,8 +298,6 @@ def request_password_reset(payload: dict) -> dict:
 
 
 def confirm_password_reset(payload: dict) -> dict:
-    """`POST /api/password-reset/confirm/`. Cambia la contraseña, consume el
-    enlace (y cualquier otro pendiente) y cierra todas las sesiones."""
     from apps.auth.sessions import revoke_user_sessions
 
     password = payload.get("password")
@@ -350,7 +338,6 @@ def send_verification_email(user: User) -> None:
 
 
 def resend_verification_email(user: User) -> dict:
-    """`POST /api/verify-email/resend/`."""
     if user.email_verified_at is not None:
         return {"ok": True, "emailVerified": True}
     send_verification_email(user)
@@ -358,8 +345,8 @@ def resend_verification_email(user: User) -> dict:
 
 
 def verify_email(payload: dict) -> dict:
-    """`POST /api/verify-email/`. Marca el correo como verificado y, en la
-    misma transacción, vincula el historial de compras como invitado."""
+    """Vincula el historial de compras como invitado en la misma transacción
+    que verifica el correo."""
     from apps.customers.services import link_guest_history
 
     with transaction.atomic():

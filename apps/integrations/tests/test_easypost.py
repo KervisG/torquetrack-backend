@@ -1,10 +1,3 @@
-"""Adaptador de EasyPost (`apps.integrations.shipping.easypost`).
-
-Mocking: `requests.post` se parchea en el módulo del adaptador. La
-elección de tarifas (ground / 2 días / overnight) y la conversión de peso son
-reglas de `apps.shipping.services`; aquí solo se prueba el request, el mapeo
-de las tarifas y las excepciones tipadas.
-"""
 import base64
 
 import pytest

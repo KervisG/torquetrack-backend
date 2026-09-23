@@ -1,10 +1,4 @@
-"""El ORM de Django es dueño de todas las tablas del backend.
-
-La base de test se arma solo con `migrate`, sin ningún SQL externo. Estos
-tests prueban que no queda ningún modelo `managed = False`, que `migrate`
-crea cada tabla de dominio y que el estado de las migraciones coincide con
-los modelos (`makemigrations --check`).
-"""
+"""La base de test se arma solo con `migrate`, sin ningún SQL externo."""
 from importlib import import_module
 from io import StringIO
 
@@ -28,7 +22,6 @@ DOMAIN_TABLES = {
     "document_sequences",
 }
 
-# Tablas retiradas que ya no tienen dueño en el backend.
 RETIRED_LEGACY_TABLES = {"sessions", "employee_roles"}
 
 

@@ -1,9 +1,5 @@
-"""`register`, `login`, `logout` y `session`: una sola cuenta para clientes
-y staff. Entrar no da acceso al panel; eso lo decide el Role.
-
-También los enlaces por correo: `password-reset` (pedido y confirmación) y
-`verify-email` (verificación y reenvío).
-"""
+"""Una sola cuenta para clientes y staff: entrar no da acceso al panel, eso lo
+decide el Role."""
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.permissions import AllowAny
@@ -51,8 +47,6 @@ def _session_payload(request, user: User) -> dict:
 
 
 class RegisterView(APIView):
-    """`POST /api/register/`."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [RegisterRateThrottle]
@@ -66,8 +60,6 @@ class RegisterView(APIView):
 
 
 class LoginView(APIView):
-    """`POST /api/login/`."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [LoginRateThrottle, LoginAccountRateThrottle]
@@ -82,11 +74,8 @@ class LoginView(APIView):
 
 
 class LogoutView(APIView):
-    """`POST /api/logout/`.
-
-    Autentica con la sesión para que un logout cross-site sin token CSRF
-    no pueda cerrar la sesión de otra persona.
-    """
+    """Autentica con la sesión para que un logout cross-site sin token CSRF
+    no pueda cerrar la sesión de otra persona."""
 
     authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
@@ -98,8 +87,7 @@ class LogoutView(APIView):
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
 class SessionView(APIView):
-    """`GET /api/session/`. También entrega el token CSRF (cookie y body) al
-    SPA, aunque todavía no haya sesión."""
+    """Entrega el token CSRF (cookie y body) al SPA aunque todavía no haya sesión."""
 
     authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
@@ -119,8 +107,6 @@ def _result(result: dict) -> Response:
 
 
 class PasswordResetView(APIView):
-    """`POST /api/password-reset/`. Siempre 200 con el mismo body."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [PasswordResetRateThrottle, PasswordResetAccountRateThrottle]
@@ -130,8 +116,6 @@ class PasswordResetView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
-    """`POST /api/password-reset/confirm/`."""
-
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [PasswordResetConfirmRateThrottle]
@@ -141,8 +125,8 @@ class PasswordResetConfirmView(APIView):
 
 
 class VerifyEmailView(APIView):
-    """`POST /api/verify-email/`. Público: el token del correo es la prueba,
-    así funciona aunque el enlace se abra en otro navegador sin sesión."""
+    """Público: el token del correo es la prueba, así funciona aunque el enlace
+    se abra en otro navegador sin sesión."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
@@ -153,8 +137,6 @@ class VerifyEmailView(APIView):
 
 
 class VerifyEmailResendView(APIView):
-    """`POST /api/verify-email/resend/`. Exige sesión y token CSRF."""
-
     authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
     throttle_classes = [VerifyEmailResendRateThrottle]

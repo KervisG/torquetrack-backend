@@ -1,10 +1,5 @@
-"""`python manage.py create_admin --email ... [--password ...]`.
-
-Crea el primer staff con el Role `admin` (acceso total) o asciende una
-cuenta existente. Sin `--password` pide la contraseña por la terminal para
-que no quede en el historial del shell; en una cuenta existente, omitirla
-deja la contraseña como está. La regla vive en `bootstrap_admin`.
-"""
+"""Sin `--password` la contraseña se pide por la terminal para que no quede en
+el historial del shell."""
 import sys
 from getpass import getpass
 

@@ -1,15 +1,3 @@
-"""Tests de `POST /api/tax/estimate`.
-
-La exención sale solo de la sesión: una cuenta con un `Customer` vinculado
-cuyo `tax_status` es `VERIFIED` recibe impuesto 0. Cualquier `customerId`
-del body se ignora; si no, cualquiera que conociera el id de un cliente
-obtendría una estimación exenta y sabría su estado fiscal. Con sesión se
-exige CSRF, igual que en el checkout.
-
-Mocking: TaxJar se falsea en su adaptador,
-`apps.integrations.tax.taxjar.calculate_tax`. Los caminos exentos lo
-parchean con una función que lanza `AssertionError`.
-"""
 import pytest
 from rest_framework.test import APIClient
 
@@ -131,7 +119,7 @@ def test_anonymous_uses_fallback_table_when_taxjar_unconfigured():
 
     assert response.status_code == 200
     body = response.json()
-    # GA fallback rate is 0.04.
+    # Tasa de respaldo de GA: 0.04.
     assert body["tax"] == 4.0
     assert body["rate"] == 0.04
     assert body["estimated"] is True
@@ -147,7 +135,7 @@ def test_reads_state_and_zip_from_nested_address():
 
     assert response.status_code == 200
     body = response.json()
-    # TX fallback rate is 0.0625.
+    # Tasa de respaldo de TX: 0.0625.
     assert body["tax"] == 6.25
     assert body["rate"] == 0.0625
 

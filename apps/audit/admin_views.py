@@ -1,4 +1,3 @@
-"""Vista de `GET /api/admin/activity`."""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

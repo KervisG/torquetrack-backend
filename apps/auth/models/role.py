@@ -1,8 +1,4 @@
-"""Roles de staff. Se crean en `/admin/` con nombre, slug y el selector
-de Permission de Django. `full_access` es el Admin.
-
-Un `User` con Role es staff; el Role es la única fuente de permisos.
-"""
+"""Un `User` con Role es staff; el Role es la única fuente de permisos."""
 from django.contrib.auth.models import Permission
 from django.db import models
 

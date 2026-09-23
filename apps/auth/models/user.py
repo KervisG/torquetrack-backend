@@ -1,9 +1,5 @@
-"""La cuenta: email y contraseña. Todo el que se registra es cliente.
-
-El acceso al panel lo da un `Role` que asigna un admin; sin Role no hay
-panel aunque la cuenta esté activa. El perfil comercial vive en
-`apps.customers.Customer` (`user.customer`).
-"""
+"""Todo el que se registra es cliente: sin un `Role` asignado por un admin no
+hay acceso al panel aunque la cuenta esté activa."""
 import secrets
 
 from django.db import models
@@ -46,13 +42,10 @@ class User(models.Model):
     class Meta:
         db_table = "users"
         default_permissions = ()
-        # `view_dashboard` vive aquí aunque el dashboard no sea de `auth`:
-        # `apps.dashboard` no tiene modelos y el proyecto retiró el marcador
-        # sin tabla (`TorqueTrackPermission`, migración 0006), así que todo
-        # permiso cuelga de un modelo real. `dashboard.view` es el permiso de
-        # entrada al panel de staff, que ya gobierna `auth` (Roles y
-        # `manage_users`); colgarlo de `Order`, `Quote` o `Cart` ataría el
-        # agregado a una de sus fuentes de forma arbitraria.
+        # `view_dashboard` vive aquí porque `apps.dashboard` no tiene modelos y
+        # todo permiso cuelga de un modelo real. Es el permiso de entrada al
+        # panel, que ya gobierna `auth`; colgarlo de `Order`, `Quote` o `Cart`
+        # ataría el agregado a una de sus fuentes de forma arbitraria.
         permissions = [
             ("manage_users", "Can manage users"),
             ("view_dashboard", "Can view dashboard"),

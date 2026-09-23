@@ -1,10 +1,4 @@
-"""Reglas de `GET /api/vin/decode`.
-
-La llamada a NHTSA vPIC vive en el adaptador
-`apps.integrations.vehicles.nhtsa`. Aquí quedan la validación del VIN, los
-mensajes que ve el cliente para cada fallo y el vehículo que consume el
-storefront (el motor prefiere la cilindrada y cae al modelo de motor).
-"""
+"""Decodificación de VIN; el motor prefiere la cilindrada y cae al modelo de motor."""
 from __future__ import annotations
 
 import re

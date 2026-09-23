@@ -1,7 +1,3 @@
-"""Tests de `record_activity`, el único punto de escritura de `activity_logs`.
-
-No hay proveedores que mockear: se assertea la fila con el ORM.
-"""
 import pytest
 
 from apps.audit.models import ActivityLog

@@ -1,16 +1,5 @@
-"""`/api/verify-email/` y `/api/verify-email/resend/`, más el correo de
-verificación que manda `/api/register/`.
-
-Verificar el correo es lo que vincula el historial de compras como invitado
-con la cuenta: los pedidos y cotizaciones de `Customer` invitados con el
-mismo email pasan al perfil del usuario y el perfil invitado se borra. Sin
-verificar se puede entrar, navegar y comprar, pero el historial no se toca.
-
-Mocking: Resend se falsea en su adaptador,
-`apps.integrations.email.resend.send_email` (`tests/fakes.py`). El correo sale en un hilo aparte
-(`run_in_background`); se ejecuta en línea salvo en los tests que prueban
-que el request no espera al proveedor.
-"""
+"""Verificar el correo vincula con la cuenta el historial de compras como
+invitado; sin verificar se puede comprar, pero el historial no se toca."""
 import pytest
 from django.core.cache import cache
 from django.utils import timezone

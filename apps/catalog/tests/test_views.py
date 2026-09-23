@@ -1,15 +1,3 @@
-"""Tests de los endpoints públicos de lectura de `products` y `applications`.
-
-Contrato:
-- `products`: solo filas `active=true` ordenadas por `id`; de cada `data` se
-  quitan `purchaseCost`, `supplierCost`, `internalNotes`, `supplierSku`,
-  `supplierEmail` y `supplierPhone`, y se devuelve un array JSON plano.
-- `applications`: todas las filas ordenadas por `id`, sin quitar campos,
-  como array JSON plano de `data`.
-
-Las acciones de detalle (retrieve) vienen de la convención
-`ReadOnlyModelViewSet` de DRF.
-"""
 
 import pytest
 from rest_framework.test import APIClient

@@ -1,12 +1,6 @@
-"""Adaptador de Resend: envío de correo por la API REST, sin el SDK.
-
-A diferencia de los demás adaptadores, `send_email` no lanza excepciones:
-devuelve `{"sent": True, "id": ...}` o `{"sent": False, "reason": ...}`.
-Todos los llamadores tratan el correo como un efecto secundario que puede
-fallar sin cortar la operación (el reset de contraseña responde igual, la
-cotización se guarda igual) y algunos muestran el motivo al staff, así que
-el resultado del envío es un dato y no un caso excepcional.
-"""
+"""A diferencia de los demás adaptadores, `send_email` no lanza excepciones:
+todos los llamadores tratan el correo como un efecto secundario que puede
+fallar sin cortar la operación, y algunos muestran el motivo al staff."""
 from __future__ import annotations
 
 import requests
@@ -21,7 +15,7 @@ def is_configured() -> bool:
 
 
 def send_email(*, to, subject, html, attachments=None, reply_to=None) -> dict:
-    """Envía un correo. `to` acepta un email o una lista; cada adjunto es
+    """`to` acepta un email o una lista; cada adjunto es
     `{"filename", "content" (base64), "contentType"}`."""
     if not is_configured():
         return {"sent": False, "reason": NOT_CONFIGURED_REASON}

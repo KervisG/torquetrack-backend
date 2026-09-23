@@ -1,12 +1,6 @@
-"""Carga el catálogo semilla (`products` y `applications`) desde
-`apps/catalog/data/`.
-
-Es idempotente: cada producto se inserta o se sobrescribe por `id` y queda
-activo, y la tabla `applications` se reemplaza completa porque su clave
-primaria la genera la base y no hay un identificador estable para cruzarla.
-Los productos que no están en la semilla (por ejemplo los creados desde el
-panel) no se tocan.
-"""
+"""`applications` se reemplaza completa porque su clave primaria la genera la
+base y no hay un identificador estable para cruzarla. Los productos que no
+están en la semilla (por ejemplo, los creados desde el panel) no se tocan."""
 
 import json
 from pathlib import Path

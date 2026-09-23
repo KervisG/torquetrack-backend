@@ -1,6 +1,3 @@
-"""Tests del modelo `Quote` (tabla `quotes`), incluida la FK `customer` a
-`apps.customers.Customer`. Los tokens del enlace público viven en `data`.
-"""
 
 import pytest
 

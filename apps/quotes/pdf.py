@@ -1,17 +1,6 @@
-"""Generación del PDF de cotizaciones con WeasyPrint.
-
-WeasyPrint renderiza `quotes/quote.html` (la MISMA plantilla de la vista
-HTML pública y del email de la cotización, ver `apps/quotes/services.py`)
-como medio de impresión; la regla CSS `@media print` ya oculta los botones
-`.actions`, así que no hace falta una plantilla aparte para el PDF. Las
-líneas, los totales y los datos de cliente y vehículo coinciden con la vista
-HTML porque ambos renders comparten `serialize_quote` y la misma plantilla.
-
-WeasyPrint necesita las librerías nativas Pango/Cairo/GDK-Pixbuf, que no
-existen en una máquina Windows sin instalar un runtime GTK3 con permisos de
-administrador. `backend/Dockerfile` (Debian slim) las instala, así que el
-contenedor Linux es el entorno donde se genera y se verifica el PDF.
-"""
+"""El PDF usa la misma plantilla que la página pública y el correo: `@media print`
+ya oculta los botones. WeasyPrint necesita Pango/Cairo, que trae la imagen de
+`backend/Dockerfile`."""
 from __future__ import annotations
 
 import base64

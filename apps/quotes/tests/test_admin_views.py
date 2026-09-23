@@ -1,12 +1,3 @@
-"""Acciones de admin sobre cotizaciones: convert/preview/reopen/send.
-
-Protegidas con `SessionUserAuthentication` + `HasTorqueTrackPermission`.
-Los tests recorren el camino real cookie -> sesión -> `request.user` con
-una sesión creada en `SessionStore` y enviada como cookie de sesión (`SESSION_COOKIE_NAME`).
-
-Resend se falsea en su adaptador, `apps.integrations.email.resend.send_email`
-(`tests/fakes.py`). El chequeo "sin proveedor" usa el adaptador real sin key.
-"""
 
 import pytest
 from django.utils import timezone
@@ -47,7 +38,7 @@ def _make_quote(quote_id="quo_admin_1", number="Q30001", status="ACTIVE", data=N
     )
 
 
-# --- shared 403/404 behavior (via the convert route) --------------------
+# --- 403/404 compartidos (por la ruta de convert) --------------------
 
 
 @pytest.mark.django_db

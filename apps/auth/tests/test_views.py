@@ -1,9 +1,3 @@
-"""`/api/register/`, `/api/login/`, `/api/logout/` y `/api/session/`.
-
-Una sola cuenta y una sola cookie de sesión para clientes y staff. El
-acceso al panel lo decide el Role, no el login. Los requests autenticados
-que mutan exigen el token CSRF.
-"""
 import pytest
 from django.conf import settings
 from django.contrib.auth.hashers import check_password

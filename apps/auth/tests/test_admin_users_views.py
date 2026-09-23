@@ -1,9 +1,3 @@
-"""`/api/admin/users/`, `/api/admin/users/[id]/` y `/api/admin/roles/`.
-
-Separa 401 (sin sesión de staff) de 403 (staff sin `users.manage`). El Role
-se identifica por `slug` en todo el contrato. Cambiar el Role, la
-contraseña o desactivar corta las sesiones vivas del usuario.
-"""
 import re
 
 import pytest

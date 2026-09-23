@@ -1,12 +1,9 @@
-"""Lectura de la bitácora para `GET /api/admin/activity`."""
 from __future__ import annotations
 
 from apps.audit.models import ActivityLog
 
 
 def list_recent_activity(limit: int = 250) -> list[dict]:
-    """Últimas `limit` filas de `activity_logs`, de la más reciente a la más
-    antigua, con las claves en camelCase como el resto de la API."""
     logs = ActivityLog.objects.order_by("-created_at")[:limit]
     return [
         {

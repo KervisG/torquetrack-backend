@@ -1,10 +1,3 @@
-"""Tests de `GET /api/vin/decode`.
-
-Mocking: NHTSA se falsea en su adaptador,
-`apps.integrations.vehicles.nhtsa.decode_vin`, con el dict plano que
-devuelve. El formato real de vPIC y el mapeo HTTP se prueban en
-`apps/integrations/tests/test_nhtsa.py`.
-"""
 from rest_framework.test import APIClient
 
 from apps.integrations.exceptions import ProviderError, ProviderUnavailable

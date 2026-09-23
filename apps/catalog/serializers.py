@@ -1,10 +1,5 @@
-"""Serializers públicos (tienda) del catálogo.
-
-Filtrado por resta: se quitan solo los campos internos y de proveedor
-conocidos y el resto del jsonb `data` se devuelve tal cual. Cualquier campo
-interno NUEVO que se agregue a `data` debe sumarse explícitamente a
-`RESTRICTED_PRODUCT_FIELDS` para no quedar expuesto.
-"""
+"""Filtrado por resta: todo campo interno nuevo de `data` debe sumarse a
+`RESTRICTED_PRODUCT_FIELDS` para no quedar expuesto en la tienda."""
 from rest_framework import serializers
 
 RESTRICTED_PRODUCT_FIELDS = (
@@ -18,10 +13,6 @@ RESTRICTED_PRODUCT_FIELDS = (
 
 
 class ProductPublicSerializer(serializers.Serializer):
-    """Returns `instance.data` (the product jsonb) minus internal fields.
-
-    Devuelve el objeto plano, sin envoltorio ni `id`/`active` alrededor.
-    """
 
     def to_representation(self, instance):
         data = dict(instance.data)
@@ -31,10 +22,6 @@ class ProductPublicSerializer(serializers.Serializer):
 
 
 class ApplicationPublicSerializer(serializers.Serializer):
-    """Returns `instance.data` (the application jsonb) unfiltered.
-
-    No se quita ningún campo.
-    """
 
     def to_representation(self, instance):
         return dict(instance.data)

@@ -1,8 +1,3 @@
-"""Reglas de negocio de `cart/sync` y `admin/carts`.
-
-Upsert por UUID del cliente y borrado cuando el carrito queda vacío. Si el
-cliente no envía `cartId`, el servidor lo genera con `uuid4`.
-"""
 import uuid
 
 from django.db.models import Q
@@ -32,20 +27,15 @@ def sync_cart(payload: dict) -> dict:
 
 
 def _delete_empty_carts() -> None:
-    """Borra los carritos cuyo `items` falta, no es un array o está vacío.
-
-    `items @> '[]'` solo es verdadero para un array, así que su negación
-    cubre los tipos que no son array.
-    """
+    """`items @> '[]'` solo es verdadero para un array, así que su negación
+    cubre los `items` que no son array."""
     Cart.objects.filter(
         Q(data__items__isnull=True) | ~Q(data__items__contains=[]) | Q(data__items=[])
     ).delete()
 
 
 def list_admin_carts() -> list[dict]:
-    """`GET /api/admin/carts` — deletes empty carts first, then derives a
-    `status` per row: `stage='CART'` becomes `ACTIVE`/`ABANDONED` based on
-    a 30-minute idle window; any other stage is used verbatim."""
+    """Borra primero los carritos vacíos."""
     _delete_empty_carts()
 
     now = timezone.now()

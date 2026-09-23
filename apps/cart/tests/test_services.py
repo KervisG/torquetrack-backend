@@ -1,8 +1,3 @@
-"""`list_admin_carts` borra primero los carritos vacíos.
-
-Se borra el carrito cuando `items` falta, no es un array o es un array
-vacío. Solo sobrevive un array con al menos un elemento.
-"""
 import pytest
 from django.utils import timezone
 

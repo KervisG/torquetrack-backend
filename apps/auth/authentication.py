@@ -1,14 +1,10 @@
-"""Puente de `request.session` hacia `request.user` para DRF.
+"""`authenticate()` nunca devuelve `None`: sin sesión válida resuelve a
+`AnonymousUser`, así `HasTorqueTrackPermission` responde 403 y no el 401 por
+defecto de DRF.
 
-`authenticate()` nunca devuelve `None`: sin sesión o con sesión inválida
-resuelve a `AnonymousUser`. Así `HasTorqueTrackPermission` responde 403 y
-no el 401 por defecto de DRF cuando falta autenticador.
-
-Con una sesión válida se exige CSRF en los métodos que mutan, igual que
-`SessionAuthentication` de DRF: la cookie viaja sola en cualquier request
-cross-site, así que sin el token un sitio ajeno podría actuar como el
-usuario. El SPA recibe el token en el body de `/api/session/` (y de
-login, registro y activación) y lo manda en `X-CSRFToken`.
+Con una sesión válida se exige CSRF en los métodos que mutan: la cookie viaja
+sola en cualquier request cross-site, así que sin el token un sitio ajeno
+podría actuar como el usuario.
 """
 
 from django.contrib.auth.models import AnonymousUser

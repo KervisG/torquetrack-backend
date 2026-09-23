@@ -1,11 +1,5 @@
-"""Modelo de la bitácora `activity_logs`.
-
-Solo `apps/audit` conoce este modelo: el resto de las apps escribe con
-`record_activity` de `apps/audit/services.py`.
-
-`actor_id` no es FK: guarda el email del staff o un actor de sistema como
-`"stripe"`, y la fila tiene que sobrevivir aunque el usuario se borre.
-"""
+"""Solo `apps/audit` conoce este modelo: el resto de las apps escribe con
+`record_activity`."""
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone

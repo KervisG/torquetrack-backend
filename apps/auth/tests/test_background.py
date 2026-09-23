@@ -1,9 +1,5 @@
-"""`run_in_background` de `apps/auth/utils/background.py`.
-
-Es lo que saca los correos de cuenta del request. No hay worker asíncrono,
-así que corre en un hilo daemon: un fallo ahí no le llega a nadie más que al
-log, y estos tests fijan que quede registrado.
-"""
+"""Un fallo en el hilo no le llega a nadie más que al log: estos tests fijan que
+quede registrado."""
 import logging
 import threading
 

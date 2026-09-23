@@ -1,11 +1,6 @@
-"""Adaptador de NHTSA vPIC `DecodeVinValuesExtended`.
-
-Es una API gubernamental gratuita y sin clave, así que no hay
-`ProviderNotConfigured`. Un estado HTTP de error se lanza como
-`ProviderUnavailable` y un fallo de red o de JSON como `ProviderError`,
-porque `apps.vin` responde un mensaje distinto para cada caso. Validar el
-VIN y armar el vehículo que ve el cliente es trabajo de `apps.vin`.
-"""
+"""API pública sin clave, así que no hay `ProviderNotConfigured`. Un HTTP de
+error es `ProviderUnavailable` y un fallo de red o de JSON es `ProviderError`,
+porque `apps.vin` responde un mensaje distinto para cada caso."""
 from __future__ import annotations
 
 from urllib.parse import quote
@@ -20,8 +15,7 @@ NHTSA_DECODE_URL = (
 
 
 def decode_vin(vin: str) -> dict | None:
-    """Primer resultado de vPIC como dict plano, o `None` si no hay
-    resultados."""
+    """Primer resultado de vPIC, o `None` si no hay resultados."""
     try:
         response = requests.get(NHTSA_DECODE_URL.format(vin=quote(vin)), timeout=10)
     except requests.RequestException as exc:

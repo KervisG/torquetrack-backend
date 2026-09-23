@@ -1,4 +1,3 @@
-"""Vista de `POST /api/fitment/check`."""
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -23,9 +22,6 @@ class FitmentCheckView(APIView):
 
         items = request.data.get("items")
         items = items if isinstance(items, list) else []
-        # Comportamiento intencional del contrato: el chequeo de vacío se
-        # hace sobre la lista de ids mapeados, que siempre mide lo mismo que
-        # `items`; un ítem sin id/productId igual cuenta como "no vacío".
         ids = [_item_id(item) for item in items]
         if not ids:
             return Response({"error": "Cart is empty"}, status=400)

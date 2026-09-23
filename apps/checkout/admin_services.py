@@ -1,27 +1,19 @@
-"""Reglas de negocio de `admin/orders`, `admin/orders/[id]`,
-`admin/orders/[id]/payment-link` y `admin/orders/[id]/take-payment`.
-
-El email del link de pago sale por el adaptador de Resend
-(`apps.integrations.email.resend`); la Checkout Session, por
-`create_stripe_checkout_session` de `apps.checkout.services`.
-"""
+"""Reglas de negocio de los pedidos en el panel de administración."""
 from __future__ import annotations
 
+from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
 
 from apps.audit.services import record_activity
 from apps.checkout.models import Order, Payment
-from apps.checkout.services import (
-    create_stripe_checkout_session,
-    js_number_or,
-    money,
-    random_id,
-)
+from apps.checkout.services import cancel_pending_payments, start_stripe_payment
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
 
 ORDER_STATUSES = ["OPEN", "PENDING_PAYMENT", "PROCESSING", "COMPLETED", "CANCELLED", "REJECTED"]
+# Estados en los que el pedido ya no se va a cobrar ni despachar.
+CLOSED_ORDER_STATUSES = {"CANCELLED", "REJECTED"}
 CORE_STATUSES = [
     "AWAITING CORE", "IN TRANSIT", "RECEIVED", "INSPECTING", "ACCEPTED", "REJECTED", "REFUNDED",
 ]
@@ -33,8 +25,11 @@ RETURN_STATUSES = [
 def _serialize_order(order: Order) -> dict:
     data = order.data or {}
     if order.customer_id and order.customer is not None:
+        # El snapshot del pedido gana sobre el perfil: un checkout invitado ya
+        # no reescribe el perfil, así que su dirección de envío vive solo aquí.
         customer = {
             **(order.customer.data or {}),
+            **(data.get("customer") or {}),
             "id": order.customer_id,
             "email": order.customer.email,
         }
@@ -54,8 +49,8 @@ def _serialize_order(order: Order) -> dict:
 
 
 def _serialize_payment(payment: Payment) -> dict:
-    """Pago para el detalle del pedido. Sin `provider_id`: ver el id de la
-    transacción es `payments.transaction_id`, no `orders.view`."""
+    """Sin `provider_id`: ver el id de la transacción exige
+    `payments.transaction_id`, no `orders.view`."""
     data = payment.data or {}
     admin_link = "ADMIN_PAYMENT_LINK" if data.get("adminGenerated") else ""
     return {
@@ -82,9 +77,12 @@ def _update_order_status(order: Order, raw_status: str, actor_email: str) -> dic
     if status not in ORDER_STATUSES:
         return {"error": "Invalid order status", "status": 400}
 
-    order.status = status
-    order.updated_at = timezone.now()
-    order.save(update_fields=["status", "updated_at"])
+    with transaction.atomic():
+        order.status = status
+        order.updated_at = timezone.now()
+        order.save(update_fields=["status", "updated_at"])
+        if status in CLOSED_ORDER_STATUSES:
+            cancel_pending_payments(order, f"ORDER_{status}")
     record_activity(
         actor=actor_email,
         action="ORDER_STATUS_CHANGED",
@@ -156,8 +154,12 @@ def delete_admin_order(order_id: str, actor_email: str) -> dict:
         }
 
     number = order.number
-    Payment.objects.filter(order=order).delete()
-    order.delete()
+    with transaction.atomic():
+        # Se cancelan antes de borrar para expirar sus sesiones: una sesión
+        # viva sin `Payment` cobraría un pedido que ya no existe.
+        cancel_pending_payments(order, "ORDER_DELETED")
+        Payment.objects.filter(order=order).delete()
+        order.delete()
     record_activity(
         actor=actor_email,
         action="UNPAID_ORDER_DELETED",
@@ -169,9 +171,6 @@ def delete_admin_order(order_id: str, actor_email: str) -> dict:
 
 
 def create_admin_payment_link(order_id: str) -> dict:
-    """`POST /api/admin/orders/[id]/payment-link` — sets the order to
-    `PENDING_PAYMENT` and emails the customer a pay link when an email is
-    on file."""
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
@@ -179,24 +178,13 @@ def create_admin_payment_link(order_id: str) -> dict:
         return {"error": "Order is already paid", "status": 409}
 
     try:
-        session = create_stripe_checkout_session(
-            {"id": order.pk, "number": order.number, **(order.data or {})}
+        payment, session = start_stripe_payment(
+            order, data={"adminGenerated": True, "source": "ADMIN_PAYMENT_LINK"}
         )
     except ProviderError as exc:
         return {"error": str(exc) or "Could not create payment link", "status": 502}
 
-    total = money(((order.data or {}).get("totals") or {}).get("total"))
-    Payment.objects.create(
-        id=random_id("PAY"),
-        order=order,
-        provider="stripe",
-        provider_id=session["id"],
-        status="PENDING",
-        amount=total,
-        data={"sessionId": session["id"], "adminGenerated": True},
-        created_at=timezone.now(),
-        updated_at=timezone.now(),
-    )
+    total = float(payment.amount)
     order.status = "PENDING_PAYMENT"
     order.updated_at = timezone.now()
     order.save(update_fields=["status", "updated_at"])
@@ -220,9 +208,8 @@ def create_admin_payment_link(order_id: str) -> dict:
 
 
 def take_admin_payment(order_id: str, actor_email: str) -> dict:
-    """`POST /api/admin/orders/[id]/take-payment` — unlike payment-link,
-    does NOT change `order.status` and logs `TAKE_PAYMENT_STARTED` instead
-    of emailing the customer."""
+    """A diferencia del link de pago, no cambia `order.status` ni envía email
+    al cliente."""
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
@@ -230,28 +217,12 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
         return {"error": "Order is already paid", "status": 409}
 
     try:
-        session = create_stripe_checkout_session(
-            {**(order.data or {}), "id": order.pk, "number": order.number}
+        _, session = start_stripe_payment(
+            order, data={"employee": actor_email, "source": "EMPLOYEE_TAKE_PAYMENT"}
         )
     except ProviderError as exc:
         return {"error": str(exc) or "Could not start secure payment", "status": 502}
 
-    total = js_number_or(((order.data or {}).get("totals") or {}).get("total"), 0.0)
-    Payment.objects.create(
-        id=random_id("PAY"),
-        order=order,
-        provider="stripe",
-        provider_id=session["id"],
-        status="PENDING",
-        amount=total,
-        data={
-            "sessionId": session["id"],
-            "employee": actor_email,
-            "source": "EMPLOYEE_TAKE_PAYMENT",
-        },
-        created_at=timezone.now(),
-        updated_at=timezone.now(),
-    )
     record_activity(
         actor=actor_email,
         action="TAKE_PAYMENT_STARTED",

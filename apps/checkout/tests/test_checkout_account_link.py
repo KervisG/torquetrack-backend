@@ -1,15 +1,5 @@
-"""`POST /api/checkout/` con una sesión de cliente.
-
-Una cuenta con `Customer` vinculado compra como ese perfil, sin resolver el
-cliente por el email del body. El pedido queda en SU `Customer`, el
-email del snapshot es el de la cuenta (el body no puede cambiarlo) y el
-perfil nunca se mezcla con el body. El checkout invitado sigue igual y está
-cubierto en `test_checkout_view.py`.
-
-Stripe se parchea en su adaptador,
-`apps.integrations.payments.stripe.create_checkout_session`; nunca se llama
-de verdad. TaxJar, en `apps.integrations.tax.taxjar.calculate_tax`.
-"""
+"""Una cuenta con `Customer` vinculado compra como ese perfil: el email del
+body no puede cambiar el cliente ni el perfil."""
 
 import pytest
 
@@ -22,6 +12,7 @@ from tests.factories import (
     create_user,
     session_client,
 )
+from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
@@ -53,6 +44,9 @@ def _stripe(settings, monkeypatch):
         return {"id": "cs_test_acct", "url": "https://checkout.stripe.com/pay/cs_test_acct"}
 
     monkeypatch.setattr(CREATE_SESSION, _create)
+    captured["_selection"] = quote_shipping(
+        monkeypatch, settings, zip_code="33701", items=[{"id": PRODUCT_ID, "qty": 1}]
+    )
     return captured
 
 
@@ -72,7 +66,12 @@ def _account(tax_status="NOT SUBMITTED"):
 def _checkout(client, customer):
     return client.post(
         "/api/checkout/",
-        {"items": [{"id": PRODUCT_ID, "qty": 1}], "vehicle": VEHICLE, "customer": customer},
+        {
+            "items": [{"id": PRODUCT_ID, "qty": 1}],
+            "vehicle": VEHICLE,
+            "customer": {"zip": "33701", **customer},
+            "shipping": {"shipmentId": "shp_checkout", "rateId": "rate_ground"},
+        },
         format="json",
     )
 

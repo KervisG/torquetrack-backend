@@ -1,15 +1,5 @@
-"""`apps/integrations` es la única puerta hacia los proveedores externos.
-
-Recorre con `ast` todos los módulos de `backend/` y prueba tres reglas:
-
-- Fuera de `apps/integrations`, nadie importa `requests`, `stripe` ni el SDK
-  de otro proveedor. Toda llamada saliente pasa por un adaptador.
-- Las apps de dominio no se prestan helpers de proveedor entre sí: nadie
-  importa `send_email` de `apps.quotes` (sale del adaptador de Resend) ni el
-  cálculo de impuestos de `apps.checkout` (es de `apps.tax.services`).
-- `apps/integrations` no importa apps de dominio: un adaptador no conoce
-  modelos ni reglas de negocio, así cualquier app puede usarlo sin ciclos.
-"""
+"""`apps/integrations` es la única puerta hacia los proveedores externos y no
+importa apps de dominio, así cualquier app puede usarla sin ciclos."""
 import ast
 from pathlib import Path
 
@@ -106,7 +96,7 @@ def test_the_boundary_check_sees_the_real_callers():
         }
 
     assert "apps/auth/services.py" in callers("apps.integrations.email", "resend")
-    assert "apps/checkout/views.py" in callers("apps.tax.services", "calculate_sales_tax")
+    assert "apps/checkout/services.py" in callers("apps.tax.services", "calculate_sales_tax")
     assert "apps/vin/services.py" in callers("apps.integrations.vehicles", "nhtsa")
     adapters = {
         path.relative_to(BACKEND_DIR).as_posix()

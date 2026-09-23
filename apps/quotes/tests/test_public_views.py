@@ -1,16 +1,7 @@
-"""Tests de `POST /api/quote/request`, `GET /api/quote/public/<token>`,
-`GET /api/quote/public/<token>/details/` y
-`POST /api/quote/public/<token>/checkout`.
+"""`BUILDING` todavía no tiene precio confirmado y `LOST` la cerró ventas: el
+checkout responde 409 sin tocar Stripe ni crear pedidos."""
 
-`details/` es el JSON que consume la página `/quote/<token>` del SPA: expone
-solo lo que ve el cliente (sin token, memo interno ni email) y trae el total
-de cada línea calculado en el backend, porque el SPA nunca recalcula dinero.
-
-Un token vencido se rechaza en todas las acciones públicas: el checkout
-responde 409 y las vistas GET (HTML y PDF) responden 410 Gone. Es una
-comparación de solo lectura contra `expires_at` que nunca cambia `status`,
-así que la cotización no se reabre sola.
-"""
+from decimal import Decimal
 
 import pytest
 from django.utils import timezone
@@ -18,6 +9,7 @@ from django.utils import timezone
 from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
+from apps.customers.models import Customer
 from apps.quotes.models import Quote
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
@@ -157,6 +149,31 @@ def test_quote_request_creates_quote_with_computed_totals(client):
 
 
 @pytest.mark.django_db
+def test_quote_request_never_overwrites_an_existing_guest_profile(client):
+    # El email del body no prueba nada: la cotización se asocia al invitado
+    # existente y el nombre y teléfono nuevos quedan solo en su snapshot.
+    _insert_product()
+    Customer.objects.create(
+        id="C_GUEST_1", email="jane@example.com", data={"name": "Jane Real", "phone": "555-1"}
+    )
+
+    response = client.post(
+        "/api/quote/request/",
+        {
+            "customer": {"name": "Mallory", "email": "JANE@example.com", "phone": "555-9"},
+            "items": [{"productId": PRODUCT_ID, "quantity": 1}],
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    quote = Quote.objects.get(pk=response.json()["quoteId"])
+    assert quote.customer_id == "C_GUEST_1"
+    assert quote.data["customer"]["name"] == "Mallory"
+    assert Customer.objects.get(pk="C_GUEST_1").data == {"name": "Jane Real", "phone": "555-1"}
+
+
+@pytest.mark.django_db
 def test_quote_request_links_cart_when_cart_id_present(client):
     _insert_product()
     _insert_cart("cart_quote_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
@@ -214,7 +231,7 @@ def test_public_view_denies_expired_token(client):
     response = client.get(f"/api/quote/public/{token}/")
 
     assert response.status_code == 410
-    # No auto-reopen: the quote's own status/expiry must stay untouched.
+    # No se reabre sola: el estado y el vencimiento quedan intactos.
     quote = Quote.objects.get(pk="quo_pub_expired")
     assert quote.status == "ACTIVE"
 
@@ -259,6 +276,33 @@ def test_public_details_returns_the_customer_facing_quote(client):
     assert "Internal note" not in serialized
     assert "jane@example.com" not in serialized
     assert "rep@example.com" not in serialized
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "status, paid_order, payable",
+    [
+        ("ACTIVE", False, True),
+        ("CONTACTED", False, True),
+        ("CONVERTED", False, True),
+        ("CONVERTED", True, False),
+        ("ACTIVE", True, False),
+        ("BUILDING", False, False),
+        ("LOST", False, False),
+        ("EXPIRED", False, False),
+    ],
+)
+def test_public_details_says_whether_checkout_is_available(client, status, paid_order, payable):
+    # `payable` sale de la misma regla que `checkout_from_quote`: el SPA no
+    # decide con su propia lista de estados.
+    quote = _make_quote(status=status)
+    if paid_order:
+        _insert_quote_order(quote, "OID_PAID_DETAILS", "O20009", payment_status="PAID")
+
+    response = client.get(f"/api/quote/public/{'tok_' + 'a' * 48}/details/")
+
+    assert response.status_code == 200
+    assert response.json()["payable"] is payable
 
 
 @pytest.mark.django_db
@@ -319,15 +363,7 @@ def test_public_checkout_creates_order_and_stripe_session(client, monkeypatch):
 def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
     token = "tok_" + "d" * 48
     quote = _make_quote(quote_id="quo_checkout_2", number="Q10004", token=token)
-    existing_order = Order.objects.create(
-        id="OID_EXISTING",
-        number="O99999",
-        status="PENDING_PAYMENT",
-        payment_status="UNPAID",
-        data={"quoteNumber": quote.number},
-        created_at=timezone.now(),
-        updated_at=timezone.now(),
-    )
+    existing_order = _insert_quote_order(quote, "OID_EXISTING", "O99999")
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = client.post(f"/api/quote/public/{token}/checkout/")
@@ -337,8 +373,113 @@ def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
     assert Order.objects.filter(data__quoteNumber=quote.number).count() == 1
 
 
+def _insert_quote_order(quote, order_id, number, payment_status="UNPAID", **overrides):
+    """Pedido de la cotización con el mismo snapshot de líneas y totales."""
+    data = {
+        "quoteNumber": quote.number,
+        "items": quote.data["items"],
+        "totals": quote.data["totals"],
+        **overrides.pop("data", {}),
+    }
+    return Order.objects.create(
+        id=order_id,
+        number=number,
+        status=overrides.pop("status", "PENDING_PAYMENT"),
+        payment_status=payment_status,
+        data=data,
+    )
+
+
+def _forbid_stripe(monkeypatch):
+    def _boom(**kwargs):
+        raise AssertionError("Stripe must not be called for this quote")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
+
+
 @pytest.mark.django_db
-def test_public_checkout_returns_409_for_expired_quote(client):
+def test_public_checkout_refuses_a_quote_that_is_already_paid(client, monkeypatch):
+    token = "tok_" + "p" * 48
+    quote = _make_quote(
+        quote_id="quo_paid_1",
+        number="Q10020",
+        token=token,
+        status="CONVERTED",
+        data={"orderNumber": "O20001"},
+    )
+    _insert_quote_order(quote, "OID_PAID", "O20001", payment_status="PAID", status="OPEN")
+    _forbid_stripe(monkeypatch)
+
+    response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "This quote has already been paid"}
+    assert Order.objects.filter(data__quoteNumber="Q10020").count() == 1
+    assert Quote.objects.get(pk="quo_paid_1").data["orderNumber"] == "O20001"
+
+
+@pytest.mark.django_db
+def test_public_checkout_twice_after_payment_does_not_charge_again(client, monkeypatch):
+    token = "tok_" + "q" * 48
+    _make_quote(quote_id="quo_paid_2", number="Q10021", token=token)
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    first = client.post(f"/api/quote/public/{token}/checkout/")
+    Order.objects.filter(number=first.json()["orderNumber"]).update(payment_status="PAID")
+    _forbid_stripe(monkeypatch)
+    second = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert second.status_code == 409
+    assert Order.objects.filter(data__quoteNumber="Q10021").count() == 1
+
+
+@pytest.mark.django_db
+def test_public_checkout_replaces_an_order_with_stale_totals(client, monkeypatch):
+    # El staff editó la cotización después del primer checkout: el pedido
+    # viejo no se cobra con los totales anteriores.
+    token = "tok_" + "s" * 48
+    quote = _make_quote(quote_id="quo_stale_1", number="Q10022", token=token)
+    stale = _insert_quote_order(
+        quote,
+        "OID_STALE",
+        "O20002",
+        data={"totals": {"subtotal": 1.0, "core": 0, "shipping": 0, "tax": 0, "total": 1.0}},
+    )
+    Payment.objects.create(
+        id="PAY_STALE", order=stale, provider="stripe", provider_id="cs_stale", status="PENDING"
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session("cs_fresh"))
+
+    response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 200
+    number = response.json()["orderNumber"]
+    assert number != "O20002"
+    fresh = Order.objects.get(number=number)
+    assert fresh.data["totals"]["total"] == 579.0
+    assert Payment.objects.get(order=fresh).amount == Decimal("579.00")
+    stale.refresh_from_db()
+    assert stale.status == "CANCELLED"
+    assert stale.data["cancelReason"] == "QUOTE_CHANGED"
+    assert Payment.objects.get(pk="PAY_STALE").status == "CANCELLED"
+    assert Quote.objects.get(pk="quo_stale_1").data["orderNumber"] == number
+
+
+@pytest.mark.django_db
+def test_public_checkout_never_reuses_a_cancelled_order(client, monkeypatch):
+    token = "tok_" + "x" * 48
+    quote = _make_quote(quote_id="quo_cancelled_1", number="Q10023", token=token)
+    _insert_quote_order(quote, "OID_CANCELLED", "O20003", status="CANCELLED")
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 200
+    assert response.json()["orderNumber"] != "O20003"
+
+
+@pytest.mark.django_db
+def test_public_checkout_returns_410_for_expired_quote(client, monkeypatch):
     token = "tok_" + "e" * 48
     _make_quote(
         quote_id="quo_checkout_expired",
@@ -346,11 +487,61 @@ def test_public_checkout_returns_409_for_expired_quote(client):
         token=token,
         expires_at=timezone.now() - timezone.timedelta(days=1),
     )
+    _forbid_stripe(monkeypatch)
+
+    response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 410
+    assert response.json() == {"error": "This quote has expired"}
+    assert not Order.objects.filter(data__quoteNumber="Q10005").exists()
+
+
+@pytest.mark.django_db
+def test_public_checkout_returns_410_for_expired_status_even_before_the_date(client, monkeypatch):
+    token = "tok_" + "f" * 48
+    _make_quote(quote_id="quo_status_expired", number="Q10006", token=token, status="EXPIRED")
+    _forbid_stripe(monkeypatch)
+
+    response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 410
+    assert response.json() == {"error": "This quote has expired"}
+    assert Quote.objects.get(pk="quo_status_expired").status == "EXPIRED"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "status, message",
+    [
+        ("BUILDING", "This quote is still being prepared. Contact TorqueTrack to finalize it."),
+        ("LOST", "This quote is closed. Contact TorqueTrack for a new quote."),
+        ("ARCHIVED", "This quote is closed. Contact TorqueTrack for a new quote."),
+    ],
+)
+def test_public_checkout_rejects_non_payable_statuses(client, monkeypatch, status, message):
+    token = "tok_" + "n" * 48
+    _make_quote(quote_id="quo_not_payable", number="Q10007", token=token, status=status)
+    _forbid_stripe(monkeypatch)
 
     response = client.post(f"/api/quote/public/{token}/checkout/")
 
     assert response.status_code == 409
-    assert response.json()["error"] == "This quote has expired"
+    assert response.json() == {"error": message}
+    assert not Order.objects.filter(data__quoteNumber="Q10007").exists()
+    assert Quote.objects.get(pk="quo_not_payable").status == status
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", ["ACTIVE", "CONTACTED", "CONVERTED"])
+def test_public_checkout_accepts_payable_statuses(client, monkeypatch, status):
+    token = "tok_" + "y" * 48
+    _make_quote(quote_id="quo_payable", number="Q10008", token=token, status=status)
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 200
+    assert Quote.objects.get(pk="quo_payable").status == "CONVERTED"
 
 
 @pytest.mark.django_db

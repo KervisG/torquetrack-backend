@@ -1,30 +1,29 @@
-"""Helpers del checkout: numeración de documentos, resolución del cliente,
-armado de la Checkout Session de Stripe y consulta del método de pago.
-
-El impuesto se calcula en `apps.tax.services.calculate_sales_tax`. La
-llamada a Stripe vive en el adaptador `apps.integrations.payments.stripe`;
-aquí queda lo que es del pedido: las líneas (con el cargo de core aparte, el
-envío y el impuesto), las URLs de retorno del SPA y la metadata que usa el
-webhook para conciliar.
-"""
+"""Checkout: numeración, pedidos del storefront, pagos de Stripe y conciliación del webhook."""
 from __future__ import annotations
 
+import logging
+import math
 import secrets
+from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import quote
 
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from apps.checkout.models import DocumentSequence
+from apps.audit.services import record_activity
+from apps.checkout.models import DocumentSequence, Order, Payment
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.payments import stripe as stripe_payments
 
+logger = logging.getLogger(__name__)
+
+CENT = Decimal("0.01")
+
 
 def js_number_or(raw, fallback=0.0):
-    """Mirror JS `Number(raw || fallback)`: falsy `raw` (None/0/""/False)
-    uses `fallback`; otherwise coerce `raw` to a number."""
+    """`None`, `False`, `""` y `0` usan `fallback`, igual que un texto que no es número."""
     if raw in (None, False, "", 0, 0.0):
         return fallback
     try:
@@ -33,14 +32,23 @@ def js_number_or(raw, fallback=0.0):
         return fallback
 
 
+def _cents(value) -> Decimal:
+    """Única regla de redondeo de dinero: centavos con `ROUND_HALF_UP`.
+
+    Se parte de `repr(float)` para redondear el número tal como se escribió
+    (1.005 -> 1.01) y no su representación binaria (1.00499...)."""
+    number = js_number_or(value, 0.0)
+    if not math.isfinite(number):
+        return Decimal("0.00")
+    return Decimal(repr(float(number))).quantize(CENT, rounding=ROUND_HALF_UP)
+
+
 def money(value) -> float:
-    """Mirror JS `Math.round((Number(n)||0)*100)/100`."""
-    return round(js_number_or(value, 0.0) * 100) / 100
+    """Monto en dólares redondeado a centavos, como `float` para el JSON."""
+    return float(_cents(value))
 
 
 def random_id(prefix: str) -> str:
-    """Id con prefijo: `prefix` más 6 bytes aleatorios en hexadecimal
-    mayúscula."""
     return prefix + secrets.token_hex(6).upper()
 
 
@@ -57,66 +65,13 @@ def linked_customer(user) -> Customer | None:
     return Customer.objects.filter(user=user).first()
 
 
-def resolve_checkout_customer(user, customer: dict) -> tuple[str | None, dict]:
-    """`(customer_id, snapshot)` del comprador de un checkout o cotización.
-
-    Con un `Customer` vinculado a la sesión, el documento es de ese perfil y
-    el email del snapshot es el de la cuenta: el body no puede desviar el
-    pedido hacia otro cliente ni cambiar el correo de Stripe. El perfil
-    nunca se reescribe con el body; el snapshot sí guarda la dirección de
-    envío que se escribió en el formulario. Sin perfil vinculado (invitado o
-    staff sin perfil) se resuelve por email.
-    """
-    profile = linked_customer(user)
-    if profile is not None:
-        return profile.pk, {**customer, "email": profile.email or user.email}
-    customer_id = resolve_or_create_customer(customer) if customer.get("email") else None
-    return customer_id, customer
-
-
-def resolve_or_create_customer(customer: dict) -> str | None:
-    """Resuelve o crea el cliente por email: combina los campos enviados con
-    la fila existente (ganan las claves nuevas) o crea una nueva con
-    `random_id("C")`."""
-    email = customer.get("email")
-    if not email:
-        return None
-
-    # Solo perfiles invitados: un email tipeado en el checkout no prueba nada,
-    # así que nunca debe mezclarse con el perfil de una cuenta registrada.
-    existing = Customer.objects.filter(email__iexact=email, user__isnull=True).first()
-    if existing:
-        existing.data = {**(existing.data or {}), **customer}
-        existing.updated_at = timezone.now()
-        existing.save(update_fields=["data", "updated_at"])
-        return existing.pk
-
-    customer_id = random_id("C")
-    now = timezone.now()
-    Customer.objects.create(
-        id=customer_id,
-        email=email,
-        data={**customer, "id": customer_id},
-        created_at=now,
-        updated_at=now,
-    )
-    return customer_id
-
-
-# Los números de pedido y cotización arrancan en 10001.
 FIRST_DOCUMENT_NUMBER = 10001
 
 
 def next_document_number(key: str, prefix: str) -> str:
-    """Emite el siguiente número de la serie `key` con formato `<prefix><n>`.
-
-    La fila de la serie (`DocumentSequence`) se bloquea con
-    `select_for_update()` dentro de `transaction.atomic`, así que dos requests
-    concurrentes nunca emiten el mismo número: cada llamada espera a la
-    anterior. Si la fila todavía no existe,
-    `get_or_create` la crea y, ante una carrera, reintenta la lectura
-    bloqueante en lugar de duplicarla.
-    """
+    """El bloqueo de la fila hace esperar a cada llamada concurrente, así que
+    nunca se emite dos veces el mismo número. Si dos crean la fila a la vez,
+    `get_or_create` reintenta la lectura bloqueante."""
     with transaction.atomic():
         sequence, created = DocumentSequence.objects.select_for_update().get_or_create(
             key=key, defaults={"last_value": FIRST_DOCUMENT_NUMBER}
@@ -131,13 +86,15 @@ def next_order_number() -> str:
     return next_document_number("order", "O")
 
 
+# --- Stripe ---------------------------------------------------------------
+
+
 def _line(name: str, unit_price: float, qty: int) -> dict:
-    return {"name": name, "unit_amount": round(unit_price * 100), "quantity": qty}
+    return {"name": name, "unit_amount": int(_cents(unit_price) * 100), "quantity": qty}
 
 
-def create_stripe_checkout_session(order: dict) -> dict:
-    """Abre la Checkout Session del pedido y devuelve `{"id", "url"}`.
-    Lanza `ProviderError` (o `ProviderNotConfigured`) del adaptador."""
+def _create_checkout_session(order: dict) -> dict:
+    """Devuelve `{"id", "url"}`; lanza `ProviderError` o `ProviderNotConfigured`."""
     items = order.get("items") or []
     totals = order.get("totals") or {}
     app_url = settings.APP_URL or "http://localhost:5173"
@@ -173,10 +130,98 @@ def create_stripe_checkout_session(order: dict) -> dict:
     )
 
 
+def start_stripe_payment(order: Order, *, data: dict | None = None) -> tuple[Payment, dict]:
+    """Única forma de cobrar con Stripe, así el monto, su redondeo y el
+    `provider_id` que busca el webhook (el id de la sesión) salen de un solo
+    lugar. Si Stripe falla lanza `ProviderError` sin dejar ningún `Payment`.
+    """
+    order_data = order.data or {}
+    # El id y el número van al final: un `id` guardado en el jsonb no puede
+    # desviar la sesión hacia otro pedido.
+    session = _create_checkout_session({**order_data, "id": order.pk, "number": order.number})
+    with transaction.atomic():
+        payment = Payment.objects.create(
+            id=random_id("PAY"),
+            order=order,
+            provider="stripe",
+            provider_id=session["id"],
+            status="PENDING",
+            amount=_cents((order_data.get("totals") or {}).get("total")),
+            data={"sessionId": session["id"], **(data or {})},
+        )
+        # Un pedido tiene una sola sesión cobrable: la anterior (otro link,
+        # otro intento de checkout) se expira solo cuando la nueva ya existe.
+        previous = (
+            Payment.objects.select_for_update()
+            .filter(order=order, provider="stripe", status="PENDING")
+            .exclude(pk=payment.pk)
+        )
+        for other in previous:
+            cancel_pending_payment(other, "REPLACED", data={"replacedBy": session["id"]})
+    return payment, session
+
+
+def cancel_pending_payment(payment: Payment, reason: str, *, data: dict | None = None) -> None:
+    """Única forma de cancelar un pago PENDING, porque además expira su
+    Checkout Session para que el cliente ya no pueda pagarla.
+
+    La expiración corre en `on_commit`: si la transacción hace rollback, la
+    sesión sigue viva igual que el pago. Un error de Stripe solo se registra;
+    en el peor caso el cliente paga una sesión cancelada y el webhook la marca
+    para reembolso (`DUPLICATE_PAYMENT_RECEIVED`).
+    """
+    if payment.status != "PENDING":
+        return
+    payment.status = "CANCELLED"
+    payment.updated_at = timezone.now()
+    payment.data = {**(payment.data or {}), "cancelReason": reason, **(data or {})}
+    payment.save(update_fields=["status", "updated_at", "data"])
+
+    if payment.provider == "stripe" and payment.provider_id:
+        session_id, payment_id = payment.provider_id, payment.pk
+        transaction.on_commit(lambda: _expire_stripe_session(session_id, payment_id))
+
+
+def _expire_stripe_session(session_id: str, payment_id: str) -> None:
+    try:
+        result = stripe_payments.expire_checkout_session(session_id)
+    except ProviderError as exc:
+        logger.warning(
+            "Could not expire Stripe session %s of cancelled payment %s: %s",
+            session_id,
+            payment_id,
+            exc,
+        )
+        return
+    if result.get("status") == "complete":
+        # Se pagó antes de poder expirarla; el webhook la concilia y, si el
+        # pedido ya estaba pagado, la marca para reembolso.
+        logger.warning(
+            "Stripe session %s of cancelled payment %s was already complete",
+            session_id,
+            payment_id,
+        )
+
+
+def cancel_pending_payments(order: Order, reason: str) -> None:
+    with transaction.atomic():
+        for payment in Payment.objects.select_for_update().filter(order=order, status="PENDING"):
+            cancel_pending_payment(payment, reason)
+
+
+def cancel_unpaid_order(order: Order, reason: str) -> None:
+    """El número queda emitido en el pedido cancelado: la serie no se reutiliza ni se salta."""
+    with transaction.atomic():
+        order.status = "CANCELLED"
+        order.data = {**(order.data or {}), "cancelReason": reason}
+        order.updated_at = timezone.now()
+        order.save(update_fields=["status", "data", "updated_at"])
+        cancel_pending_payments(order, reason)
+
+
 def get_stripe_payment_method(payment_intent_id) -> dict | None:
-    """Datos de la tarjeta para el pedido pagado, o `None`. Es un dato
-    decorativo: sin key, sin PaymentIntent o con Stripe caído, el webhook
-    concilia igual."""
+    """Dato decorativo: sin key, sin PaymentIntent o con Stripe caído devuelve
+    `None` y el webhook concilia igual."""
     if not payment_intent_id:
         return None
     try:
@@ -185,3 +230,340 @@ def get_stripe_payment_method(payment_intent_id) -> dict | None:
         return None
 
 
+# --- Checkout del storefront -------------------------------------------------
+
+
+def _cart_lines(raw_items: list[dict]) -> tuple[list[tuple[dict, dict]], float, float]:
+    """Líneas repreciadas desde la base: `[(item, product_data)]`, subtotal y
+    core. Los productos inexistentes o inactivos se descartan."""
+    from apps.catalog.models import Product
+
+    ids = [str(raw_item.get("id")) for raw_item in raw_items]
+    products_by_id = {
+        product.id: (product.data or {})
+        for product in Product.objects.filter(id__in=ids, active=True)
+    }
+
+    pairs = []
+    subtotal = 0.0
+    core_total = 0.0
+    for raw_item in raw_items:
+        product_data = products_by_id.get(str(raw_item.get("id")))
+        if not product_data:
+            continue
+        qty = max(1, min(99, int(js_number_or(raw_item.get("qty"), 1))))
+        price = money(product_data.get("price"))
+        core = money(product_data.get("coreCharge"))
+        subtotal += price * qty
+        core_total += core * qty
+        title = (
+            product_data.get("title") or product_data.get("partNumber") or product_data.get("id")
+        )
+        item = {
+            "id": product_data.get("id"),
+            "title": title,
+            "partNumber": (
+                product_data.get("partNumber")
+                or product_data.get("oemPart")
+                or product_data.get("aftermarketPart")
+                or ""
+            ),
+            "qty": qty,
+            "price": price,
+            "coreCharge": core,
+        }
+        pairs.append((item, product_data))
+    return pairs, subtotal, core_total
+
+
+def _object_or_empty(value) -> dict | None:
+    """`{}` para un campo ausente, el dict si es un objeto y `None` si el
+    body mandó otro tipo."""
+    if value is None:
+        return {}
+    return value if isinstance(value, dict) else None
+
+
+def _link_cart_to_order(cart_id, order: Order, customer: dict) -> None:
+    from apps.cart.models import Cart
+
+    cart = Cart.objects.filter(pk=cart_id).first()
+    if cart is None:
+        return
+    cart.data = {
+        **(cart.data or {}),
+        "stage": "CHECKOUT",
+        "status": "CHECKOUT",
+        "orderId": order.pk,
+        "orderNumber": order.number,
+        "customer": customer,
+    }
+    cart.updated_at = timezone.now()
+    cart.save(update_fields=["data", "updated_at"])
+
+
+def create_storefront_checkout(user, body: dict) -> tuple[dict, int]:
+    """Nunca confía en montos del cliente: reprecia desde la base, vuelve a
+    chequear el fitment, cobra solo la tarifa de envío que el servidor cotizó
+    para ese ZIP y omite el impuesto únicamente con un perfil VERIFIED
+    vinculado a la sesión.
+
+    El pedido se crea antes de Stripe porque la sesión necesita su id y su
+    número. Si Stripe falla, el pedido queda `CANCELLED` y el carrito no pasa a
+    `CHECKOUT`: el carrito solo se vincula cuando la sesión existe.
+    """
+    from apps.customers.services import resolve_guest_customer
+    from apps.fitment.services import check_product_fitment
+    from apps.shipping.services import verify_shipping_selection
+    from apps.tax.services import calculate_sales_tax
+
+    raw_items = body.get("items")
+    if not isinstance(raw_items, list) or not raw_items:
+        return {"error": "Cart is empty"}, 400
+    if not all(isinstance(raw_item, dict) for raw_item in raw_items):
+        return {"error": "Each cart item must be an object with an id and qty"}, 400
+    raw_customer = _object_or_empty(body.get("customer"))
+    vehicle = _object_or_empty(body.get("vehicle"))
+    if raw_customer is None or vehicle is None:
+        return {"error": "Customer and vehicle must be objects"}, 400
+
+    pairs, subtotal, core_total = _cart_lines(raw_items)
+    if not pairs:
+        return {"error": "No valid products in cart"}, 400
+
+    incompatible = [(item, check_product_fitment(data, vehicle)) for item, data in pairs]
+    incompatible = [(item, check) for item, check in incompatible if not check["compatible"]]
+    if incompatible:
+        detail = "; ".join(
+            f"{item['partNumber'] or item['title']}: {', '.join(check['reasons'])}"
+            for item, check in incompatible
+        )
+        return {"error": f"VIN fitment check failed: {detail}"}, 409
+
+    # Con perfil vinculado el pedido es de la cuenta y su email manda; el
+    # perfil nunca se reescribe con el body.
+    profile = linked_customer(user)
+    customer = dict(raw_customer)
+    if profile is not None:
+        customer["email"] = profile.email or user.email
+
+    selection = body.get("shipping")
+    if not (
+        isinstance(selection, dict) and selection.get("shipmentId") and selection.get("rateId")
+    ):
+        return {"error": "Select a shipping method before payment."}, 400
+    shipping_rate = verify_shipping_selection(selection, customer.get("zip"), items=raw_items)
+    if shipping_rate is None:
+        return {"error": "Shipping rate could not be verified. Get shipping rates again."}, 409
+    shipping = shipping_rate["rate"]
+
+    # La exención sale solo del perfil de la sesión: un email tipeado por un
+    # invitado no prueba que el comprador sea ese cliente exento.
+    if profile is not None and profile.tax_status == "VERIFIED":
+        tax_result = {"tax": 0, "rate": 0, "source": "Tax exempt"}
+    else:
+        tax_result = calculate_sales_tax(
+            subtotal=subtotal,
+            core_charge=core_total,
+            shipping=shipping,
+            state=customer.get("state"),
+            zip_code=customer.get("zip"),
+            city=customer.get("city"),
+            address1=customer.get("address1"),
+        )
+    tax = money(tax_result["tax"])
+    cart_id = body.get("cartId")
+
+    with transaction.atomic():
+        if profile is not None:
+            customer_id = profile.pk
+        else:
+            customer_id = resolve_guest_customer(customer)
+        order = Order.objects.create(
+            id=random_id("OID"),
+            number=next_order_number(),
+            customer_id=customer_id,
+            status="PENDING_PAYMENT",
+            payment_status="UNPAID",
+            data={
+                "customer": customer,
+                "vehicle": vehicle,
+                "items": [item for item, _ in pairs],
+                "shipping": shipping_rate,
+                "cartId": cart_id,
+                "taxSource": tax_result["source"],
+                "totals": {
+                    "subtotal": money(subtotal),
+                    "core": money(core_total),
+                    "shipping": shipping,
+                    "tax": tax,
+                    "total": money(subtotal + core_total + shipping + tax),
+                },
+            },
+        )
+
+    try:
+        _, session = start_stripe_payment(order, data={"source": "STOREFRONT_CHECKOUT"})
+    except ProviderError as exc:
+        cancel_unpaid_order(order, "PAYMENT_SETUP_FAILED")
+        return {"error": str(exc) or "Could not create secure checkout"}, 502
+
+    if cart_id:
+        _link_cart_to_order(cart_id, order, customer)
+
+    return (
+        {
+            "ok": True,
+            "url": session["url"],
+            "orderId": order.pk,
+            "orderNumber": order.number,
+            "tax": tax,
+        },
+        200,
+    )
+
+
+# --- Webhook de Stripe ---------------------------------------------------------
+
+
+def _session_payment(session_obj: dict) -> Payment | None:
+    """`Payment` de la Checkout Session del evento, o `None` si la sesión no
+    es nuestra o no coincide con el pedido de su metadata."""
+    session_id = session_obj.get("id")
+    metadata = session_obj.get("metadata") or {}
+    order_id = metadata.get("order_id") or session_obj.get("client_reference_id")
+    payment = (
+        Payment.objects.filter(provider="stripe", provider_id=session_id).first()
+        if session_id
+        else None
+    )
+    if payment is None or payment.order_id is None or (order_id and payment.order_id != order_id):
+        # Se responde 200 igual: reintentar no va a hacer aparecer el pago.
+        logger.warning(
+            "Stripe session %s for order %s does not match any payment", session_id, order_id
+        )
+        return None
+    return payment
+
+
+def _locked_order_and_payment(payment: Payment) -> tuple[Order | None, Payment]:
+    """Bloquea primero el pedido y después el pago, siempre en ese orden, y
+    relee el pago ya bloqueado para ver lo que otro evento acaba de
+    confirmar."""
+    order = Order.objects.select_for_update().filter(pk=payment.order_id).first()
+    return order, Payment.objects.select_for_update().get(pk=payment.pk)
+
+
+def reconcile_paid_session(session_obj: dict) -> None:
+    """`checkout.session.completed` / `async_payment_succeeded`.
+
+    Marca PAID el pago de ESA sesión y el pedido, y cancela las demás
+    sesiones pendientes del pedido. Es idempotente: un reenvío del mismo
+    evento, o dos eventos de éxito concurrentes, registran una sola vez. Si
+    el pedido ya estaba pagado por otra sesión, el cobro igual existe en
+    Stripe: el pago queda PAID y la bitácora lo marca para reembolso.
+    """
+    payment = _session_payment(session_obj)
+    if payment is None or payment.status == "PAID":
+        return
+
+    # Fuera del bloqueo: es una llamada de red y es solo decorativa.
+    method = get_stripe_payment_method(session_obj.get("payment_intent")) or {}
+    session_id = session_obj.get("id")
+    now = timezone.now()
+
+    with transaction.atomic():
+        order, payment = _locked_order_and_payment(payment)
+        if order is None or payment.status == "PAID":
+            return
+
+        customer_details = session_obj.get("customer_details") or {}
+        payment.status = "PAID"
+        payment.updated_at = now
+        payment.data = {
+            **(payment.data or {}),
+            "payment_intent": session_obj.get("payment_intent"),
+            "payment_status": session_obj.get("payment_status"),
+            "customer_email": customer_details.get("email") or session_obj.get("customer_email"),
+            "brand": method.get("brand"),
+            "last4": method.get("last4"),
+            "funding": method.get("funding"),
+        }
+        payment.save(update_fields=["status", "updated_at", "data"])
+
+        activity = {
+            "sessionId": session_id,
+            "paymentIntent": session_obj.get("payment_intent"),
+            "amountTotal": session_obj.get("amount_total"),
+            "brand": method.get("brand"),
+            "last4": method.get("last4"),
+        }
+        if order.payment_status == "PAID":
+            record_activity(
+                actor="stripe",
+                action="DUPLICATE_PAYMENT_RECEIVED",
+                entity_type="ORDER",
+                entity_id=order.pk,
+                data={**activity, "paymentId": payment.pk},
+            )
+            return
+
+        order_data = order.data or {}
+        paid_patch = {
+            "payment": {
+                "provider": "stripe",
+                "brand": method.get("brand"),
+                "last4": method.get("last4"),
+                "paymentIntent": session_obj.get("payment_intent"),
+                "paidAt": now.isoformat(),
+            }
+        }
+        core_amount = money((order_data.get("totals") or {}).get("core"))
+        if core_amount > 0 and not order_data.get("coreCase"):
+            paid_patch["coreCase"] = {
+                "status": "AWAITING CORE",
+                "amount": core_amount,
+                "createdAt": now.isoformat(),
+                "createdBy": "stripe",
+            }
+        order.status = "OPEN"
+        order.payment_status = "PAID"
+        order.updated_at = now
+        order.data = {**order_data, **paid_patch}
+        order.save(update_fields=["status", "payment_status", "updated_at", "data"])
+
+        # Las otras sesiones abiertas del pedido ya no deben cobrarse.
+        superseded = Payment.objects.select_for_update().filter(
+            order=order, provider="stripe", status="PENDING"
+        )
+        for other in superseded:
+            cancel_pending_payment(other, "SUPERSEDED", data={"supersededBy": session_id})
+
+        record_activity(
+            actor="stripe",
+            action="PAYMENT_PAID",
+            entity_type="ORDER",
+            entity_id=order.pk,
+            data=activity,
+        )
+
+
+def reconcile_failed_session(session_obj: dict) -> None:
+    """`checkout.session.async_payment_failed`: falla el pago de esa sesión;
+    el pedido pasa a FAILED salvo que otra sesión ya lo haya pagado."""
+    payment = _session_payment(session_obj)
+    if payment is None:
+        return
+
+    now = timezone.now()
+    with transaction.atomic():
+        order, payment = _locked_order_and_payment(payment)
+        if payment.status != "PENDING":
+            return
+        payment.status = "FAILED"
+        payment.updated_at = now
+        payment.save(update_fields=["status", "updated_at"])
+        if order is not None and order.payment_status not in ("PAID", "FAILED"):
+            order.payment_status = "FAILED"
+            order.updated_at = now
+            order.save(update_fields=["payment_status", "updated_at"])

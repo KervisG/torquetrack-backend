@@ -1,10 +1,4 @@
-"""Reglas de `admin/customers`, del autoservicio `/api/account/**` y de la
-activación del portal (`/api/activate/`).
-
-`admin/customers` incluye `admin/customers/[id]`,
-`admin/customers/[id]/tax-exemption`, `admin/customers/[id]/tax-status` y
-`admin/customers/portal-invite`.
-"""
+"""Clientes: panel de staff, autoservicio de la cuenta y activación del portal."""
 from __future__ import annotations
 
 import base64
@@ -14,7 +8,7 @@ import re
 import secrets
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
@@ -31,11 +25,6 @@ ALLOWED_TAX_STATUSES = [
 
 
 def _serialize_customer_masked(customer: Customer) -> dict:
-    """Serializa el cliente para el panel: enmascara `taxId` dejando sus
-    últimos 4 caracteres, quita `taxId`/`certificateData` del `data`
-    expandido y deja que cualquier clave `id`/`email`/`portalStatus`/
-    `taxStatus` presente TAMBIÉN en `data` gane sobre las columnas de la fila
-    (orden intencional: primero las columnas, después `safe_data`)."""
     data = customer.data or {}
     raw_tax_id = str(data.get("taxId") or "")
     tax_id_masked = ("•" * max(0, len(raw_tax_id) - 4) + raw_tax_id[-4:]) if raw_tax_id else ""
@@ -57,11 +46,6 @@ def list_admin_customers() -> list[dict]:
 
 
 def upsert_admin_customer(payload: dict) -> dict:
-    """`POST /api/admin/customers`: crea cuando ningún `id` resuelve y
-    actualiza en caso contrario. Comportamiento intencional del contrato:
-    `reusedExistingCustomer` solo indica si el payload ORIGINAL omitió `id` y
-    traía email, no si realmente se encontró una fila existente; los tests
-    fijan esa semántica."""
     email = str(payload.get("email") or "").strip().lower()
     had_id = bool(payload.get("id"))
     customer_id = str(payload["id"]) if had_id else ""
@@ -77,9 +61,6 @@ def upsert_admin_customer(payload: dict) -> dict:
 
         customer = Customer.objects.filter(pk=customer_id).first()
         if customer is None:
-            # Un `id` enviado que no existe no crea nada: se responde 500
-            # "Customer could not be saved", igual que cuando el guardado no
-            # devuelve fila.
             return {"error": "Customer could not be saved", "status": 500}
 
         customer.email = email or None
@@ -174,8 +155,8 @@ def update_customer_tax_status(customer_id: str, payload: dict, reviewer_email: 
 
 
 def portal_status(customer: Customer) -> str:
-    """Estado del portal derivado del vínculo: la credencial ya no vive en
-    `customers`, así que no hay columna que mantener sincronizada."""
+    """Se deriva del vínculo con `User` para no tener una columna que
+    mantener sincronizada."""
     if customer.user_id is not None:
         return "ACTIVE"
     if customer.activation_token_hash and customer.activation_expires_at and (
@@ -190,8 +171,6 @@ def _hash_token(token: str) -> str:
 
 
 def create_portal_invite(payload: dict) -> dict:
-    """`POST /api/admin/customers/portal-invite/` — enlace de activación para
-    un Customer invitado. El enlace abre `/activate?token=...` en el SPA."""
     customer_id = payload.get("customerId") or payload.get("id")
     if not customer_id:
         return {"error": "Customer required", "status": 400}
@@ -217,8 +196,6 @@ def create_portal_invite(payload: dict) -> dict:
 
 
 def activate_customer_account(payload: dict) -> dict:
-    """`POST /api/activate/` — el invitado elige contraseña y queda con una
-    cuenta sin Role vinculada a su Customer. El token es de un solo uso."""
     from apps.auth.services import create_account, split_full_name
 
     token = payload.get("token")
@@ -301,19 +278,50 @@ def customer_for_user(user) -> Customer | None:
     return Customer.objects.filter(user=user).first()
 
 
+def resolve_guest_customer(snapshot: dict) -> str | None:
+    """Un email tipeado no prueba identidad, así que el perfil existente nunca
+    se reescribe: los datos del formulario quedan solo en el snapshot del
+    pedido o la cotización, y la exención de ese perfil no se aplica (eso lo
+    decide quien llama). Se reusa el invitado existente porque el email es
+    único entre invitados. Nunca toca un perfil con cuenta.
+    """
+    email = str(snapshot.get("email") or "").strip()
+    if not email:
+        return None
+
+    existing = (
+        Customer.objects.filter(email__iexact=email, user__isnull=True)
+        .order_by("created_at")
+        .values_list("pk", flat=True)
+        .first()
+    )
+    if existing:
+        return existing
+
+    customer_id = random_id("C")
+    try:
+        with transaction.atomic():
+            Customer.objects.create(
+                id=customer_id, email=email, data={**snapshot, "email": email, "id": customer_id}
+            )
+    except IntegrityError:
+        # Otro request creó el mismo invitado entre la lectura y el insert.
+        return (
+            Customer.objects.filter(email__iexact=email, user__isnull=True)
+            .values_list("pk", flat=True)
+            .first()
+        )
+    return customer_id
+
+
 def link_guest_history(user) -> dict:
-    """Pasa al perfil de `user` el historial de los `Customer` invitados
-    (`user IS NULL`) con su mismo email, sin distinguir mayúsculas.
+    """Solo se llama después de verificar el correo, dentro de esa transacción.
 
-    Solo se llama después de verificar el correo, dentro de esa transacción.
-    Se mueven los FKs de `Order` y `Quote` al perfil propio y se borra el
-    invitado, en lugar de fusionar los `data`: pedidos y cotizaciones son lo
-    único que apunta a `Customer`, así que no queda ninguna fila huérfana y
-    el perfil que el cliente ya editó no se pisa con datos del checkout. Si
-    la cuenta todavía no tiene perfil (por ejemplo, staff), adopta el primer
-    invitado y el resto se mueve a ese.
-
-    Devuelve `{"linkedOrders", "linkedQuotes"}`.
+    Se mueven los FKs de `Order` y `Quote` y se borra el invitado en vez de
+    fusionar los `data`: pedidos y cotizaciones son lo único que apunta a
+    `Customer`, así que no queda ninguna fila huérfana y el perfil que el
+    cliente ya editó no se pisa con datos del checkout. Una cuenta sin perfil
+    (por ejemplo, staff) adopta el primer invitado.
     """
     from apps.checkout.models import Order
     from apps.quotes.models import Quote
@@ -356,8 +364,6 @@ def serialize_account(customer: Customer) -> dict:
 
 
 def update_account(customer: Customer, payload: dict) -> dict:
-    """`PATCH /api/account/` — solo `ACCOUNT_PROFILE_FIELDS`; lo demás se
-    ignora para que el cliente no pueda escribirse su propio estado fiscal."""
     patch = {}
     for field in ACCOUNT_PROFILE_FIELDS:
         if field not in payload:
@@ -435,8 +441,6 @@ def _certificate_error(certificate_data: str) -> dict | None:
 
 
 def submit_tax_exemption(customer: Customer, payload: dict) -> dict:
-    """`POST /api/account/tax-exemption/`: registra la solicitud de exención
-    y valida tipo y tamaño del certificado."""
     tax_id = str(payload.get("taxId") or "").strip()
     company = str(payload.get("company") or "").strip()
     tax_state = str(payload.get("taxState") or "").strip().upper()

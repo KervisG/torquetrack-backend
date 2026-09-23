@@ -1,9 +1,5 @@
-"""Proveedores falsos compartidos por los tests de las apps de dominio.
-
-Se instalan sobre el adaptador de `apps/integrations`, nunca sobre
-`requests` ni sobre el SDK: los tests de dominio prueban qué se le pide al
-proveedor, y el mapeo HTTP se prueba en `apps/integrations/tests/`.
-"""
+"""Se instalan sobre el adaptador, nunca sobre `requests` ni el SDK: los tests
+de dominio prueban qué se le pide al proveedor, no el mapeo HTTP."""
 import threading
 
 RESEND_SEND_EMAIL = "apps.integrations.email.resend.send_email"
@@ -58,3 +54,50 @@ def forbid_resend(monkeypatch, message="No email must be sent for this request")
         raise AssertionError(message)
 
     monkeypatch.setattr(RESEND_SEND_EMAIL, _boom)
+
+
+EASYPOST_GET_RATES = "apps.integrations.shipping.easypost.get_rates"
+
+
+def quote_shipping(
+    monkeypatch,
+    settings,
+    *,
+    zip_code="33701",
+    rate=12.5,
+    shipment_id="shp_checkout",
+    rate_id="rate_ground",
+    items,
+) -> dict:
+    """Devuelve la selección que el SPA manda al checkout: el checkout solo
+    cobra envíos cotizados por el servidor, nunca el monto del body.
+
+    Un producto de `items` que todavía no existe se crea solo para cotizar y
+    se borra después, así el caller puede cargarlo con sus propios datos; la
+    tarifa ya quedó atada a sus ids en el cache."""
+    from apps.catalog.models import Product
+    from apps.shipping.services import get_shipping_rates
+
+    settings.EASYPOST_API_KEY = "ep_test_fake"
+    ids = {str(item["id"]) for item in items}
+    existing = set(Product.objects.filter(id__in=ids).values_list("id", flat=True))
+    temporary = sorted(ids - existing)
+    for product_id in temporary:
+        Product.objects.create(id=product_id, data={"shippingWeight": 2}, active=True)
+    rates = [
+        {
+            "id": rate_id,
+            "carrier": "USPS",
+            "service": "Ground Advantage",
+            "rate": rate,
+            "delivery_days": 5,
+            "guaranteed": False,
+        }
+    ]
+    monkeypatch.setattr(
+        EASYPOST_GET_RATES, lambda **kwargs: {"shipment_id": shipment_id, "rates": rates}
+    )
+    _, status = get_shipping_rates({"to": {"zip": zip_code}, "items": items})
+    Product.objects.filter(id__in=temporary).delete()
+    assert status == 200, "quote_shipping could not quote the given items"
+    return {"shipmentId": shipment_id, "rateId": rate_id}

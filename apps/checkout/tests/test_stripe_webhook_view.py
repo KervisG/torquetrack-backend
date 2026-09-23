@@ -1,19 +1,14 @@
-"""Tests de `POST /api/webhooks/stripe`.
-
-La verificación de firma pasa por el adaptador real
-(`apps.integrations.payments.stripe.construct_webhook_event`), que usa el SDK
-oficial: es un chequeo HMAC local, sin red ni API key real, así que el test
-calcula una firma válida igual que Stripe (esquema `t=<ts>,v1=<hmac>`).
-`retrieve_payment_method` del adaptador (marca/últimos 4 de la tarjeta del
-pedido pagado) SÍ se parchea, porque llamaría a la API real de Stripe.
-"""
+"""La firma se verifica con el adaptador real (HMAC local, sin red); solo se
+parchea `retrieve_payment_method`, que llamaría a la API de Stripe."""
 import hashlib
 import hmac
 import json
+import threading
 import time
 from decimal import Decimal
 
 import pytest
+from django.db import connections
 from rest_framework.test import APIClient
 
 from apps.checkout.models import Order, Payment
@@ -47,19 +42,22 @@ def _insert_payment(payment_id, order_id, status, data):
         id=payment_id,
         order_id=order_id,
         provider="stripe",
+        provider_id=data.get("sessionId"),
         status=status,
         amount=Decimal("239.99"),
         data=data,
     )
 
 
-def _checkout_completed_event(order_id, event_id="evt_test_1", payment_intent="pi_test_1"):
+def _checkout_completed_event(
+    order_id, event_id="evt_test_1", payment_intent="pi_test_1", session_id="cs_test_1"
+):
     return {
         "id": event_id,
         "type": "checkout.session.completed",
         "data": {
             "object": {
-                "id": "cs_test_1",
+                "id": session_id,
                 "payment_intent": payment_intent,
                 "payment_status": "paid",
                 "amount_total": 23999,
@@ -74,7 +72,7 @@ def _checkout_completed_event(order_id, event_id="evt_test_1", payment_intent="p
 @pytest.fixture(autouse=True)
 def _webhook_secret(settings, monkeypatch):
     settings.STRIPE_WEBHOOK_SECRET = WEBHOOK_SECRET
-    settings.STRIPE_SECRET_KEY = ""  # no payment-method enrichment call by default
+    settings.STRIPE_SECRET_KEY = ""  # sin key no se consulta la tarjeta
     return settings
 
 
@@ -171,7 +169,7 @@ def test_core_charge_opens_core_case_when_core_amount_present(monkeypatch):
     _insert_order("ord_core_1", "O10002", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 50.0}})
     _insert_payment("pay_core_1", "ord_core_1", "PENDING", {"sessionId": "cs_test_2"})
 
-    payload = json.dumps(_checkout_completed_event("ord_core_1")).encode()
+    payload = json.dumps(_checkout_completed_event("ord_core_1", session_id="cs_test_2")).encode()
     response = APIClient().post(
         "/api/webhooks/stripe/",
         data=payload,
@@ -187,9 +185,8 @@ def test_core_charge_opens_core_case_when_core_amount_present(monkeypatch):
 
 @pytest.mark.django_db
 def test_replaying_the_same_event_id_is_idempotent(monkeypatch):
-    """Stripe can and does resend webhook events; a second delivery of the
-    same (or an equivalent) success event for an already-paid order must
-    not duplicate the audit log entry or re-run the payment reconciliation."""
+    """Stripe reenvía eventos: una segunda entrega no duplica la bitácora ni
+    vuelve a conciliar el pago."""
     monkeypatch.setattr(
         "apps.integrations.payments.stripe.retrieve_payment_method",
         lambda payment_intent_id: {"brand": "visa", "last4": "4242", "funding": "credit"},
@@ -197,7 +194,9 @@ def test_replaying_the_same_event_id_is_idempotent(monkeypatch):
     _insert_order("ord_replay_1", "O10003", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
     _insert_payment("pay_replay_1", "ord_replay_1", "PENDING", {"sessionId": "cs_test_3"})
 
-    event = _checkout_completed_event("ord_replay_1", event_id="evt_replay_1")
+    event = _checkout_completed_event(
+        "ord_replay_1", event_id="evt_replay_1", session_id="cs_test_3"
+    )
     payload = json.dumps(event).encode()
     signature = _sign(payload)
     client = APIClient()
@@ -228,7 +227,7 @@ def test_async_payment_failed_marks_order_and_payment_failed():
     _insert_order("ord_failed_1", "O10004", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
     _insert_payment("pay_failed_1", "ord_failed_1", "PENDING", {"sessionId": "cs_test_4"})
 
-    event = _checkout_completed_event("ord_failed_1")
+    event = _checkout_completed_event("ord_failed_1", session_id="cs_test_4")
     event["type"] = "checkout.session.async_payment_failed"
     payload = json.dumps(event).encode()
 
@@ -254,7 +253,7 @@ def test_client_reference_id_fallback_used_when_metadata_order_id_missing(monkey
     _insert_order("ord_fallback_1", "O10005", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
     _insert_payment("pay_fallback_1", "ord_fallback_1", "PENDING", {"sessionId": "cs_test_5"})
 
-    event = _checkout_completed_event("ord_fallback_1")
+    event = _checkout_completed_event("ord_fallback_1", session_id="cs_test_5")
     event["data"]["object"]["metadata"] = {}
     payload = json.dumps(event).encode()
 
@@ -268,3 +267,158 @@ def test_client_reference_id_fallback_used_when_metadata_order_id_missing(monkey
     assert response.status_code == 200
     order = Order.objects.get(pk="ord_fallback_1")
     assert order.payment_status == "PAID"
+
+
+def _post_event(event):
+    payload = json.dumps(event).encode()
+    return APIClient().post(
+        "/api/webhooks/stripe/",
+        data=payload,
+        content_type="application/json",
+        HTTP_STRIPE_SIGNATURE=_sign(payload),
+    )
+
+
+def _no_card_details(monkeypatch):
+    monkeypatch.setattr(
+        "apps.integrations.payments.stripe.retrieve_payment_method", lambda payment_intent_id: None
+    )
+
+
+@pytest.mark.django_db
+def test_marks_the_payment_of_the_completed_session_not_the_first_pending(monkeypatch):
+    # Checkout del cliente y link de pago del staff: dos sesiones abiertas.
+    _no_card_details(monkeypatch)
+    _insert_order("ord_two_1", "O10010", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_checkout", "ord_two_1", "PENDING", {"sessionId": "cs_checkout"})
+    _insert_payment("pay_link", "ord_two_1", "PENDING", {"sessionId": "cs_link"})
+
+    response = _post_event(_checkout_completed_event("ord_two_1", session_id="cs_link"))
+
+    assert response.status_code == 200
+    paid = Payment.objects.get(pk="pay_link")
+    assert paid.status == "PAID"
+    assert paid.provider_id == "cs_link"
+    superseded = Payment.objects.get(pk="pay_checkout")
+    assert superseded.status == "CANCELLED"
+    assert superseded.provider_id == "cs_checkout"
+    assert superseded.data["supersededBy"] == "cs_link"
+    assert Order.objects.get(pk="ord_two_1").payment_status == "PAID"
+
+
+@pytest.mark.django_db
+def test_unknown_session_is_acknowledged_without_touching_the_order(monkeypatch, caplog):
+    _no_card_details(monkeypatch)
+    _insert_order("ord_unknown_1", "O10011", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_known", "ord_unknown_1", "PENDING", {"sessionId": "cs_known"})
+
+    response = _post_event(_checkout_completed_event("ord_unknown_1", session_id="cs_forgotten"))
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk="ord_unknown_1")
+    assert order.payment_status == "UNPAID"
+    assert Payment.objects.get(pk="pay_known").status == "PENDING"
+    assert activity_count(entity_id="ord_unknown_1", action="PAYMENT_PAID") == 0
+    assert "cs_forgotten" in caplog.text
+
+
+@pytest.mark.django_db
+def test_session_of_another_order_is_not_reconciled(monkeypatch):
+    _no_card_details(monkeypatch)
+    _insert_order("ord_a", "O10012", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_order("ord_b", "O10013", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_b", "ord_b", "PENDING", {"sessionId": "cs_b"})
+
+    response = _post_event(_checkout_completed_event("ord_a", session_id="cs_b"))
+
+    assert response.status_code == 200
+    assert Order.objects.get(pk="ord_a").payment_status == "UNPAID"
+    assert Order.objects.get(pk="ord_b").payment_status == "UNPAID"
+    assert Payment.objects.get(pk="pay_b").status == "PENDING"
+
+
+@pytest.mark.django_db
+def test_second_session_paid_on_an_already_paid_order_is_flagged_for_refund(monkeypatch):
+    # El cliente pagó dos sesiones: el cobro existe en Stripe, así que el
+    # pago queda PAID y la bitácora avisa al staff en lugar de ignorarlo.
+    _no_card_details(monkeypatch)
+    _insert_order("ord_dup_1", "O10014", "OPEN", "PAID", {"totals": {"core": 0}})
+    _insert_payment("pay_first", "ord_dup_1", "PAID", {"sessionId": "cs_first"})
+    _insert_payment("pay_second", "ord_dup_1", "CANCELLED", {"sessionId": "cs_second"})
+
+    response = _post_event(_checkout_completed_event("ord_dup_1", session_id="cs_second"))
+
+    assert response.status_code == 200
+    assert Payment.objects.get(pk="pay_second").status == "PAID"
+    assert activity_count(entity_id="ord_dup_1", action="PAYMENT_PAID") == 0
+    assert activity_count(entity_id="ord_dup_1", action="DUPLICATE_PAYMENT_RECEIVED") == 1
+
+
+@pytest.mark.django_db
+def test_async_payment_failed_only_fails_the_session_payment():
+    _insert_order("ord_failed_2", "O10015", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_async", "ord_failed_2", "PENDING", {"sessionId": "cs_async"})
+    _insert_payment("pay_other", "ord_failed_2", "PENDING", {"sessionId": "cs_other"})
+
+    event = _checkout_completed_event("ord_failed_2", session_id="cs_async")
+    event["type"] = "checkout.session.async_payment_failed"
+    response = _post_event(event)
+
+    assert response.status_code == 200
+    assert Payment.objects.get(pk="pay_async").status == "FAILED"
+    assert Payment.objects.get(pk="pay_other").status == "PENDING"
+    assert Order.objects.get(pk="ord_failed_2").payment_status == "FAILED"
+
+
+@pytest.mark.django_db
+def test_async_failure_never_downgrades_a_paid_order():
+    _insert_order("ord_paid_2", "O10016", "OPEN", "PAID", {"totals": {"core": 0}})
+    _insert_payment("pay_paid", "ord_paid_2", "PAID", {"sessionId": "cs_paid"})
+    _insert_payment("pay_late", "ord_paid_2", "PENDING", {"sessionId": "cs_late"})
+
+    event = _checkout_completed_event("ord_paid_2", session_id="cs_late")
+    event["type"] = "checkout.session.async_payment_failed"
+    _post_event(event)
+
+    assert Order.objects.get(pk="ord_paid_2").payment_status == "PAID"
+    assert Payment.objects.get(pk="pay_late").status == "FAILED"
+
+
+@pytest.mark.django_db(transaction=True)
+def test_concurrent_success_events_reconcile_once(monkeypatch):
+    """`checkout.session.completed` y `async_payment_succeeded` pueden llegar
+    a la vez. La barrera hace que ambos requests pasen la lectura sin
+    bloqueo antes de conciliar; el bloqueo de fila deja un solo registro."""
+    barrier = threading.Barrier(2, timeout=5)
+
+    def _card(payment_intent_id):
+        try:
+            barrier.wait()
+        except threading.BrokenBarrierError:
+            pass
+        return {"brand": "visa", "last4": "4242", "funding": "credit"}
+
+    monkeypatch.setattr("apps.integrations.payments.stripe.retrieve_payment_method", _card)
+    _insert_order("ord_race_1", "O10017", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_race", "ord_race_1", "PENDING", {"sessionId": "cs_race"})
+
+    completed = _checkout_completed_event("ord_race_1", session_id="cs_race")
+    succeeded = _checkout_completed_event("ord_race_1", session_id="cs_race", event_id="evt_2")
+    succeeded["type"] = "checkout.session.async_payment_succeeded"
+    statuses = []
+
+    def _deliver(event):
+        try:
+            statuses.append(_post_event(event).status_code)
+        finally:
+            connections.close_all()
+
+    threads = [threading.Thread(target=_deliver, args=(event,)) for event in (completed, succeeded)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(10)
+
+    assert statuses == [200, 200]
+    assert activity_count(entity_id="ord_race_1", action="PAYMENT_PAID") == 1
+    assert Payment.objects.get(pk="pay_race").status == "PAID"

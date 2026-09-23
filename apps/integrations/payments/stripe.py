@@ -1,15 +1,5 @@
-"""Adaptador de Stripe con el SDK oficial `stripe` de Python.
-
-Expone tres operaciones: crear una Checkout Session, leer el método de pago
-de un PaymentIntent y verificar la firma de un webhook. La key se pasa por
-llamada (`api_key=`) en lugar de mutar el global `stripe.api_key`.
-
-Qué queda en `apps.checkout`: armar las líneas del pedido (cargos de core,
-envío e impuesto), las URLs de retorno del SPA y la metadata; persistir
-`Order` y `Payment`; y conciliar el pedido cuando llega el webhook. El link
-de pago y el cobro asistido del panel son Checkout Sessions, así que usan
-la misma `create_checkout_session`.
-"""
+"""La key se pasa en cada llamada (`api_key=`) en vez de mutar el global
+`stripe.api_key`."""
 from __future__ import annotations
 
 import json
@@ -43,11 +33,7 @@ def create_checkout_session(
     metadata,
     customer_email=None,
 ) -> dict:
-    """Crea una Checkout Session en modo `payment` y devuelve `{"id", "url"}`.
-
-    Cada línea es `{"name", "unit_amount" (centavos), "quantity"}` y se
-    traduce al `price_data` en USD que espera Stripe.
-    """
+    """Cada línea es `{"name", "unit_amount" (centavos), "quantity"}`."""
     params = {
         "api_key": _secret_key(),
         "mode": "payment",
@@ -77,6 +63,35 @@ def create_checkout_session(
     return {"id": session["id"], "url": session["url"]}
 
 
+def expire_checkout_session(session_id: str) -> dict:
+    """Stripe rechaza con `InvalidRequestError` expirar una sesión que ya no
+    está `open`. En ese caso se relee: si ya estaba `expired` o `complete` se
+    devuelve `alreadyClosed=True` en vez de fallar, porque el objetivo (que no
+    se pueda pagar) ya se cumplió o ya no depende de nosotros.
+    """
+    api_key = _secret_key()
+    try:
+        session = stripe.checkout.Session.expire(session_id, api_key=api_key)
+    except stripe.InvalidRequestError as exc:
+        closed = _closed_session_status(session_id, api_key)
+        if closed is None:
+            raise ProviderError(str(exc) or "Stripe request failed") from exc
+        return {"id": session_id, "status": closed, "alreadyClosed": True}
+    except stripe.StripeError as exc:
+        raise ProviderError(str(exc) or "Stripe request failed") from exc
+    return {"id": session["id"], "status": session["status"], "alreadyClosed": False}
+
+
+def _closed_session_status(session_id: str, api_key: str) -> str | None:
+    """`None` si sigue `open` o no se pudo leer."""
+    try:
+        session = stripe.checkout.Session.retrieve(session_id, api_key=api_key)
+    except stripe.StripeError:
+        return None
+    status = session.get("status")
+    return status if status in ("expired", "complete") else None
+
+
 def retrieve_payment_method(payment_intent_id: str) -> dict:
     """Marca, últimos 4 y tipo de fondos de la tarjeta del PaymentIntent."""
     api_key = _secret_key()
@@ -104,8 +119,7 @@ def retrieve_payment_method(payment_intent_id: str) -> dict:
 
 
 def construct_webhook_event(payload: bytes, signature_header: str) -> dict:
-    """Verifica `Stripe-Signature` con el secreto del webhook y devuelve el
-    evento como dict plano. Sin firma válida no se parsea nada."""
+    """Sin firma válida no se parsea nada."""
     secret = settings.STRIPE_WEBHOOK_SECRET
     if not secret:
         raise ProviderNotConfigured("STRIPE_WEBHOOK_SECRET is not set")

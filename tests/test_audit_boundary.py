@@ -1,14 +1,6 @@
-"""`apps/audit` es una dependencia hoja con una sola puerta de escritura.
-
-Recorre con `ast` todos los módulos de `backend/` y prueba dos reglas:
-
-- Fuera de `apps/audit`, lo único que se importa de `apps.audit` es
-  `record_activity` de `apps.audit.services`; nadie importa `ActivityLog`.
-  La excepción es `tests/factories.py`, que expone `activity_count` para que
-  los tests de otras apps asserteen la bitácora sin tocar el modelo.
-- `apps/audit` no importa ninguna app de dominio; solo la autenticación y
-  la permission class de `apps.auth` para su admin view.
-"""
+"""`apps/audit` es una dependencia hoja con una sola puerta de escritura,
+`record_activity`. `tests/factories.py` es la única excepción que importa
+`ActivityLog`."""
 import ast
 from pathlib import Path
 
@@ -79,5 +71,5 @@ def test_the_boundary_check_sees_the_real_callers():
         and not path.is_relative_to(AUDIT_DIR)
     }
 
-    assert "apps/checkout/webhook_views.py" in callers
+    assert "apps/checkout/services.py" in callers
     assert "apps/quotes/admin_services.py" in callers

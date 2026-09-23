@@ -1,18 +1,15 @@
-"""Tests de `POST /api/checkout`.
-
-La API real de Stripe nunca se llama: se parchea su adaptador,
-`apps.integrations.payments.stripe.create_checkout_session`, y nunca se usa
-un `STRIPE_SECRET_KEY` real.
-"""
 
 import pytest
 from rest_framework.test import APIClient
 
 from apps.cart.models import Cart
 from apps.catalog.models import Product
+from apps.checkout.admin_services import ORDER_STATUSES
 from apps.checkout.models import Order, Payment
+from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from tests.factories import create_customer
+from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
@@ -28,14 +25,16 @@ PRODUCT_DATA = {
     "yearTo": 2000,
     "engineFamily": "6.5",
 }
+VEHICLE = {"make": "Chevrolet", "year": 1996, "engine": "6.5"}
+SHIPPING_RATE = 12.5
 
 
 def _insert_product(product_id=PRODUCT_ID, data=None, active=True):
     Product.objects.create(id=product_id, data=data or PRODUCT_DATA, active=active)
 
 
-def _insert_customer(customer_id, email, tax_status="NOT SUBMITTED"):
-    create_customer(customer_id, email=email, tax_status=tax_status)
+def _insert_customer(customer_id, email, tax_status="NOT SUBMITTED", data=None):
+    create_customer(customer_id, email=email, tax_status=tax_status, data=data or {})
 
 
 def _insert_cart(cart_id, data):
@@ -49,14 +48,41 @@ def _fake_session(session_id="cs_test_123", url="https://checkout.stripe.com/pay
 @pytest.fixture(autouse=True)
 def _stripe_secret_key(settings):
     settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+    settings.TAXJAR_API_KEY = ""
     return settings
+
+
+@pytest.fixture
+def shipping(monkeypatch, settings):
+    return quote_shipping(
+        monkeypatch,
+        settings,
+        zip_code="33701",
+        rate=SHIPPING_RATE,
+        items=[{"id": PRODUCT_ID, "qty": 1}],
+    )
+
+
+def _body(shipping, **overrides):
+    body = {
+        "items": [{"id": PRODUCT_ID, "qty": 1}],
+        "vehicle": VEHICLE,
+        "customer": {"state": "FL", "zip": "33701"},
+        "shipping": shipping,
+    }
+    body.update(overrides)
+    return body
+
+
+def _post(body):
+    return APIClient().post("/api/checkout/", body, format="json")
 
 
 @pytest.mark.django_db
 def test_returns_503_when_stripe_not_configured(settings):
     settings.STRIPE_SECRET_KEY = ""
 
-    response = APIClient().post("/api/checkout/", {"items": []}, format="json")
+    response = _post({"items": []})
 
     assert response.status_code == 503
     assert "STRIPE_SECRET_KEY" in response.json()["error"]
@@ -64,122 +90,313 @@ def test_returns_503_when_stripe_not_configured(settings):
 
 @pytest.mark.django_db
 def test_returns_400_when_cart_is_empty():
-    response = APIClient().post("/api/checkout/", {"items": []}, format="json")
+    response = _post({"items": []})
 
     assert response.status_code == 400
     assert response.json()["error"] == "Cart is empty"
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize(
+    "items",
+    [["gm-65"], [1], [None], [[PRODUCT_ID]], "gm-65", {"id": PRODUCT_ID}],
+)
+def test_returns_400_when_items_are_not_a_list_of_objects(items, monkeypatch):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post({"items": items, "vehicle": VEHICLE})
+
+    assert response.status_code == 400
+    assert "error" in response.json()
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("field", ["customer", "vehicle"])
+def test_returns_400_when_customer_or_vehicle_is_not_an_object(field, shipping):
+    _insert_product()
+
+    response = _post(_body(shipping, **{field: "not-an-object"}))
+
+    assert response.status_code == 400
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
 def test_returns_400_when_no_valid_products_in_cart():
-    response = APIClient().post(
-        "/api/checkout/", {"items": [{"id": "does-not-exist", "qty": 1}]}, format="json"
-    )
+    response = _post({"items": [{"id": "does-not-exist", "qty": 1}]})
 
     assert response.status_code == 400
     assert response.json()["error"] == "No valid products in cart"
 
 
 @pytest.mark.django_db
-def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch):
+def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch, settings):
     _insert_product()
+    items = [{"id": PRODUCT_ID, "qty": 2, "price": 0.01}]
+    shipping = quote_shipping(monkeypatch, settings, zip_code="33701", items=items)
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 2, "price": 0.01}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-        },
-        format="json",
-    )
+    response = _post(_body(shipping, items=items))
 
     assert response.status_code == 200
     order = Order.objects.get(pk=response.json()["orderId"])
-    # 189.99 * 2 = 379.98, never the client-submitted 0.01 * 2.
+    # 189.99 * 2 = 379.98, nunca el 0.01 * 2 que mandó el cliente.
     assert order.data["totals"]["subtotal"] == 379.98
 
 
 @pytest.mark.django_db
-def test_returns_409_when_fitment_check_fails(monkeypatch):
+def test_returns_409_when_fitment_check_fails(monkeypatch, shipping):
     _insert_product()
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Ford", "year": 1996, "engine": "6.5"},
-        },
-        format="json",
-    )
+    response = _post(_body(shipping, vehicle={"make": "Ford", "year": 1996, "engine": "6.5"}))
 
     assert response.status_code == 409
     assert "VIN fitment check failed" in response.json()["error"]
-    assert not Order.objects.filter(data__vehicle__make="Ford").exists()
+    assert not Order.objects.exists()
+
+
+# --- shipping ------------------------------------------------------------
 
 
 @pytest.mark.django_db
-def test_verified_customer_pays_zero_tax(monkeypatch):
+def test_charges_the_server_quoted_shipping_ignoring_the_client_amount(monkeypatch, shipping):
     _insert_product()
-    _insert_customer("cus_verified_1", "verified@example.com", tax_status="VERIFIED")
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return _fake_session()
+
+    monkeypatch.setattr(CREATE_SESSION, _create)
+
+    response = _post(_body({**shipping, "rate": 0.01}))
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.data["totals"]["shipping"] == SHIPPING_RATE
+    assert order.data["shipping"]["rate"] == SHIPPING_RATE
+    shipping_lines = [line for line in captured["line_items"] if line["name"] == "Shipping"]
+    assert shipping_lines == [{"name": "Shipping", "unit_amount": 1250, "quantity": 1}]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("shipping_body", [None, {"rate": 0}, 25, {"shipmentId": "shp_checkout"}])
+def test_returns_400_without_a_shipping_selection(shipping_body, monkeypatch):
+    _insert_product()
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-            "customer": {"email": "verified@example.com", "state": "FL", "zip": "33701"},
-        },
-        format="json",
+    response = _post(_body(shipping_body))
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Select a shipping method before payment."
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "selection, zip_code",
+    [
+        ({"shipmentId": "shp_checkout", "rateId": "rate_forged"}, "33701"),
+        ({"shipmentId": "shp_other", "rateId": "rate_ground"}, "33701"),
+        ({"shipmentId": "shp_checkout", "rateId": "rate_ground"}, "90210"),
+    ],
+)
+def test_returns_409_when_the_shipping_rate_cannot_be_verified(
+    selection, zip_code, monkeypatch, shipping
+):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(selection, customer={"state": "CA", "zip": zip_code}))
+
+    assert response.status_code == 409
+    assert response.json()["error"] == (
+        "Shipping rate could not be verified. Get shipping rates again."
+    )
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "items",
+    [
+        [{"id": PRODUCT_ID, "qty": 3}],
+        [{"id": PRODUCT_ID, "qty": 1}, {"id": "heavy-block", "qty": 1}],
+    ],
+)
+def test_returns_409_when_the_rate_was_quoted_for_other_items(items, monkeypatch, shipping):
+    # La tarifa se cotizó para una sola unidad: no paga un carrito más pesado.
+    _insert_product()
+    _insert_product(product_id="heavy-block", data={**PRODUCT_DATA, "id": "heavy-block"})
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(shipping, items=items))
+
+    assert response.status_code == 409
+    assert response.json()["error"] == (
+        "Shipping rate could not be verified. Get shipping rates again."
+    )
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_accepts_the_quoted_items_split_in_several_lines(monkeypatch, settings):
+    _insert_product()
+    shipping = quote_shipping(
+        monkeypatch, settings, zip_code="33701", items=[{"id": PRODUCT_ID, "qty": 2}]
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(
+        _body(shipping, items=[{"id": PRODUCT_ID, "qty": 1}, {"id": PRODUCT_ID, "qty": 1}])
+    )
+
+    assert response.status_code == 200
+
+
+# --- customer and tax ------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_guest_never_inherits_the_exemption_of_a_verified_guest_profile(monkeypatch, shipping):
+    # Tipear el email de un invitado exento no prueba nada: se cobra el
+    # impuesto y el perfil no se toca.
+    _insert_product()
+    _insert_customer(
+        "cus_verified_1",
+        "verified@example.com",
+        tax_status="VERIFIED",
+        data={"name": "Real Owner", "city": "Tampa"},
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(
+        _body(
+            shipping,
+            customer={
+                "email": "verified@example.com",
+                "name": "Mallory",
+                "city": "Elsewhere",
+                "state": "FL",
+                "zip": "33701",
+            },
+        )
     )
 
     assert response.status_code == 200
     body = response.json()
-    assert body["tax"] == 0
+    # FL fallback 0.06 sobre partes + core + envío.
+    assert body["tax"] == round((239.99 + SHIPPING_RATE) * 0.06, 2)
     order = Order.objects.get(pk=body["orderId"])
-    assert order.data["taxSource"] == "Tax exempt"
+    assert order.data["taxSource"] != "Tax exempt"
+    assert order.data["customer"]["name"] == "Mallory"
+    profile = Customer.objects.get(pk="cus_verified_1")
+    assert profile.data == {"name": "Real Owner", "city": "Tampa"}
+    assert profile.tax_status == "VERIFIED"
 
 
 @pytest.mark.django_db
-def test_non_verified_customer_gets_fallback_table_tax(monkeypatch, settings):
-    settings.TAXJAR_API_KEY = ""
+def test_non_verified_customer_gets_fallback_table_tax(monkeypatch, shipping):
     _insert_product()
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-            "customer": {"email": "anon@example.com", "state": "FL", "zip": "33701"},
-        },
-        format="json",
+    response = _post(
+        _body(shipping, customer={"email": "anon@example.com", "state": "FL", "zip": "33701"})
     )
 
     assert response.status_code == 200
-    body = response.json()
-    # FL fallback rate is 0.06; subtotal+core = 189.99+50.0 = 239.99, no shipping.
-    assert body["tax"] == round(239.99 * 0.06, 2)
+    assert response.json()["tax"] == round((239.99 + SHIPPING_RATE) * 0.06, 2)
 
 
 @pytest.mark.django_db
-def test_creates_order_and_pending_payment_via_stripe_sdk(monkeypatch):
+def test_guest_order_attaches_to_existing_guest_profile_without_overwriting_it(
+    monkeypatch, shipping
+):
+    _insert_product()
+    _insert_customer("cus_existing_1", "repeat@example.com", data={"name": "Original"})
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(
+        _body(
+            shipping,
+            customer={
+                "email": "Repeat@Example.com",
+                "name": "Repeat Customer",
+                "state": "FL",
+                "zip": "33701",
+            },
+        )
+    )
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.customer_id == "cus_existing_1"
+    assert order.data["customer"]["name"] == "Repeat Customer"
+    assert Customer.objects.get(pk="cus_existing_1").data == {"name": "Original"}
+    assert Customer.objects.count() == 1
+
+
+@pytest.mark.django_db
+def test_new_guest_email_creates_a_guest_profile_from_the_snapshot(monkeypatch, shipping):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(
+        _body(
+            shipping,
+            customer={"email": "new@example.com", "name": "New", "state": "FL", "zip": "33701"},
+        )
+    )
+
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.customer.email == "new@example.com"
+    assert order.customer.user_id is None
+    assert order.customer.data["name"] == "New"
+
+
+@pytest.mark.django_db
+def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypatch, shipping):
+    # Un invitado solo escribe un email: si se mezclara con el perfil de una
+    # cuenta registrada, cualquiera podría pisar su dirección o sumarle pedidos.
+    from tests.factories import create_user
+
+    _insert_product()
+    owner = create_user("U_REGISTERED", email="owner@example.com")
+    create_customer(
+        "cus_registered", email="owner@example.com", user=owner, data={"city": "Tampa"}
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(
+        _body(
+            shipping,
+            customer={"email": "owner@example.com", "city": "Elsewhere", "zip": "33701"},
+        )
+    )
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.customer_id != "cus_registered"
+    assert Customer.objects.get(pk="cus_registered").data == {"city": "Tampa"}
+
+
+# --- order, payment and cart ---------------------------------------------
+
+
+@pytest.mark.django_db
+def test_creates_order_and_pending_payment_via_stripe_sdk(monkeypatch, shipping):
     _insert_product()
     monkeypatch.setattr(
         CREATE_SESSION,
-        lambda **kwargs: _fake_session("cs_test_created", "https://checkout.stripe.com/pay/cs_test_created"),
+        lambda **kwargs: _fake_session(
+            "cs_test_created", "https://checkout.stripe.com/pay/cs_test_created"
+        ),
     )
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-        },
-        format="json",
-    )
+    response = _post(_body(shipping))
 
     assert response.status_code == 200
     body = response.json()
@@ -193,99 +410,41 @@ def test_creates_order_and_pending_payment_via_stripe_sdk(monkeypatch):
     assert payment.provider == "stripe"
     assert payment.provider_id == "cs_test_created"
     assert payment.status == "PENDING"
+    assert float(payment.amount) == order.data["totals"]["total"]
 
 
 @pytest.mark.django_db
-def test_stripe_session_failure_marks_order_payment_setup_failed(monkeypatch):
+def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypatch, shipping):
     _insert_product()
+    _insert_cart("cart_fail_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
 
     def _boom(**kwargs):
         raise ProviderError("Could not create secure checkout")
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-        },
-        format="json",
-    )
+    response = _post(_body(shipping, cartId="cart_fail_1"))
 
     assert response.status_code == 502
     order = Order.objects.get()
-    assert order.status == "PAYMENT_SETUP_FAILED"
+    # El número ya emitido queda en un pedido visible, no se reutiliza.
+    assert order.status == "CANCELLED"
+    assert order.status in ORDER_STATUSES
+    assert order.payment_status == "UNPAID"
+    assert order.data["cancelReason"] == "PAYMENT_SETUP_FAILED"
     assert not Payment.objects.filter(order=order).exists()
+    cart = Cart.objects.get(pk="cart_fail_1").data
+    assert cart["stage"] == "CART"
+    assert "orderId" not in cart
 
 
 @pytest.mark.django_db
-def test_resolves_existing_customer_by_email_and_merges_submitted_fields(monkeypatch):
-    _insert_product()
-    _insert_customer("cus_existing_1", "repeat@example.com")
-    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
-
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-            "customer": {"email": "repeat@example.com", "name": "Repeat Customer"},
-        },
-        format="json",
-    )
-
-    assert response.status_code == 200
-    order = Order.objects.get(pk=response.json()["orderId"])
-    assert order.customer_id == "cus_existing_1"
-
-
-@pytest.mark.django_db
-def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypatch):
-    # Un invitado solo escribe un email: si se mezclara con el perfil de una
-    # cuenta registrada, cualquiera podría pisar su dirección o sumarle pedidos.
-    from tests.factories import create_user
-
-    _insert_product()
-    owner = create_user("U_REGISTERED", email="owner@example.com")
-    create_customer(
-        "cus_registered", email="owner@example.com", user=owner, data={"city": "Tampa"}
-    )
-    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
-
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-            "customer": {"email": "owner@example.com", "city": "Elsewhere"},
-        },
-        format="json",
-    )
-
-    assert response.status_code == 200
-    order = Order.objects.get(pk=response.json()["orderId"])
-    assert order.customer_id != "cus_registered"
-    from apps.customers.models import Customer
-
-    assert Customer.objects.get(pk="cus_registered").data == {"city": "Tampa"}
-
-
-@pytest.mark.django_db
-def test_cart_transitions_to_checkout_stage_when_cart_id_present(monkeypatch):
+def test_cart_transitions_to_checkout_stage_when_cart_id_present(monkeypatch, shipping):
     _insert_product()
     _insert_cart("cart_uuid_checkout_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = APIClient().post(
-        "/api/checkout/",
-        {
-            "cartId": "cart_uuid_checkout_1",
-            "items": [{"id": PRODUCT_ID, "qty": 1}],
-            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
-        },
-        format="json",
-    )
+    response = _post(_body(shipping, cartId="cart_uuid_checkout_1"))
 
     assert response.status_code == 200
     data = Cart.objects.get(pk="cart_uuid_checkout_1").data

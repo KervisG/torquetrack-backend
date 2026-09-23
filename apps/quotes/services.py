@@ -1,41 +1,31 @@
-"""Reglas de negocio de `quote/request` y `quote/public/<token>` (vista y
-checkout). `serialize_quote`, `is_expired`, `render_quote_html`,
-y `quote_token` también los usa `apps/quotes/admin_services.py`; viven aquí
-porque `quote/public/<token>` los necesita primero. Los correos salen por el
-adaptador de Resend (`apps.integrations.email.resend`).
-
-Reutiliza de `apps.checkout.services` los helpers numéricos (`money`,
-`js_number_or`, `random_id`) y la creación de la Checkout Session de Stripe
-(`create_stripe_checkout_session`) en lugar de duplicarlos; importar
-servicios entre apps es un patrón habitual del proyecto.
-"""
+"""Cotizaciones del storefront: solicitud, enlace público y checkout."""
 from __future__ import annotations
 
 import secrets
 
 from django.conf import settings
+from django.db import transaction
 from django.template.loader import render_to_string
 from django.utils import timezone
 
-from apps.checkout.models import Order, Payment
+from apps.checkout.models import Order
 from apps.checkout.services import (
-    create_stripe_checkout_session,
+    cancel_unpaid_order,
     js_number_or,
     linked_customer,
     money,
     next_document_number,
     next_order_number,
     random_id,
+    start_stripe_payment,
 )
-from apps.customers.models import Customer
+from apps.customers.services import resolve_guest_customer
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 
 
 def quote_token() -> str:
-    """Token del magic link: 24 bytes aleatorios en hexadecimal (48
-    caracteres)."""
     return secrets.token_hex(24)
 
 
@@ -48,8 +38,7 @@ def _app_base_url() -> str:
 
 
 def public_quote_url(token: str) -> str:
-    """Enlace que recibe el cliente: la página `/quote/<token>` del SPA, que
-    lee `GET /api/quote/public/<token>/details/`. Nunca el endpoint HTML."""
+    """El cliente recibe la página del SPA, nunca el endpoint HTML de la API."""
     return f"{_app_base_url()}/quote/{token}"
 
 
@@ -59,12 +48,16 @@ def public_quote_pdf_url(token: str) -> str:
 
 
 def serialize_quote(quote: Quote) -> dict:
-    """Serializa la cotización como `{...data, id, number, status, createdAt,
-    expiresAt, customer}`. Para `customer` se prefieren los datos de la fila
-    `Customer` vinculada sobre el snapshot guardado en el jsonb."""
+    """El snapshot de `customer` gana sobre el perfil vinculado: una solicitud
+    invitada no reescribe el perfil, así que lo que escribió el cliente vive
+    solo ahí. El email siempre es el del perfil."""
     data = quote.data or {}
     if quote.customer_id and quote.customer is not None:
-        customer = {**(quote.customer.data or {}), "email": quote.customer.email}
+        customer = {
+            **(quote.customer.data or {}),
+            **(data.get("customer") or {}),
+            "email": quote.customer.email,
+        }
     else:
         customer = data.get("customer")
 
@@ -84,8 +77,7 @@ def is_expired(quote: Quote) -> bool:
 
 
 def _quote_line(item: dict) -> dict:
-    """Normaliza una línea (`quantity`/`qty`, `unitPrice`/`price`) y calcula
-    su total en el backend: ni el correo ni el SPA recalculan dinero."""
+    """El total de la línea se calcula aquí: ni el correo ni el SPA recalculan dinero."""
     qty = js_number_or(item.get("quantity") or item.get("qty"), 1)
     has_unit_price = item.get("unitPrice") is not None
     raw_price = item.get("unitPrice") if has_unit_price else item.get("price")
@@ -104,8 +96,7 @@ _PUBLIC_LINE_KEYS = ("title", "partNumber", "quantity", "unitPrice", "coreCharge
 
 
 def serialize_public_quote(quote: Quote) -> dict:
-    """`GET /api/quote/public/<token>/details/`: solo lo que ve el cliente.
-    Sin token, memo interno, vendedor ni email, porque el enlace se reenvía."""
+    """Sin token, memo interno, vendedor ni email, porque el enlace se reenvía."""
     serialized = serialize_quote(quote)
     customer = serialized.get("customer") or {}
     lines = [_quote_line(item) for item in serialized.get("items") or []]
@@ -121,6 +112,7 @@ def serialize_public_quote(quote: Quote) -> dict:
         "vehicle": serialized.get("vehicle") or {},
         "items": [{key: line.get(key) for key in _PUBLIC_LINE_KEYS} for line in lines],
         "totals": serialized.get("totals") or {},
+        "payable": is_quote_payable(quote),
     }
 
 
@@ -131,10 +123,8 @@ def render_quote_html(
     pdf_url: str | None = None,
     print_mode: bool = False,
 ) -> str:
-    """Renderiza la plantilla `quotes/quote.html`, compartida por la página
-    pública, el PDF y el email de la cotización. `pdf_url` por defecto es
-    `<public_url>/pdf`, que solo vale cuando `public_url` es la ruta HTML de
-    la API; el correo manda el suyo porque enlaza al SPA."""
+    """El `pdf_url` por defecto solo vale cuando `public_url` es la ruta HTML
+    de la API; el correo manda el suyo porque enlaza al SPA."""
     customer = quote.get("customer") or {}
     vehicle = quote.get("vehicle") or {}
     totals = quote.get("totals") or {}
@@ -157,9 +147,7 @@ def render_quote_html(
 
 
 def create_quote_from_request(payload: dict, user=None) -> dict:
-    """`POST /api/quote/request` — storefront quote request.
-
-    Con un `Customer` vinculado a la sesión, la cotización es de ese perfil:
+    """Con un `Customer` vinculado a la sesión, la cotización es de ese perfil:
     el email es el de la cuenta, el nombre y el teléfono del body solo
     completan el snapshot y el perfil no se reescribe.
     """
@@ -213,7 +201,7 @@ def create_quote_from_request(payload: dict, user=None) -> dict:
     if profile is not None:
         customer_id = profile.pk
     elif email:
-        customer_id = _resolve_or_merge_customer(name, email, phone)
+        customer_id = resolve_guest_customer({"name": name, "email": email, "phone": phone})
 
     quote_id = random_id("QID")
     number = next_quote_number()
@@ -298,28 +286,6 @@ def _active_products(ids):
     return Product.objects.filter(id__in=ids, active=True)
 
 
-def _resolve_or_merge_customer(name, email, phone) -> str:
-    # Solo perfiles invitados: un email tipeado en el checkout no prueba nada,
-    # así que nunca debe mezclarse con el perfil de una cuenta registrada.
-    existing = Customer.objects.filter(email__iexact=email, user__isnull=True).first()
-    if existing:
-        existing.data = {**(existing.data or {}), "name": name, "email": email, "phone": phone}
-        existing.updated_at = timezone.now()
-        existing.save(update_fields=["data", "updated_at"])
-        return existing.pk
-
-    customer_id = random_id("C")
-    now = timezone.now()
-    Customer.objects.create(
-        id=customer_id,
-        email=email,
-        data={"id": customer_id, "name": name, "email": email, "phone": phone},
-        created_at=now,
-        updated_at=now,
-    )
-    return customer_id
-
-
 def _link_cart_to_quote(cart_id, quote_id, quote_number, customer):
     from apps.cart.models import Cart
 
@@ -338,57 +304,115 @@ def _link_cart_to_quote(cart_id, quote_id, quote_number, customer):
     cart.save(update_fields=["data", "updated_at"])
 
 
-def checkout_from_quote(quote: Quote) -> dict:
-    """`POST /api/quote/public/<token>/checkout`."""
-    if is_expired(quote):
-        return {"error": "This quote has expired", "status": 409}
+_TOTAL_KEYS = ("subtotal", "core", "shipping", "tax", "total")
 
-    order = (
-        Order.objects.filter(data__quoteNumber=quote.number, payment_status="UNPAID")
-        .order_by("-created_at")
-        .first()
+
+def _matches_quote(order: Order, quote_data: dict) -> bool:
+    """El pedido cobra exactamente lo cotizado: mismas líneas y mismos
+    totales. Si el staff editó la cotización, el pedido quedó viejo."""
+    order_data = order.data or {}
+    order_totals = order_data.get("totals") or {}
+    quote_totals = quote_data.get("totals") or {}
+    return order_data.get("items") == quote_data.get("items") and all(
+        money(order_totals.get(key)) == money(quote_totals.get(key)) for key in _TOTAL_KEYS
     )
-    data = quote.data or {}
-    if order is None:
-        number = next_order_number()
-        order_id = random_id("OID")
-        serialized = serialize_quote(quote)
-        order_data = {
-            **data,
-            "customer": serialized.get("customer") or data.get("customer") or {},
-            "quoteNumber": quote.number,
-            "salesRep": data.get("createdBy") or "Online Quote",
+
+
+# `CONVERTED` sigue siendo pagable: el checkout la convierte antes de abrir
+# Stripe, así que un reintento (Stripe caído, sesión abandonada) reusa el
+# pedido. Un pedido ya pagado se rechaza aparte.
+PAYABLE_QUOTE_STATUSES = frozenset({"ACTIVE", "CONTACTED", "CONVERTED"})
+
+
+def _checkout_refusal(quote: Quote) -> dict | None:
+    """El vencimiento responde 410, igual que las vistas públicas por token."""
+    if is_expired(quote) or quote.status == "EXPIRED":
+        return {"error": "This quote has expired", "status": 410}
+    if quote.status == "BUILDING":
+        return {
+            "error": "This quote is still being prepared. Contact TorqueTrack to finalize it.",
+            "status": 409,
         }
-        order = Order.objects.create(
-            id=order_id,
-            number=number,
-            customer_id=quote.customer_id,
-            status="PENDING_PAYMENT",
-            payment_status="UNPAID",
-            data=order_data,
-            created_at=timezone.now(),
-            updated_at=timezone.now(),
+    if quote.status not in PAYABLE_QUOTE_STATUSES:
+        return {
+            "error": "This quote is closed. Contact TorqueTrack for a new quote.",
+            "status": 409,
+        }
+    return None
+
+
+def is_quote_payable(quote: Quote) -> bool:
+    """La página pública muestra el botón de pago con esta misma regla, así el
+    SPA no la repite."""
+    if _checkout_refusal(quote) is not None:
+        return False
+    return not Order.objects.filter(
+        data__quoteNumber=quote.number, payment_status="PAID"
+    ).exists()
+
+
+def checkout_from_quote(quote: Quote) -> dict:
+    """El token sigue vivo después de pagar, así que una cotización con un
+    pedido PAID se rechaza con 409 en vez de abrir otro cobro. Se reusa el
+    pedido sin pagar que coincide con la cotización; uno viejo (la cotización
+    cambió) se cancela junto con sus sesiones pendientes. La cotización y sus
+    pedidos se bloquean para que dos clics no creen dos pedidos.
+    """
+    refusal = _checkout_refusal(quote)
+    if refusal is not None:
+        return refusal
+
+    with transaction.atomic():
+        quote = Quote.objects.select_for_update().get(pk=quote.pk)
+        # Se vuelve a mirar con la fila bloqueada: el staff pudo cerrarla
+        # entre la lectura del token y este punto.
+        refusal = _checkout_refusal(quote)
+        if refusal is not None:
+            return refusal
+        orders = list(
+            Order.objects.select_for_update()
+            .filter(data__quoteNumber=quote.number)
+            .order_by("-created_at")
         )
-        quote.status = "CONVERTED"
-        quote.data = {**data, "orderNumber": number}
-        quote.updated_at = timezone.now()
-        quote.save(update_fields=["status", "data", "updated_at"])
+        if any(order.payment_status == "PAID" for order in orders):
+            return {"error": "This quote has already been paid", "status": 409}
+
+        data = quote.data or {}
+        order = None
+        for candidate in orders:
+            if candidate.payment_status != "UNPAID" or candidate.status == "CANCELLED":
+                continue
+            if _matches_quote(candidate, data):
+                order = order or candidate
+            else:
+                cancel_unpaid_order(candidate, "QUOTE_CHANGED")
+
+        if order is None:
+            serialized = serialize_quote(quote)
+            order = Order.objects.create(
+                id=random_id("OID"),
+                number=next_order_number(),
+                customer_id=quote.customer_id,
+                status="PENDING_PAYMENT",
+                payment_status="UNPAID",
+                data={
+                    **data,
+                    "customer": serialized.get("customer") or data.get("customer") or {},
+                    "quoteNumber": quote.number,
+                    "salesRep": data.get("createdBy") or "Online Quote",
+                },
+            )
+        if quote.status != "CONVERTED" or data.get("orderNumber") != order.number:
+            quote.status = "CONVERTED"
+            quote.data = {**data, "orderNumber": order.number}
+            quote.updated_at = timezone.now()
+            quote.save(update_fields=["status", "data", "updated_at"])
 
     try:
-        session_payload = {"id": order.pk, "number": order.number, **(order.data or {})}
-        session = create_stripe_checkout_session(session_payload)
+        _, session = start_stripe_payment(order, data={"source": "PUBLIC_QUOTE"})
     except ProviderError as exc:
+        # El pedido queda sin pagar y coincide con la cotización: el próximo
+        # intento lo reusa.
         return {"error": str(exc) or "Could not create secure checkout", "status": 502}
 
-    Payment.objects.create(
-        id=random_id("PAY"),
-        order=order,
-        provider="stripe",
-        provider_id=session["id"],
-        status="PENDING",
-        amount=money((order.data or {}).get("totals", {}).get("total")),
-        data={"sessionId": session["id"], "source": "PUBLIC_QUOTE"},
-        created_at=timezone.now(),
-        updated_at=timezone.now(),
-    )
     return {"ok": True, "url": session["url"], "orderNumber": order.number}

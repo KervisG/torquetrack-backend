@@ -1,7 +1,7 @@
-Django>=5.1,<5.2
-djangorestframework>=3.15,<3.16
+Django>=5.2,<5.3
+djangorestframework>=3.16,<3.17
 psycopg[binary]>=3.2,<3.3
-django-environ>=0.11,<0.12
+django-environ>=0.13,<0.14
 requests>=2.32,<3
 stripe>=11,<12
 weasyprint>=70,<71

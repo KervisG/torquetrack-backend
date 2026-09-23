@@ -1,0 +1,569 @@
+[
+    {
+        "id": "ford-73-powerstroke-1994-1997",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350"
+        ],
+        "yearFrom": 1994,
+        "yearTo": 1997,
+        "engine": "7.3",
+        "engineFamily": "Power Stroke",
+        "engineCode": "7.3L DIT",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-73-powerstroke-1998-2003",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 1998,
+        "yearTo": 2003,
+        "engine": "7.3",
+        "engineFamily": "Power Stroke",
+        "engineCode": "7.3L DIT",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-60-powerstroke-2003-2004",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2003,
+        "yearTo": 2004,
+        "engine": "6.0",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.0L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-60-powerstroke-2005-2007",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2005,
+        "yearTo": 2007,
+        "engine": "6.0",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.0L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-64-powerstroke-2008-2010",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2008,
+        "yearTo": 2010,
+        "engine": "6.4",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.4L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-67-powerstroke-2011-2014",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2011,
+        "yearTo": 2014,
+        "engine": "6.7",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-67-powerstroke-2015-2016",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2015,
+        "yearTo": 2016,
+        "engine": "6.7",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-67-powerstroke-2017-2019",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2017,
+        "yearTo": 2019,
+        "engine": "6.7",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-67-powerstroke-2020-2022",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2020,
+        "yearTo": 2022,
+        "engine": "6.7",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ford-67-powerstroke-2023-2026",
+        "vehicleType": "Pickup",
+        "make": "Ford",
+        "models": [
+            "F-250",
+            "F-350",
+            "F-450",
+            "F-550"
+        ],
+        "yearFrom": 2023,
+        "yearTo": 2026,
+        "engine": "6.7",
+        "engineFamily": "Power Stroke",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "chevrolet-65-turbodiesel-1994-2000",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "C2500",
+            "C3500",
+            "K2500",
+            "K3500",
+            "2500",
+            "3500"
+        ],
+        "yearFrom": 1994,
+        "yearTo": 2000,
+        "engine": "6.5",
+        "engineFamily": "GM Turbo Diesel",
+        "engineCode": "L65/L56",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "chevrolet-duramax-lb7",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "Silverado 2500HD",
+            "Silverado 3500",
+            "Silverado 3500HD"
+        ],
+        "yearFrom": 2001,
+        "yearTo": 2004,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LB7",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "chevrolet-duramax-lly",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "Silverado 2500HD",
+            "Silverado 3500",
+            "Silverado 3500HD"
+        ],
+        "yearFrom": 2004,
+        "yearTo": 2006,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LLY",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "chevrolet-duramax-lbz",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "Silverado 2500HD",
+            "Silverado 3500",
+            "Silverado 3500HD"
+        ],
+        "yearFrom": 2006,
+        "yearTo": 2007,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LBZ",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "chevrolet-duramax-lmm",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "Silverado 2500HD",
+            "Silverado 3500HD"
+        ],
+        "yearFrom": 2007,
+        "yearTo": 2010,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LMM",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "chevrolet-duramax-lml",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "Silverado 2500HD",
+            "Silverado 3500HD"
+        ],
+        "yearFrom": 2011,
+        "yearTo": 2016,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LML",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "chevrolet-duramax-l5p",
+        "vehicleType": "Pickup",
+        "make": "Chevrolet",
+        "models": [
+            "Silverado 2500HD",
+            "Silverado 3500HD"
+        ],
+        "yearFrom": 2017,
+        "yearTo": 2026,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "L5P",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-65-turbodiesel-1994-2000",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "C2500",
+            "C3500",
+            "K2500",
+            "K3500",
+            "2500",
+            "3500"
+        ],
+        "yearFrom": 1994,
+        "yearTo": 2000,
+        "engine": "6.5",
+        "engineFamily": "GM Turbo Diesel",
+        "engineCode": "L65/L56",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-duramax-lb7",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "Sierra 2500HD",
+            "Sierra 3500",
+            "Sierra 3500HD"
+        ],
+        "yearFrom": 2001,
+        "yearTo": 2004,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LB7",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-duramax-lly",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "Sierra 2500HD",
+            "Sierra 3500",
+            "Sierra 3500HD"
+        ],
+        "yearFrom": 2004,
+        "yearTo": 2006,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LLY",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-duramax-lbz",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "Sierra 2500HD",
+            "Sierra 3500",
+            "Sierra 3500HD"
+        ],
+        "yearFrom": 2006,
+        "yearTo": 2007,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LBZ",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-duramax-lmm",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "Sierra 2500HD",
+            "Sierra 3500HD"
+        ],
+        "yearFrom": 2007,
+        "yearTo": 2010,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LMM",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-duramax-lml",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "Sierra 2500HD",
+            "Sierra 3500HD"
+        ],
+        "yearFrom": 2011,
+        "yearTo": 2016,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "LML",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "gmc-duramax-l5p",
+        "vehicleType": "Pickup",
+        "make": "GMC",
+        "models": [
+            "Sierra 2500HD",
+            "Sierra 3500HD"
+        ],
+        "yearFrom": 2017,
+        "yearTo": 2026,
+        "engine": "6.6",
+        "engineFamily": "Duramax",
+        "engineCode": "L5P",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": false
+    },
+    {
+        "id": "ram-59-cummins-12v-1994-1998",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500"
+        ],
+        "yearFrom": 1994,
+        "yearTo": 1998,
+        "engine": "5.9",
+        "engineFamily": "Cummins",
+        "engineCode": "12V",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ram-59-cummins-24v-1998-2002",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500"
+        ],
+        "yearFrom": 1998,
+        "yearTo": 2002,
+        "engine": "5.9",
+        "engineFamily": "Cummins",
+        "engineCode": "24V ISB",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ram-59-cummins-commonrail-2003-2007",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500"
+        ],
+        "yearFrom": 2003,
+        "yearTo": 2007,
+        "engine": "5.9",
+        "engineFamily": "Cummins",
+        "engineCode": "Common Rail",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ram-67-cummins-2007-2012",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500",
+            "4500",
+            "5500"
+        ],
+        "yearFrom": 2007,
+        "yearTo": 2012,
+        "engine": "6.7",
+        "engineFamily": "Cummins",
+        "engineCode": "6.7L ISB",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ram-67-cummins-2013-2018",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500",
+            "4500",
+            "5500"
+        ],
+        "yearFrom": 2013,
+        "yearTo": 2018,
+        "engine": "6.7",
+        "engineFamily": "Cummins",
+        "engineCode": "6.7L ISB",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ram-67-cummins-2019-2024",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500",
+            "4500",
+            "5500"
+        ],
+        "yearFrom": 2019,
+        "yearTo": 2024,
+        "engine": "6.7",
+        "engineFamily": "Cummins",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    },
+    {
+        "id": "ram-67-cummins-2025-2026",
+        "vehicleType": "Pickup",
+        "make": "RAM",
+        "models": [
+            "2500",
+            "3500",
+            "4500",
+            "5500"
+        ],
+        "yearFrom": 2025,
+        "yearTo": 2026,
+        "engine": "6.7",
+        "engineFamily": "Cummins",
+        "engineCode": "6.7L",
+        "fuelType": "Diesel",
+        "vinCompatible": true,
+        "serialCompatible": true
+    }
+]

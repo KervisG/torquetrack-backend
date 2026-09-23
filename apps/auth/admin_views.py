@@ -5,13 +5,14 @@ Estas views separan 401 (sin sesión) de 403 (sin `users.manage`).
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth.permissions import has_torquetrack_permission, is_active_admin_user
 from apps.auth.admin_services import (
+    create_admin_user,
     delete_admin_user,
     list_admin_users,
     update_admin_user,
 )
 from apps.auth.authentication import AdminSessionAuthentication
+from apps.auth.permissions import has_torquetrack_permission, is_active_admin_user
 
 
 class _AdminUsersManageView(APIView):
@@ -32,6 +33,16 @@ class AdminUsersView(_AdminUsersManageView):
         if denied is not None:
             return denied
         return Response(list_admin_users())
+
+    def post(self, request):
+        denied = self._require_admin(request)
+        if denied is not None:
+            return denied
+        body = request.data if isinstance(request.data, dict) else {}
+        result = create_admin_user(body, request.user)
+        if "error" in result:
+            return Response({"error": result["error"]}, status=result.get("status", 400))
+        return Response(result, status=201)
 
 
 class AdminUserDetailView(_AdminUsersManageView):

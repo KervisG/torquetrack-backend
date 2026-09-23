@@ -132,9 +132,17 @@ REST_FRAMEWORK = {
     # (`apps/auth/utils/throttling.py`).
     "DEFAULT_THROTTLE_RATES": {
         "admin_login": env("ADMIN_LOGIN_THROTTLE_RATE", default="10/min"),
-        "register": env("REGISTER_THROTTLE_RATE", default="10/min"),
+        # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
+        "admin_login_account": env("ADMIN_LOGIN_ACCOUNT_THROTTLE_RATE", default="20/hour"),
     },
 }
+
+# Key de `request.META` con la IP real del cliente para los throttles por IP
+# (en producción, `HTTP_CF_CONNECTING_IP`). Solo es confiable si el origen
+# acepta tráfico exclusivamente desde Cloudflare (allowlist en el firewall o
+# Cloudflare Tunnel); si no, cualquiera puede falsificar el header. Vacío usa
+# `REMOTE_ADDR`.
+CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
 
 # Phase 5 (checkout/webhook) integration env vars, names verified against
 # real `process.env.*` usage in `docs/migration/phase-0-infra-env-validation.md`

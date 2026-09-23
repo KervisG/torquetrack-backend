@@ -3,10 +3,12 @@
 Separa 401 (sin sesión) de 403 (sesión sin `users.manage`).
 """
 import json
+import re
 from importlib import import_module
 
 import pytest
 from django.conf import settings
+from django.contrib.auth.hashers import check_password
 from django.db import connection
 from rest_framework.test import APIClient
 
@@ -70,14 +72,125 @@ def test_list_returns_admin_first_then_by_created_at():
     assert body[0]["id"] == "usr_admin"
 
 
+def _create_payload(**overrides):
+    payload = {
+        "email": "Ana.Torres@example.com",
+        "password": "s3cret-pass",
+        "firstName": "Ana",
+        "lastName": "Torres",
+        "role": "employee",
+    }
+    payload.update(overrides)
+    return payload
+
+
 @pytest.mark.django_db
-def test_post_is_not_allowed():
+def test_create_returns_401_without_session():
+    response = APIClient().post("/api/admin/users/", _create_payload(), format="json")
+
+    assert response.status_code == 401
+    assert not User.objects.filter(username="ana.torres@example.com").exists()
+
+
+@pytest.mark.django_db
+def test_create_returns_403_without_users_manage_permission():
+    _insert_user("usr_create_no_perm", permissions=["dashboard.view"])
+    client = _admin_client("usr_create_no_perm")
+
+    response = client.post("/api/admin/users/", _create_payload(), format="json")
+
+    assert response.status_code == 403
+    assert not User.objects.filter(username="ana.torres@example.com").exists()
+
+
+@pytest.mark.django_db
+def test_create_stores_user_with_explicit_role():
     _insert_user("usr_creator", role="admin")
     client = _admin_client("usr_creator")
 
-    response = client.post("/api/admin/users/", {"email": "nopass@example.com"}, format="json")
+    response = client.post("/api/admin/users/", _create_payload(), format="json")
 
-    assert response.status_code == 405
+    assert response.status_code == 201
+    body = response.json()["user"]
+    assert body["email"] == "ana.torres@example.com"
+    assert body["name"] == "Ana Torres"
+    assert body["roleSlug"] == "employee"
+
+    user = User.objects.get(username="ana.torres@example.com")
+    assert user.first_name == "Ana"
+    assert user.last_name == "Torres"
+    assert check_password("s3cret-pass", user.password_hash)
+    assert EmployeeRole.objects.get(user_id=user.pk).role.slug == "employee"
+    assert ActivityLog.objects.filter(
+        action="USER_CREATED", entity_id=user.pk, actor_id="usr_creator@example.com"
+    ).exists()
+
+
+@pytest.mark.django_db
+def test_create_ignores_client_chosen_id():
+    _insert_user("usr_creator_id", role="admin")
+    client = _admin_client("usr_creator_id")
+
+    response = client.post(
+        "/api/admin/users/", _create_payload(id="usr_chosen"), format="json"
+    )
+
+    assert response.status_code == 201
+    user_id = response.json()["user"]["id"]
+    assert user_id != "usr_chosen"
+    assert re.fullmatch(r"U[0-9A-F]{12}", user_id)
+    assert not User.objects.filter(pk="usr_chosen").exists()
+
+
+@pytest.mark.django_db
+def test_create_returns_400_without_required_fields():
+    _insert_user("usr_creator_req", role="admin")
+    client = _admin_client("usr_creator_req")
+
+    response = client.post(
+        "/api/admin/users/", {"email": "nopass@example.com", "role": "employee"}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Email, password, first name and last name required"
+    }
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("role", [None, "", "does-not-exist"])
+def test_create_returns_400_for_missing_or_unknown_role(role):
+    _insert_user("usr_creator_role", role="admin")
+    client = _admin_client("usr_creator_role")
+
+    response = client.post("/api/admin/users/", _create_payload(role=role), format="json")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Valid role required"}
+    assert not User.objects.filter(username="ana.torres@example.com").exists()
+
+
+@pytest.mark.django_db
+def test_create_rejects_full_access_role_from_non_full_access_actor():
+    _insert_user("usr_manager", role="authorized", permissions=["users.manage"])
+    client = _admin_client("usr_manager")
+
+    response = client.post("/api/admin/users/", _create_payload(role="admin"), format="json")
+
+    assert response.status_code == 403
+    assert not User.objects.filter(username="ana.torres@example.com").exists()
+
+
+@pytest.mark.django_db
+def test_create_returns_409_on_duplicate_email():
+    _insert_user("usr_creator_dup", role="admin")
+    _insert_user("usr_existing", username="ana.torres@example.com")
+    client = _admin_client("usr_creator_dup")
+
+    response = client.post("/api/admin/users/", _create_payload(), format="json")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Email already exists"}
 
 
 @pytest.mark.django_db

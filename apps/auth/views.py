@@ -3,14 +3,13 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth.permissions import is_active_admin_user
 from apps.auth.authentication import AdminSessionAuthentication
-from apps.auth.services import (
-    authenticate_admin_user,
-    register_user,
-    serialize_admin_session_user,
+from apps.auth.permissions import is_active_admin_user
+from apps.auth.services import authenticate_admin_user, serialize_admin_session_user
+from apps.auth.utils.throttling import (
+    AdminLoginAccountRateThrottle,
+    AdminLoginRateThrottle,
 )
-from apps.auth.utils.throttling import AdminLoginRateThrottle, RegisterRateThrottle
 
 
 class AdminLoginView(APIView):
@@ -18,7 +17,7 @@ class AdminLoginView(APIView):
 
     authentication_classes = []
     permission_classes = [AllowAny]
-    throttle_classes = [AdminLoginRateThrottle]
+    throttle_classes = [AdminLoginRateThrottle, AdminLoginAccountRateThrottle]
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
@@ -44,21 +43,6 @@ class AdminLoginView(APIView):
                 },
             }
         )
-
-
-class RegisterView(APIView):
-    """`POST /api/register/`."""
-
-    authentication_classes = []
-    permission_classes = [AllowAny]
-    throttle_classes = [RegisterRateThrottle]
-
-    def post(self, request):
-        body = request.data if isinstance(request.data, dict) else {}
-        result = register_user(body)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
 
 
 class AdminLogoutView(APIView):

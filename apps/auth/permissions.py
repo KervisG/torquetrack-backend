@@ -93,14 +93,6 @@ def role_by_slug(slug: str) -> Role | None:
     return Role.objects.filter(slug=slug).first()
 
 
-def default_system_role() -> Role | None:
-    """El rol lo define el sistema, no el formulario de registro."""
-    role = role_by_slug(EMPLOYEE_ROLE_SLUG)
-    if role is not None and not role.full_access:
-        return role
-    return Role.objects.filter(full_access=False).order_by("id").first()
-
-
 def resolve_role_slug(raw: str) -> str:
     key = str(raw).strip().lower()
     return ROLE_SLUG_ALIASES.get(key, key)

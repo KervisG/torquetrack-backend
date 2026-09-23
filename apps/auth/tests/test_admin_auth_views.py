@@ -10,11 +10,15 @@ from django.conf import settings
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
 from django.db import connection
+from django.urls import Resolver404, resolve
 from rest_framework.test import APIClient
 
 from apps.auth.models import User
 from apps.auth.utils.hashers import ScryptLegacyHasher
-from apps.auth.utils.throttling import AdminLoginRateThrottle
+from apps.auth.utils.throttling import (
+    AdminLoginAccountRateThrottle,
+    AdminLoginRateThrottle,
+)
 
 LEGACY_SALT = "0123456789abcdef0123456789abcdef"
 PASSWORD = "diesel-pass-123"
@@ -213,6 +217,93 @@ def test_login_is_rate_limited_by_ip(monkeypatch):
     assert blocked.status_code == 429
 
 
+@pytest.mark.django_db
+def test_login_ip_throttle_ignores_a_rotating_x_forwarded_for(monkeypatch):
+    # Sin proxy de confianza configurado, `X-Forwarded-For` lo escribe el
+    # cliente: rotarlo no puede abrir una cuota nueva.
+    monkeypatch.setattr(AdminLoginRateThrottle, "rate", "3/min", raising=False)
+    monkeypatch.setattr(AdminLoginAccountRateThrottle, "rate", "1000/min", raising=False)
+    _insert_user("usr_login_xff", username="employee")
+    client = APIClient()
+
+    for index in range(3):
+        response = client.post(
+            "/api/admin/login/",
+            {"username": "employee", "password": "wrong"},
+            format="json",
+            HTTP_X_FORWARDED_FOR=f"198.51.100.{index}",
+        )
+        assert response.status_code == 401
+
+    blocked = client.post(
+        "/api/admin/login/",
+        {"username": "employee", "password": PASSWORD},
+        format="json",
+        HTTP_X_FORWARDED_FOR="198.51.100.99",
+    )
+
+    assert blocked.status_code == 429
+
+
+@pytest.mark.django_db
+def test_login_ip_throttle_counts_each_trusted_client_ip_separately(monkeypatch, settings):
+    settings.CLIENT_IP_HEADER = "HTTP_CF_CONNECTING_IP"
+    monkeypatch.setattr(AdminLoginRateThrottle, "rate", "2/min", raising=False)
+    monkeypatch.setattr(AdminLoginAccountRateThrottle, "rate", "1000/min", raising=False)
+    _insert_user("usr_login_cf", username="employee")
+    client = APIClient()
+
+    def attempt(client_ip):
+        return client.post(
+            "/api/admin/login/",
+            {"username": "employee", "password": "wrong"},
+            format="json",
+            HTTP_CF_CONNECTING_IP=client_ip,
+        ).status_code
+
+    assert attempt("203.0.113.1") == 401
+    assert attempt(" 203.0.113.1 ") == 401
+    assert attempt("203.0.113.1") == 429
+    assert attempt("203.0.113.2") == 401
+
+
+@pytest.mark.django_db
+def test_login_account_throttle_blocks_the_same_email_from_different_ips(
+    monkeypatch, settings
+):
+    settings.CLIENT_IP_HEADER = "HTTP_CF_CONNECTING_IP"
+    monkeypatch.setattr(AdminLoginRateThrottle, "rate", "1000/min", raising=False)
+    monkeypatch.setattr(AdminLoginAccountRateThrottle, "rate", "3/min", raising=False)
+    _insert_user("usr_login_acct", username="employee@example.com")
+    _insert_user("usr_login_other", username="other@example.com")
+    client = APIClient()
+
+    def attempt(identifier, client_ip, field="email", password="wrong"):
+        return client.post(
+            "/api/admin/login/",
+            {field: identifier, "password": password},
+            format="json",
+            HTTP_CF_CONNECTING_IP=client_ip,
+        ).status_code
+
+    assert attempt("employee@example.com", "203.0.113.1") == 401
+    assert attempt(" Employee@Example.com ", "203.0.113.2") == 401
+    assert attempt("EMPLOYEE@EXAMPLE.COM", "203.0.113.3", field="username") == 401
+    assert attempt("employee@example.com", "203.0.113.4", password=PASSWORD) == 429
+    assert attempt("other@example.com", "203.0.113.5") == 401
+
+
+@pytest.mark.django_db
+def test_login_account_throttle_skips_requests_without_an_identifier(monkeypatch):
+    monkeypatch.setattr(AdminLoginRateThrottle, "rate", "1000/min", raising=False)
+    monkeypatch.setattr(AdminLoginAccountRateThrottle, "rate", "1/min", raising=False)
+    client = APIClient()
+
+    for _ in range(3):
+        response = client.post("/api/admin/login/", {"password": "wrong"}, format="json")
+        assert response.status_code == 401
+
+
 # --- session ----------------------------------------------------------------
 
 
@@ -335,3 +426,13 @@ def test_deleting_an_employee_revokes_their_live_session():
 
     assert response.status_code == 200
     assert not Session.objects.filter(session_key=deleted_key).exists()
+
+
+
+def test_public_register_endpoint_no_longer_exists():
+    # El alta pública se retiró: las cuentas de staff solo las crea quien
+    # tiene `users.manage` en `POST /api/admin/users/`. Se valida con el
+    # resolver porque la página 404 de Django falla al renderizar en este
+    # entorno (bug de `Context.__copy__` con Python 3.14), igual que en quotes.
+    with pytest.raises(Resolver404):
+        resolve("/api/register/")

@@ -1,22 +1,16 @@
-"""WeasyPrint-based PDF generation for quotes (task 6.2, design decision
-#8), replacing `lib/quote-pdf.ts`'s hand-rolled raw PDF byte writer.
+"""Generación del PDF de cotizaciones con WeasyPrint.
 
-WeasyPrint renders `quotes/quote.html` (the SAME template used for the
-public HTML view and the emailed quote — see `apps/quotes/services.py`)
-as print media, which already hides the `.actions` buttons via the
-`@media print` CSS rule — no separate PDF-only template is needed. Layout
-is allowed to differ from the legacy generator (spec: "Quote PDF Visual
-Equivalence"); line items, totals, and customer/vehicle data must match,
-which is guaranteed here because both renders share one `serialize_quote`
-data source and one template.
+WeasyPrint renderiza `quotes/quote.html` (la MISMA plantilla de la vista
+HTML pública y del email de la cotización, ver `apps/quotes/services.py`)
+como medio de impresión; la regla CSS `@media print` ya oculta los botones
+`.actions`, así que no hace falta una plantilla aparte para el PDF. Las
+líneas, los totales y los datos de cliente y vehículo coinciden con la vista
+HTML porque ambos renders comparten `serialize_quote` y la misma plantilla.
 
-WeasyPrint needs native Pango/Cairo/GDK-Pixbuf libraries that are not
-available on a bare Windows dev machine without an admin-level GTK3
-runtime install; this project's `backend/Dockerfile` (Debian slim,
-already the deployment target) installs them, so the Linux container is
-both the correct production shape AND the environment PDF generation was
-verified against in this phase — see apply-progress for the exact
-commands.
+WeasyPrint necesita las librerías nativas Pango/Cairo/GDK-Pixbuf, que no
+existen en una máquina Windows sin instalar un runtime GTK3 con permisos de
+administrador. `backend/Dockerfile` (Debian slim) las instala, así que el
+contenedor Linux es el entorno donde se genera y se verifica el PDF.
 """
 from __future__ import annotations
 

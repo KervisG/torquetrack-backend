@@ -1,11 +1,9 @@
-"""Public (storefront) serializers for the catalog app.
+"""Serializers públicos (tienda) del catálogo.
 
-Whitelist-by-subtraction, matching `app/api/products/route.ts`'s `clean()`:
-strip only the known internal/supplier fields, keep everything else in the
-`data` jsonb blob as-is. Design decision (DRF Conventions) requires
-whitelisting, not `exclude`, so any NEW internal field added to `data` in
-the future is NOT silently exposed here without an explicit change to this
-list.
+Filtrado por resta: se quitan solo los campos internos y de proveedor
+conocidos y el resto del jsonb `data` se devuelve tal cual. Cualquier campo
+interno NUEVO que se agregue a `data` debe sumarse explícitamente a
+`RESTRICTED_PRODUCT_FIELDS` para no quedar expuesto.
 """
 from rest_framework import serializers
 
@@ -22,8 +20,7 @@ RESTRICTED_PRODUCT_FIELDS = (
 class ProductPublicSerializer(serializers.Serializer):
     """Returns `instance.data` (the product jsonb) minus internal fields.
 
-    Mirrors `app/api/products/route.ts`'s bare-object shape exactly — no
-    envelope, no wrapping of `id`/`active` around it.
+    Devuelve el objeto plano, sin envoltorio ni `id`/`active` alrededor.
     """
 
     def to_representation(self, instance):
@@ -36,7 +33,7 @@ class ProductPublicSerializer(serializers.Serializer):
 class ApplicationPublicSerializer(serializers.Serializer):
     """Returns `instance.data` (the application jsonb) unfiltered.
 
-    Mirrors `app/api/applications/route.ts`, which never strips any field.
+    No se quita ningún campo.
     """
 
     def to_representation(self, instance):

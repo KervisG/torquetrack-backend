@@ -1,19 +1,17 @@
-"""`GET /api/quote/public/<token>/pdf` (task 6.2), pinned against
-`app/api/quote/public/[token]/pdf/route.ts` and `lib/quote-pdf.ts`.
+"""Tests de `GET /api/quote/public/<token>/pdf`.
 
-Design decision #8: WeasyPrint over the existing `quotes/quote.html`
-template (visually equivalent, not pixel-identical, to the legacy raw PDF
-byte writer). This test asserts the generated file is a well-formed,
-non-empty PDF and that the source data (line items/totals/customer/
-vehicle) round-trips through `render_quote_html`/`serialize_quote` — the
-same functions the interactive public HTML view uses — rather than
-attempting a pixel/layout comparison (none is required by the spec).
+El PDF se genera con WeasyPrint sobre la plantilla `quotes/quote.html`.
+Estos tests verifican que el archivo generado sea un PDF bien formado y no
+vacío, y que los datos de origen (líneas, totales, cliente y vehículo) pasen
+por `render_quote_html`/`serialize_quote`, las mismas funciones de la vista
+HTML pública. No se compara píxel a píxel ni el layout.
 """
 
 import pytest
 from django.utils import timezone
 
 from apps.quotes.models import Quote
+from apps.quotes.tests.pdf_support import requires_weasyprint
 
 TOKEN = "tok_pdf_" + "f" * 40
 
@@ -47,6 +45,7 @@ def _make_quote(status="ACTIVE", expires_at=None):
 
 
 @pytest.mark.django_db
+@requires_weasyprint
 def test_pdf_endpoint_returns_well_formed_pdf_for_valid_token(client):
     _make_quote()
 
@@ -81,12 +80,12 @@ def test_pdf_endpoint_denies_expired_token(client):
 
 
 @pytest.mark.django_db
+@requires_weasyprint
 def test_pdf_source_data_matches_quote_line_items_and_totals():
-    """Proves the PDF and the public HTML view share one data source
-    (`serialize_quote`) — not a pixel comparison, but a genuine assertion
-    that line items/totals/customer/vehicle data is the same input either
-    renderer would receive (spec: "Regenerated PDF contains same line
-    items and totals")."""
+    """Demuestra que el PDF y la vista HTML pública comparten la misma fuente
+    de datos (`serialize_quote`): no compara píxeles, sino que las líneas,
+    los totales y los datos de cliente y vehículo son la misma entrada para
+    ambos renders."""
     from apps.quotes.pdf import render_quote_pdf_bytes
     from apps.quotes.services import serialize_quote
 

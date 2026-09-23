@@ -1,24 +1,26 @@
-"""`admin/customers`, `admin/customers/[id]`,
-`admin/customers/[id]/tax-exemption`, `admin/customers/[id]/tax-status`,
-`admin/customers/portal-invite` (task 7.2), pinned against
-`app/api/admin/customers/route.ts`, `app/api/admin/customers/[id]/route.ts`,
-`app/api/admin/customers/[id]/tax-exemption/route.ts`,
-`app/api/admin/customers/[id]/tax-status/route.ts`, and
-`app/api/admin/customers/portal-invite/route.ts`.
+"""Tests de `admin/customers`, `admin/customers/[id]`,
+`admin/customers/[id]/tax-exemption`, `admin/customers/[id]/tax-status` y
+`admin/customers/portal-invite`.
 
-`tax-exemption` (GET) and `tax-status` (POST) use ONLY `requireAdmin()` in
-the legacy code (any active admin-role-or-employee session, 401 only) —
-NOT `requirePermission("customers.view")` as the spec's paraphrase might
-suggest. Verified directly against `lib/auth.ts` and both route files;
-preserved verbatim rather than "corrected" to match the spec prose.
+`tax-exemption` (GET) devuelve el tax ID completo y el certificado, así que
+exige lo mismo que `tax-status` (POST): `tax_exemptions.review`. Los dos
+responden 401 sin sesión de staff (incluida la sesión de un cliente) y 403
+sin el permiso.
 """
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.backoffice.models import ActivityLog
 from apps.customers.models import Customer
-from tests.factories import create_customer, create_staff_user, create_user, session_client
+from tests.factories import (
+    activity_count,
+    create_customer,
+    create_staff_user,
+    create_user,
+    session_client,
+)
+
+TAX_REVIEW = "tax_exemptions.review"
 
 
 def _insert_user(user_id, permissions=None, active=True):
@@ -104,9 +106,9 @@ def test_create_new_customer_without_id():
 
     assert response.status_code == 200
     body = response.json()
-    # Legacy `reusedExistingCustomer` reflects only "no id was submitted
-    # AND an email was present" — true here even though no existing row
-    # actually matched (see `upsert_admin_customer`'s docstring).
+    # `reusedExistingCustomer` solo refleja "no se envió id Y había email":
+    # es verdadero aquí aunque ninguna fila existente coincidió (ver el
+    # docstring de `upsert_admin_customer`).
     assert body["reusedExistingCustomer"] is True
     customer = Customer.objects.get(pk=body["customer"]["id"])
     assert customer.email == "brand-new@example.com"
@@ -212,10 +214,31 @@ def test_tax_exemption_returns_401_without_session():
 
 
 @pytest.mark.django_db
-def test_tax_exemption_returns_unmasked_tax_id_for_any_active_admin_session():
-    # No specific permission required beyond an active session — verified
-    # directly against `requireAdmin()` in the legacy route.
-    _insert_user("usr_tax_view", permissions=[])
+def test_tax_exemption_returns_401_for_a_customer_session():
+    create_user("usr_tax_customer")
+    _make_customer()
+    client = _admin_client("usr_tax_customer")
+
+    response = client.get("/api/admin/customers/cus_1/tax-exemption/")
+
+    assert response.status_code == 401
+
+
+@pytest.mark.django_db
+def test_tax_exemption_returns_403_without_tax_exemptions_review_permission():
+    _insert_user("usr_tax_view_no_perm", permissions=["customers.view", "customers.edit"])
+    _make_customer(data={"taxId": "12-3456789", "certificateData": "b64"})
+    client = _admin_client("usr_tax_view_no_perm")
+
+    response = client.get("/api/admin/customers/cus_1/tax-exemption/")
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden"}
+
+
+@pytest.mark.django_db
+def test_tax_exemption_returns_unmasked_tax_id_with_tax_exemptions_review():
+    _insert_user("usr_tax_view", permissions=[TAX_REVIEW])
     _make_customer(
         data={"taxId": "12-3456789", "taxCompany": "Diesel Co", "certificateData": "b64"}
     )
@@ -232,7 +255,7 @@ def test_tax_exemption_returns_unmasked_tax_id_for_any_active_admin_session():
 
 @pytest.mark.django_db
 def test_tax_exemption_returns_404_for_unknown_customer():
-    _insert_user("usr_tax_view2", permissions=[])
+    _insert_user("usr_tax_view2", permissions=[TAX_REVIEW])
     client = _admin_client("usr_tax_view2")
 
     response = client.get("/api/admin/customers/does-not-exist/tax-exemption/")
@@ -255,8 +278,39 @@ def test_tax_status_returns_401_without_session():
 
 
 @pytest.mark.django_db
+def test_tax_status_returns_403_without_tax_exemptions_review_permission():
+    _insert_user("usr_tax_status_no_perm", permissions=["customers.view", "customers.edit"])
+    _make_customer()
+    client = _admin_client("usr_tax_status_no_perm")
+
+    response = client.post(
+        "/api/admin/customers/cus_1/tax-status/", {"status": "VERIFIED"}, format="json"
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden"}
+    customer = Customer.objects.get(pk="cus_1")
+    assert customer.tax_status != "VERIFIED"
+    assert activity_count(action="TAX_EXEMPTION_STATUS_CHANGED") == 0
+
+
+@pytest.mark.django_db
+def test_tax_status_is_allowed_for_a_full_access_role():
+    create_staff_user("usr_tax_status_owner", full_access=True)
+    _make_customer()
+    client = _admin_client("usr_tax_status_owner")
+
+    response = client.post(
+        "/api/admin/customers/cus_1/tax-status/", {"status": "VERIFIED"}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "VERIFIED"
+
+
+@pytest.mark.django_db
 def test_tax_status_rejects_invalid_status():
-    _insert_user("usr_tax_status", permissions=[])
+    _insert_user("usr_tax_status", permissions=[TAX_REVIEW])
     _make_customer()
     client = _admin_client("usr_tax_status")
 
@@ -269,7 +323,7 @@ def test_tax_status_rejects_invalid_status():
 
 @pytest.mark.django_db
 def test_tax_status_verified_sets_reviewed_metadata_and_logs_activity():
-    _insert_user("usr_tax_status2", permissions=[])
+    _insert_user("usr_tax_status2", permissions=[TAX_REVIEW])
     _make_customer()
     client = _admin_client("usr_tax_status2")
 
@@ -285,14 +339,14 @@ def test_tax_status_verified_sets_reviewed_metadata_and_logs_activity():
     customer = Customer.objects.get(pk="cus_1")
     assert customer.tax_status == "VERIFIED"
     assert customer.data["taxReviewedBy"] == "usr_tax_status2@example.com"
-    assert ActivityLog.objects.filter(
+    assert activity_count(
         action="TAX_EXEMPTION_STATUS_CHANGED", entity_id="cus_1"
-    ).exists()
+    ) >= 1
 
 
 @pytest.mark.django_db
 def test_tax_status_pending_verification_does_not_set_reviewed_metadata():
-    _insert_user("usr_tax_status3", permissions=[])
+    _insert_user("usr_tax_status3", permissions=[TAX_REVIEW])
     _make_customer()
     client = _admin_client("usr_tax_status3")
 

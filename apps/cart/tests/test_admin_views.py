@@ -1,6 +1,4 @@
-"""`GET /api/admin/carts` (task 7.3), pinned against
-`app/api/admin/carts/route.ts`.
-"""
+"""Tests de `GET /api/admin/carts`."""
 
 import pytest
 from django.utils import timezone

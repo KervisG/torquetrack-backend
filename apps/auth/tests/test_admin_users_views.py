@@ -13,9 +13,9 @@ from django.contrib.sessions.models import Session
 from rest_framework.test import APIClient
 
 from apps.auth.models import Role, User
-from apps.backoffice.models import ActivityLog
 from apps.customers.models import Customer
 from tests.factories import (
+    activity_count,
     create_customer,
     create_role,
     create_staff_user,
@@ -139,9 +139,9 @@ def test_create_stores_user_with_explicit_role():
     assert user.last_name == "Torres"
     assert user.role.slug == "employee"
     assert check_password("s3cret-pass", user.password_hash)
-    assert ActivityLog.objects.filter(
+    assert activity_count(
         action="USER_CREATED", entity_id=user.pk, actor_id="U_CREATOR@example.com".lower()
-    ).exists()
+    ) >= 1
 
 
 @pytest.mark.django_db
@@ -410,7 +410,7 @@ def test_delete_removes_the_user_revokes_sessions_and_keeps_the_customer():
     assert not User.objects.filter(pk="U_TO_DELETE").exists()
     assert not Session.objects.filter(session_key=target_key).exists()
     assert Customer.objects.get(pk="C_KEEP").user is None
-    assert ActivityLog.objects.filter(action="USER_DELETED", entity_id="U_TO_DELETE").exists()
+    assert activity_count(action="USER_DELETED", entity_id="U_TO_DELETE") >= 1
 
 
 @pytest.mark.django_db

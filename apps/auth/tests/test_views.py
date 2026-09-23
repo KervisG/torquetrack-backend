@@ -32,9 +32,10 @@ STRONG_PASSWORD = "Diesel-Torque-2026!"
 
 
 @pytest.fixture(autouse=True)
-def _clear_throttle_history():
-    """`SimpleRateThrottle` guarda los intentos en el cache compartido del
-    proceso, así que sin esto un test filtra su cuota al siguiente."""
+def _clear_throttle_history(db):
+    """`SimpleRateThrottle` guarda los intentos en el cache compartido
+    (`DatabaseCache`, tabla `django_cache`), así que sin esto un test filtra
+    su cuota al siguiente. Pide `db` porque el cache es una tabla."""
     cache.clear()
     yield
     cache.clear()
@@ -244,6 +245,7 @@ def test_login_accepts_a_customer_and_sets_the_session_cookie():
             "isStaff": False,
             "role": None,
             "permissions": [],
+            "emailVerified": False,
         },
     }
     cookie = response.cookies[settings.SESSION_COOKIE_NAME]
@@ -526,7 +528,7 @@ def test_register_returns_a_csrf_token_that_authorizes_the_next_mutation():
     "path", ["/api/admin/login/", "/api/admin/logout/", "/api/admin/session/"]
 )
 def test_admin_specific_auth_routes_no_longer_exist(path):
-    # Se valida con el resolver porque la página 404 de Django falla al
-    # renderizar en este entorno (bug de `Context.__copy__` con Python 3.14).
+    # Se valida con el resolver: la prueba es sobre el enrutado, no sobre la
+    # página 404 que renderiza Django.
     with pytest.raises(Resolver404):
         resolve(path)

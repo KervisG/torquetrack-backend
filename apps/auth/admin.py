@@ -2,7 +2,7 @@
 
 Los Roles se crean aquí con nombre, slug y el selector de permisos (no se
 escriben strings tipo `dashboard.view`, se elige
-`Activity log — Can view dashboard`). En `User` solo se asigna el Role y
+`user — Can view dashboard`). En `User` solo se asigna el Role y
 se activa o desactiva la cuenta: el alta es por `/api/register/` o
 `POST /api/admin/users/`, y las contraseñas nunca se tocan desde aquí.
 """

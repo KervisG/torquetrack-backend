@@ -11,6 +11,7 @@ from django.db import IntegrityError, transaction
 from django.db.models import Case, IntegerField, When
 from django.utils import timezone
 
+from apps.audit.services import record_activity
 from apps.auth.models import Role, User
 from apps.auth.permissions import (
     is_full_access,
@@ -20,12 +21,12 @@ from apps.auth.permissions import (
 from apps.auth.services import (
     compose_display_name,
     create_account,
+    invalidate_password_reset_tokens,
     parse_email,
     password_error,
     serialize_role,
 )
 from apps.auth.sessions import revoke_user_sessions
-from apps.backoffice.models import ActivityLog
 
 _MISSING = object()
 
@@ -80,13 +81,12 @@ def _parse_role(payload: dict):
 
 
 def _log(actor: User, action: str, user_id: str, data: dict) -> None:
-    ActivityLog.objects.create(
-        actor_id=actor.email,
+    record_activity(
+        actor=actor.email,
         action=action,
         entity_type="USER",
         entity_id=user_id,
         data=data,
-        created_at=timezone.now(),
     )
 
 
@@ -253,6 +253,8 @@ def update_admin_user(user_id: str, payload: dict, actor: User) -> dict:
     deactivated = was_active and not target.active
     if deactivated or role_changed or password:
         revoke_user_sessions(target.pk)
+    if password:
+        invalidate_password_reset_tokens(target.pk)
 
     _log(
         actor,
@@ -285,3 +287,67 @@ def delete_admin_user(user_id: str, actor: User) -> dict:
     target.delete()
     _log(actor, "USER_DELETED", user_id, {"email": email})
     return {"ok": True}
+
+
+# --- arranque del primer admin (`manage.py create_admin`) ---------------------
+
+ADMIN_ROLE_SLUG = "admin"
+
+
+def bootstrap_admin(email, password: str | None) -> tuple[dict, int]:
+    """Crea o asciende a `email` al Role `admin` (acceso total), activo y con
+    el email verificado. Devuelve `({"user", "action"}, status)` o
+    `({"error"}, status)`.
+
+    Es la puerta de entrada cuando todavía no hay nadie con `users.manage`,
+    así que no pide actor ni registra actividad. Es idempotente: sin
+    `password` no toca la contraseña de una cuenta existente. Todo cambio de
+    Role, de contraseña o una reactivación cierra las sesiones abiertas.
+    """
+    normalized = parse_email(email)
+    if normalized is None:
+        return {"error": "A valid email is required"}, 400
+
+    role, _ = Role.objects.get_or_create(
+        slug=ADMIN_ROLE_SLUG, defaults={"name": "Admin", "full_access": True}
+    )
+    if not role.full_access:
+        # No se corrige en silencio: alguien le quitó el acceso total a
+        # propósito o por error, y eso se decide en `/admin/`.
+        return {"error": "The admin role does not have full access; fix it in /admin/"}, 409
+
+    now = timezone.now()
+    with transaction.atomic():
+        user = User.objects.select_for_update().filter(email=normalized).first()
+        if user is None:
+            if not password:
+                return {"error": "A password is required to create the admin"}, 400
+            result = create_account(
+                email=normalized, password=password, first_name="", last_name="", role=role
+            )
+            if "error" in result:
+                return {"error": result["error"]}, result["status"]
+            user = result["user"]
+            user.email_verified_at = now
+            user.save(update_fields=["email_verified_at"])
+            return {"user": user, "action": "created"}, 201
+
+        password_changed = password is not None
+        if password_changed:
+            error = password_error(password, user)
+            if error is not None:
+                return {"error": error}, 400
+            user.password_hash = make_password(password)
+        role_changed = user.role_id != role.pk
+        reactivated = not user.active
+        user.role = role
+        user.active = True
+        user.email_verified_at = user.email_verified_at or now
+        user.save(update_fields=["password_hash", "role", "active", "email_verified_at"])
+        if password_changed:
+            invalidate_password_reset_tokens(user.pk)
+
+    if password_changed or role_changed or reactivated:
+        revoke_user_sessions(user.pk)
+    action = "promoted" if role_changed else "updated"
+    return {"user": user, "action": action}, 200

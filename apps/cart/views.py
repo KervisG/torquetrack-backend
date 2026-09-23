@@ -1,6 +1,4 @@
-"""`POST /api/cart/sync` and `GET /api/admin/carts`, matching
-`app/api/cart/sync/route.ts` and `app/api/admin/carts/route.ts`.
-"""
+"""Vistas de `POST /api/cart/sync` y `GET /api/admin/carts`."""
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView

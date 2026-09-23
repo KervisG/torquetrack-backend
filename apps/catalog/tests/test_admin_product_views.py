@@ -1,10 +1,7 @@
-"""`PUT/DELETE /api/admin/products/[id]` (task 7.3), pinned against
-`app/api/admin/products/[id]/route.ts`.
+"""Tests de `PUT/DELETE /api/admin/products/[id]`.
 
-Task 7.3 literally names only `admin/products/[id]`, not the collection
-`admin/products` (GET/POST) — see the apply-progress note flagging that
-collection route as a new scope gap, same precedent as Phase 6's task 7.6
-flag for admin quotes list/create.
+La colección `admin/products` (GET/POST) no está implementada y no se cubre
+aquí.
 """
 
 import pytest

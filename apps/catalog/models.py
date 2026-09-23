@@ -1,8 +1,8 @@
 """Modelos de catálogo: `products` y `applications`.
 
-`Product.data` guarda la ficha completa del producto tal como la escribía el
-Next.js; el índice GIN (`idx_products_data`) acelera las búsquedas por
-contención sobre ese JSON.
+`Product.data` guarda la ficha completa del producto como JSON; el índice
+GIN (`idx_products_data`) acelera las búsquedas por contención sobre ese
+JSON.
 """
 from django.contrib.postgres.indexes import GinIndex
 from django.db import models

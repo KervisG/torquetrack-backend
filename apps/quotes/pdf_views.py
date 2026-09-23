@@ -1,7 +1,5 @@
-"""`GET /api/quote/public/<token>/pdf` (task 6.2), matching
-`app/api/quote/public/[token]/pdf/route.ts`. Separate module from
-`views.py` for clean commit splitting (same precedent as Phase 5's
-`webhook_views.py`).
+"""Vista de `GET /api/quote/public/<token>/pdf`, separada de `views.py`
+para aislar la dependencia de WeasyPrint.
 """
 from django.http import HttpResponse
 from rest_framework.permissions import AllowAny
@@ -21,7 +19,7 @@ class PublicQuotePdfView(APIView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
         if is_expired(quote):
-            # Same deliberate spec-driven deviation as PublicQuoteView.
+            # Misma regla que PublicQuoteView: un token vencido se rechaza.
             return Response({"error": "This quote has expired"}, status=410)
 
         pdf_bytes = render_quote_pdf_bytes(serialize_quote(quote))

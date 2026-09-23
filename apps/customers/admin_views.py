@@ -1,16 +1,19 @@
-"""`admin/customers` views (task 7.2), matching the route files documented
-in `apps/customers/services.py`.
+"""Vistas de `admin/customers`.
 
-`tax-exemption` (GET) and `tax-status` (POST) intentionally do NOT use
-`HasTorqueTrackPermission` — the legacy routes gate on `requireAdmin()`
-alone (any active admin-role-or-employee session, 401-only), not a
-specific permission string. See the test module's docstring.
+`tax-exemption` (GET) devuelve el tax ID completo y el certificado, y
+`tax-status` (POST) deja al cliente comprar sin impuestos: los dos exigen
+`tax_exemptions.review`. Separan el 401 (sin sesión de staff) del 403 (sin
+permiso) para no cambiar lo que ya recibe el panel.
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth.authentication import SessionUserAuthentication
-from apps.auth.permissions import HasTorqueTrackPermission, is_staff_user
+from apps.auth.permissions import (
+    HasTorqueTrackPermission,
+    has_torquetrack_permission,
+    is_staff_user,
+)
 from apps.customers.services import (
     create_portal_invite,
     delete_admin_customer,
@@ -55,9 +58,13 @@ class AdminCustomerDeleteView(APIView):
 class AdminCustomerTaxExemptionView(APIView):
     authentication_classes = [SessionUserAuthentication]
 
+    required_permission = "tax_exemptions.review"
+
     def get(self, request, customer_id):
         if not is_staff_user(request.user):
             return Response({"error": "Unauthorized"}, status=401)
+        if not has_torquetrack_permission(request.user, self.required_permission):
+            return Response({"error": "Forbidden"}, status=403)
 
         result = get_customer_tax_exemption(customer_id)
         if "error" in result:
@@ -68,9 +75,13 @@ class AdminCustomerTaxExemptionView(APIView):
 class AdminCustomerTaxStatusView(APIView):
     authentication_classes = [SessionUserAuthentication]
 
+    required_permission = "tax_exemptions.review"
+
     def post(self, request, customer_id):
         if not is_staff_user(request.user):
             return Response({"error": "Unauthorized"}, status=401)
+        if not has_torquetrack_permission(request.user, self.required_permission):
+            return Response({"error": "Forbidden"}, status=403)
 
         body = request.data if isinstance(request.data, dict) else {}
         result = update_customer_tax_status(customer_id, body, request.user.email)

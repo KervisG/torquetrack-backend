@@ -1,41 +1,44 @@
-"""`POST shipping/rates` business rules (task 7.5), near-verbatim port of
-`app/api/shipping/rates/route.ts`.
+"""Reglas de negocio de `POST shipping/rates` (tarifas de EasyPost).
 
-Reuses `apps.checkout.services.js_number_or` instead of duplicating the same
-"mirror JS `Number(raw || fallback)`" helper a third time (same precedent as
-`apps.quotes.admin_services` reusing `apps.checkout.services.next_order_number`).
+La llamada HTTP vive en el adaptador `apps.integrations.shipping.easypost`.
+Aquí quedan las reglas de la tienda: derivar el paquete del producto,
+convertir libras a onzas, el origen del envío y elegir las tres opciones que
+ve el cliente (ground, 2 días y overnight).
+
+Reutiliza `apps.checkout.services.js_number_or` para la conversión numérica
+con valor por defecto, en lugar de duplicar ese helper.
 """
 from __future__ import annotations
 
-import base64
-
-import requests
 from django.conf import settings
 
 from apps.catalog.models import Product
 from apps.checkout.services import js_number_or
+from apps.integrations.exceptions import ProviderError
+from apps.integrations.shipping import easypost
 
 
 def _norm_rate(rate: dict | None) -> dict | None:
     if not rate:
         return None
     return {
-        "id": rate.get("id"),
-        "carrier": rate.get("carrier"),
-        "service": rate.get("service"),
-        "rate": float(rate.get("rate") or 0),
-        "deliveryDays": rate.get("delivery_days"),
-        "guaranteed": bool(rate.get("delivery_date_guaranteed")),
+        "id": rate["id"],
+        "carrier": rate["carrier"],
+        "service": rate["service"],
+        "rate": rate["rate"],
+        "deliveryDays": rate["delivery_days"],
+        "guaranteed": rate["guaranteed"],
     }
 
 
 def get_shipping_rates(payload: dict) -> tuple[dict, int]:
-    api_key = settings.EASYPOST_API_KEY
-    if not api_key:
+    if not easypost.is_configured():
         return (
             {
                 "configured": False,
-                "message": "EasyPost is not configured. Add EASYPOST_API_KEY to .env.local.",
+                "message": (
+                    "EasyPost is not configured. Add EASYPOST_API_KEY to the server environment."
+                ),
             },
             200,
         )
@@ -54,36 +57,23 @@ def get_shipping_rates(payload: dict) -> tuple[dict, int]:
     if not parcel:
         return {"error": "Parcel information required"}, 400
 
-    # Verbatim legacy behavior (route.ts): a weight under 50 is assumed to be
-    # pounds and is converted to ounces. This applies even to a
-    # product-derived parcel already expressed in ounces above — not fixed
-    # here, since Phase 7 preserves existing request/response contracts
-    # rather than correcting a pre-existing legacy quirk.
+    # Comportamiento intencional del contrato: un peso menor a 50 se asume en
+    # libras y se convierte a onzas. Esto aplica incluso al paquete derivado
+    # del producto, que arriba ya se expresó en onzas; el contrato de
+    # request/response se mantiene tal cual y los tests lo fijan.
     if js_number_or(parcel.get("weight")) < 50:
         parcel = {**parcel, "weight": js_number_or(parcel.get("weight")) * 16}
 
-    ship_from_zip = settings.SHIP_FROM_ZIP or "34241"
-    request_payload = {
-        "shipment": {
-            "to_address": payload.get("to"),
-            "from_address": {"zip": ship_from_zip, "country": "US"},
-            "parcel": parcel,
-        }
-    }
+    try:
+        shipment = easypost.get_rates(
+            to_address=payload.get("to"),
+            from_address={"zip": settings.SHIP_FROM_ZIP or "34241", "country": "US"},
+            parcel=parcel,
+        )
+    except ProviderError as exc:
+        return {"error": str(exc)}, 502
 
-    auth = base64.b64encode(f"{api_key}:".encode()).decode()
-    response = requests.post(
-        "https://api.easypost.com/v2/shipments",
-        headers={"Authorization": f"Basic {auth}", "Content-Type": "application/json"},
-        json=request_payload,
-        timeout=15,
-    )
-    body = response.json()
-    if not response.ok:
-        message = ((body or {}).get("error") or {}).get("message") or "EasyPost rate request failed"
-        return {"error": message}, 502
-
-    rates = sorted(body.get("rates") or [], key=lambda rate: float(rate.get("rate") or 0))
+    rates = sorted(shipment["rates"], key=lambda rate: rate["rate"])
 
     def pick(test):
         return _norm_rate(
@@ -93,7 +83,7 @@ def get_shipping_rates(payload: dict) -> tuple[dict, int]:
     return (
         {
             "configured": True,
-            "shipmentId": body.get("id"),
+            "shipmentId": shipment["shipment_id"],
             "ground": pick(lambda service: "ground" in service),
             "secondDay": pick(
                 lambda service: "2day" in service or "2nd" in service or "second" in service

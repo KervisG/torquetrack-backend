@@ -1,28 +1,26 @@
-"""`admin/orders`, `admin/orders/[id]`, `admin/orders/[id]/payment-link`,
-`admin/orders/[id]/take-payment` (task 7.4), pinned against
-`app/api/admin/orders/route.ts`, `app/api/admin/orders/[id]/route.ts`,
-`app/api/admin/orders/[id]/payment-link/route.ts`, and
-`app/api/admin/orders/[id]/take-payment/route.ts`.
+"""Tests de `admin/orders`, `admin/orders/[id]`,
+`admin/orders/[id]/payment-link` y `admin/orders/[id]/take-payment`.
 
-`PATCH`/`DELETE admin/orders/[id]` use `requireAdmin()`+`hasPermission()`
-as SEPARATE checks (401 no-session vs 403 no-permission, with the
-required permission string depending on the requested change), matching
-`admin/users`' precedent — NOT the single-403 `requirePermission()`
-pattern used by list/payment-link/take-payment.
+`PATCH`/`DELETE admin/orders/[id]` hacen dos chequeos SEPARADOS: sesión de
+staff (401 sin sesión) y permiso (403 sin permiso), donde el permiso exigido
+depende del cambio pedido. El listado, payment-link y take-payment usan en
+cambio `HasTorqueTrackPermission` con un único `required_permission`.
 
-The real Stripe Checkout Session API and Resend email API are never
-called: `stripe.checkout.Session.create` and `apps.quotes.services.
-requests.post` (the shared `send_email` this module reuses) are
-monkeypatched at the SDK/HTTP boundary.
+Las APIs reales de Stripe y de Resend nunca se llaman: se parchean sus
+adaptadores, `apps.integrations.payments.stripe.create_checkout_session` y
+`apps.integrations.email.resend.send_email` (`tests/fakes.py`).
 """
 
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.backoffice.models import ActivityLog
 from apps.checkout.models import Order, Payment
-from tests.factories import create_staff_user, session_client
+from apps.integrations.exceptions import ProviderError
+from tests.factories import activity_count, create_staff_user, session_client
+from tests.fakes import install_resend
+
+CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
 
 def _insert_user(user_id, permissions=None, active=True, full_access=False):
@@ -81,6 +79,39 @@ def test_list_returns_orders_with_expected_shape():
     assert body[0]["number"] == "O20001"
     assert body[0]["paymentStatus"] == "UNPAID"
     assert body[0]["customer"]["email"] == "no-fk@example.com"
+
+
+@pytest.mark.django_db
+def test_list_includes_payments_without_the_provider_transaction_id():
+    """El detalle del pedido en el panel muestra sus pagos. El id de Stripe
+    queda fuera: verlo es `payments.transaction_id`, no `orders.view`."""
+    _insert_user("usr_list_payments", permissions=["orders.view"])
+    order = _make_order()
+    Payment.objects.create(
+        id="PAY_1",
+        order=order,
+        provider="stripe",
+        provider_id="cs_secret_session",
+        status="PENDING",
+        amount=125.5,
+        data={"source": "EMPLOYEE_TAKE_PAYMENT"},
+        created_at=timezone.now(),
+        updated_at=timezone.now(),
+    )
+    client = _admin_client("usr_list_payments")
+
+    response = client.get("/api/admin/orders/")
+
+    assert response.status_code == 200
+    payments = response.json()[0]["payments"]
+    assert len(payments) == 1
+    assert payments[0]["id"] == "PAY_1"
+    assert payments[0]["provider"] == "stripe"
+    assert payments[0]["status"] == "PENDING"
+    assert payments[0]["amount"] == 125.5
+    assert payments[0]["source"] == "EMPLOYEE_TAKE_PAYMENT"
+    assert payments[0]["createdAt"]
+    assert "cs_secret_session" not in response.content.decode()
 
 
 # --- PATCH status -----------------------------------------------------
@@ -150,7 +181,7 @@ def test_patch_status_updates_and_logs_activity():
     assert response.json() == {"ok": True, "status": "PROCESSING"}
     order = Order.objects.get(pk="ord_1")
     assert order.status == "PROCESSING"
-    assert ActivityLog.objects.filter(action="ORDER_STATUS_CHANGED", entity_id="ord_1").exists()
+    assert activity_count(action="ORDER_STATUS_CHANGED", entity_id="ord_1") >= 1
 
 
 @pytest.mark.django_db
@@ -214,7 +245,7 @@ def test_patch_workflow_merges_core_case_into_data():
     order = Order.objects.get(pk="ord_1")
     assert order.data["coreCase"]["status"] == "RECEIVED"
     assert order.data["coreCase"]["updatedBy"] == "usr_workflow3@example.com"
-    assert ActivityLog.objects.filter(action="ORDER_WORKFLOW_UPDATED", entity_id="ord_1").exists()
+    assert activity_count(action="ORDER_WORKFLOW_UPDATED", entity_id="ord_1") >= 1
 
 
 @pytest.mark.django_db
@@ -285,7 +316,7 @@ def test_delete_removes_unpaid_order_and_its_payments():
     assert response.status_code == 200
     assert not Order.objects.filter(pk="ord_1").exists()
     assert not Payment.objects.filter(id="pay_1").exists()
-    assert ActivityLog.objects.filter(action="UNPAID_ORDER_DELETED", entity_id="ord_1").exists()
+    assert activity_count(action="UNPAID_ORDER_DELETED", entity_id="ord_1") >= 1
 
 
 # --- payment-link (POST) --------------------------------------------------
@@ -321,21 +352,9 @@ def test_payment_link_creates_payment_updates_status_and_emails_customer(monkeyp
     _make_order(data={"customer": {"email": "buyer@example.com"}, "totals": {"total": 150.5}})
     client = _admin_client("usr_link3")
 
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    captured = {}
-
-    class _FakeResponse:
-        ok = True
-
-        def json(self):
-            return {"id": "email_admin_1"}
-
-    def _fake_post(url, headers=None, json=None, timeout=None):
-        captured["payload"] = json
-        return _FakeResponse()
-
-    monkeypatch.setattr("apps.quotes.services.requests.post", _fake_post)
+    resend = install_resend(monkeypatch)
 
     response = client.post("/api/admin/orders/ord_1/payment-link/")
 
@@ -343,7 +362,7 @@ def test_payment_link_creates_payment_updates_status_and_emails_customer(monkeyp
     body = response.json()
     assert body["ok"] is True
     assert body["emailed"] is True
-    assert captured["payload"]["to"] == ["buyer@example.com"]
+    assert resend.sent[0]["to"] == ["buyer@example.com"]
 
     order = Order.objects.get(pk="ord_1")
     assert order.status == "PENDING_PAYMENT"
@@ -357,7 +376,7 @@ def test_payment_link_without_customer_email_is_not_emailed(monkeypatch):
     _make_order(data={"totals": {"total": 50.0}})
     client = _admin_client("usr_link4")
 
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = client.post("/api/admin/orders/ord_1/payment-link/")
 
@@ -372,9 +391,9 @@ def test_payment_link_returns_502_on_stripe_failure(monkeypatch):
     client = _admin_client("usr_link5")
 
     def _boom(**kwargs):
-        raise RuntimeError("Could not create payment link")
+        raise ProviderError("Could not create payment link")
 
-    monkeypatch.setattr("stripe.checkout.Session.create", _boom)
+    monkeypatch.setattr(CREATE_SESSION, _boom)
 
     response = client.post("/api/admin/orders/ord_1/payment-link/")
 
@@ -412,7 +431,7 @@ def test_take_payment_creates_payment_and_logs_activity_without_status_change(mo
     _make_order(data={"totals": {"total": 75.25}})
     client = _admin_client("usr_take3")
 
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = client.post("/api/admin/orders/ord_1/take-payment/")
 
@@ -422,7 +441,7 @@ def test_take_payment_creates_payment_and_logs_activity_without_status_change(mo
     payment = Payment.objects.get(order=order)
     assert payment.data["source"] == "EMPLOYEE_TAKE_PAYMENT"
     assert payment.data["employee"] == "usr_take3@example.com"
-    assert ActivityLog.objects.filter(action="TAKE_PAYMENT_STARTED", entity_id="ord_1").exists()
+    assert activity_count(action="TAKE_PAYMENT_STARTED", entity_id="ord_1") >= 1
 
 
 @pytest.mark.django_db
@@ -432,9 +451,9 @@ def test_take_payment_returns_502_on_stripe_failure(monkeypatch):
     client = _admin_client("usr_take4")
 
     def _boom(**kwargs):
-        raise RuntimeError("Could not start secure payment")
+        raise ProviderError("Could not start secure payment")
 
-    monkeypatch.setattr("stripe.checkout.Session.create", _boom)
+    monkeypatch.setattr(CREATE_SESSION, _boom)
 
     response = client.post("/api/admin/orders/ord_1/take-payment/")
 

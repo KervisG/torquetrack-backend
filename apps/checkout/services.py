@@ -1,43 +1,25 @@
-"""Checkout repricing, Stripe Checkout Session creation, and payment-method
-lookup helpers for tasks 5.2/5.3 (spec domain `commerce-checkout`; design
-decision #7).
+"""Helpers del checkout: numeración de documentos, resolución del cliente,
+armado de la Checkout Session de Stripe y consulta del método de pago.
 
-Near-verbatim port of `app/api/checkout/route.ts`, `lib/stripe.ts`, and
-`lib/tax.ts` (all re-read directly from source this run, not from the
-design doc's paraphrase). `calculate_sales_tax` is scoped to checkout's own
-server-side repricing need (task 5.2: "VERIFIED exemption -> $0 tax", which
-requires the real calculation for the non-exempt branch); the public
-`tax/estimate` HTTP endpoint that also uses this logic in the legacy app is
-explicitly Phase 7 scope per the tasks artifact and is NOT implemented
-here — this module creates nothing under `apps/tax/`.
-
-Stripe Checkout Session creation uses the official `stripe` Python SDK
-(design decision #7), matching `lib/stripe.ts`'s hand-rolled form-encoded
-`fetch` call field-for-field (same `mode`, `client_reference_id`,
-`success_url`/`cancel_url` templates, `metadata`, and per-line-item
-`price_data`/`quantity` shape), not a hand-rolled HTTP call.
+El impuesto se calcula en `apps.tax.services.calculate_sales_tax`. La
+llamada a Stripe vive en el adaptador `apps.integrations.payments.stripe`;
+aquí queda lo que es del pedido: las líneas (con el cargo de core aparte, el
+envío y el impuesto), las URLs de retorno del SPA y la metadata que usa el
+webhook para conciliar.
 """
 from __future__ import annotations
 
 import secrets
 from urllib.parse import quote
 
-import requests
-import stripe
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from apps.checkout.models import DocumentSequence
 from apps.customers.models import Customer
-
-# Mirrors `lib/tax.ts`'s `fallbackRates` table verbatim (19 states).
-FALLBACK_TAX_RATES = {
-    "FL": 0.06, "GA": 0.04, "TX": 0.0625, "CA": 0.0725, "NY": 0.04,
-    "NJ": 0.06625, "PA": 0.06, "IL": 0.0625, "NC": 0.0475, "SC": 0.06,
-    "VA": 0.053, "OH": 0.0575, "MI": 0.06, "AZ": 0.056, "CO": 0.029,
-    "WA": 0.065, "NV": 0.0685, "TN": 0.07, "AL": 0.04,
-}
+from apps.integrations.exceptions import ProviderError
+from apps.integrations.payments import stripe as stripe_payments
 
 
 def js_number_or(raw, fallback=0.0):
@@ -57,74 +39,45 @@ def money(value) -> float:
 
 
 def random_id(prefix: str) -> str:
-    """Mirror `lib/auth.ts`'s `randomId(prefix)`: prefix + 6 random bytes
-    rendered as uppercase hex."""
+    """Id con prefijo: `prefix` más 6 bytes aleatorios en hexadecimal
+    mayúscula."""
     return prefix + secrets.token_hex(6).upper()
 
 
-def calculate_sales_tax(
-    *, subtotal, core_charge, shipping, state, zip_code, city=None, address1=None
-) -> dict:
-    """Near-verbatim port of `lib/tax.ts`'s `calculateSalesTax`: TaxJar REST
-    call when configured and a destination zip is present, else the static
-    fallback table; TaxJar failures fall back silently, matching the
-    original's `catch` swallowing errors and falling through."""
-    subtotal = money(subtotal)
-    core_charge = money(core_charge)
-    shipping = money(shipping)
-    taxable_amount = money(subtotal + core_charge)
-    state = str(state or "").strip().upper()
-    zip_code = str(zip_code or "").strip()
+def linked_customer(user) -> Customer | None:
+    """Perfil comercial de la cuenta con sesión, o `None` para un invitado.
 
-    api_key = settings.TAXJAR_API_KEY
-    if api_key and zip_code:
-        try:
-            response = requests.post(
-                "https://api.taxjar.com/v2/taxes",
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
-                json={
-                    "from_country": "US",
-                    "from_zip": settings.SHIP_FROM_ZIP or "34241",
-                    "to_country": "US",
-                    "to_state": state,
-                    "to_zip": zip_code,
-                    "to_city": city,
-                    "to_street": address1,
-                    "amount": taxable_amount,
-                    "shipping": shipping,
-                },
-                timeout=10,
-            )
-            payload = response.json()
-            if response.ok:
-                tax_block = payload.get("tax") or {}
-                return {
-                    "tax": money(tax_block.get("amount_to_collect")),
-                    "rate": float(tax_block.get("rate") or 0),
-                    "source": "TaxJar destination tax",
-                    "provider": "taxjar",
-                    "estimated": False,
-                }
-        except (requests.RequestException, ValueError):
-            pass
+    Se exige un `User` real: `AnonymousUser.pk` es `None` y filtrar por
+    `user_id=None` devolvería un perfil invitado cualquiera.
+    """
+    from apps.auth.models import User
 
-    rate = FALLBACK_TAX_RATES.get(state, 0)
-    return {
-        "tax": money((taxable_amount + shipping) * rate),
-        "rate": rate,
-        "source": "Estimated state tax - TaxJar unavailable",
-        "provider": "fallback",
-        "estimated": True,
-    }
+    if not isinstance(user, User):
+        return None
+    return Customer.objects.filter(user=user).first()
+
+
+def resolve_checkout_customer(user, customer: dict) -> tuple[str | None, dict]:
+    """`(customer_id, snapshot)` del comprador de un checkout o cotización.
+
+    Con un `Customer` vinculado a la sesión, el documento es de ese perfil y
+    el email del snapshot es el de la cuenta: el body no puede desviar el
+    pedido hacia otro cliente ni cambiar el correo de Stripe. El perfil
+    nunca se reescribe con el body; el snapshot sí guarda la dirección de
+    envío que se escribió en el formulario. Sin perfil vinculado (invitado o
+    staff sin perfil) se resuelve por email.
+    """
+    profile = linked_customer(user)
+    if profile is not None:
+        return profile.pk, {**customer, "email": profile.email or user.email}
+    customer_id = resolve_or_create_customer(customer) if customer.get("email") else None
+    return customer_id, customer
 
 
 def resolve_or_create_customer(customer: dict) -> str | None:
-    """Mirror the checkout route's inline "resolve or create customer by
-    email" block: merge submitted fields into an existing row (new keys
-    win) or create a fresh one with a `random_id("C")`."""
+    """Resuelve o crea el cliente por email: combina los campos enviados con
+    la fila existente (ganan las claves nuevas) o crea una nueva con
+    `random_id("C")`."""
     email = customer.get("email")
     if not email:
         return None
@@ -150,17 +103,17 @@ def resolve_or_create_customer(customer: dict) -> str | None:
     return customer_id
 
 
-# Los números de pedido y cotización arrancan en 10001, igual que el legado.
+# Los números de pedido y cotización arrancan en 10001.
 FIRST_DOCUMENT_NUMBER = 10001
 
 
 def next_document_number(key: str, prefix: str) -> str:
     """Emite el siguiente número de la serie `key` con formato `<prefix><n>`.
 
-    El legado calculaba `max(substring(number)) + 1`: dos requests
-    concurrentes leían el mismo máximo y chocaban. Aquí la fila de la serie se
-    bloquea con `select_for_update()` dentro de `transaction.atomic`, así que
-    cada llamada espera a la anterior. Si la fila todavía no existe,
+    La fila de la serie (`DocumentSequence`) se bloquea con
+    `select_for_update()` dentro de `transaction.atomic`, así que dos requests
+    concurrentes nunca emiten el mismo número: cada llamada espera a la
+    anterior. Si la fila todavía no existe,
     `get_or_create` la crea y, ante una carrera, reintenta la lectura
     bloqueante en lugar de duplicarla.
     """
@@ -178,25 +131,16 @@ def next_order_number() -> str:
     return next_document_number("order", "O")
 
 
-def _line_item(name: str, unit_price: float, qty: int) -> dict:
-    return {
-        "price_data": {
-            "currency": "usd",
-            "product_data": {"name": name},
-            "unit_amount": round(unit_price * 100),
-        },
-        "quantity": qty,
-    }
+def _line(name: str, unit_price: float, qty: int) -> dict:
+    return {"name": name, "unit_amount": round(unit_price * 100), "quantity": qty}
 
 
-def create_stripe_checkout_session(order: dict):
-    """Mirror `lib/stripe.ts`'s `createStripeCheckout` using the official
-    SDK's `stripe.checkout.Session.create` instead of a hand-rolled
-    form-encoded `fetch` to `/v1/checkout/sessions`."""
-    stripe.api_key = settings.STRIPE_SECRET_KEY
+def create_stripe_checkout_session(order: dict) -> dict:
+    """Abre la Checkout Session del pedido y devuelve `{"id", "url"}`.
+    Lanza `ProviderError` (o `ProviderNotConfigured`) del adaptador."""
     items = order.get("items") or []
     totals = order.get("totals") or {}
-    app_url = settings.APP_URL or "http://localhost:3000"
+    app_url = settings.APP_URL or "http://localhost:5173"
 
     line_items = []
     for item in items:
@@ -204,59 +148,40 @@ def create_stripe_checkout_session(order: dict):
         price = money(item.get("price") if item.get("price") is not None else item.get("unitPrice"))
         core = money(item.get("coreCharge"))
         title = item.get("title") or item.get("partNumber") or "Diesel Part"
-        line_items.append(_line_item(title, price, qty))
+        line_items.append(_line(title, price, qty))
         if core > 0:
-            line_items.append(_line_item(f"Core charge — {title}", core, qty))
+            line_items.append(_line(f"Core charge — {title}", core, qty))
 
     for name, value in (
         ("Shipping", money(totals.get("shipping"))),
         ("Sales Tax", money(totals.get("tax"))),
     ):
         if value > 0:
-            line_items.append(_line_item(name, value, 1))
+            line_items.append(_line(name, value, 1))
 
     order_id = str(order["id"])
-    params = {
-        "mode": "payment",
-        "client_reference_id": order_id,
-        "success_url": (
+    return stripe_payments.create_checkout_session(
+        client_reference_id=order_id,
+        line_items=line_items,
+        success_url=(
             f"{app_url}/checkout-success.html?session_id={{CHECKOUT_SESSION_ID}}"
             f"&order_id={quote(order_id)}"
         ),
-        "cancel_url": f"{app_url}/checkout.html?canceled=1",
-        "metadata": {"order_id": order_id, "order_number": order["number"]},
-        "line_items": line_items,
-    }
-    customer_email = (order.get("customer") or {}).get("email")
-    if customer_email:
-        params["customer_email"] = customer_email
-
-    return stripe.checkout.Session.create(**params)
+        cancel_url=f"{app_url}/checkout.html?canceled=1",
+        metadata={"order_id": order_id, "order_number": order["number"]},
+        customer_email=(order.get("customer") or {}).get("email") or None,
+    )
 
 
-def get_stripe_payment_method(payment_intent_id):
-    """Mirror `lib/stripe.ts`'s `getStripePaymentMethod` using the official
-    SDK's `stripe.PaymentIntent.retrieve(expand=['payment_method'])`
-    instead of a hand-rolled `fetch`."""
-    if not settings.STRIPE_SECRET_KEY or not payment_intent_id:
+def get_stripe_payment_method(payment_intent_id) -> dict | None:
+    """Datos de la tarjeta para el pedido pagado, o `None`. Es un dato
+    decorativo: sin key, sin PaymentIntent o con Stripe caído, el webhook
+    concilia igual."""
+    if not payment_intent_id:
         return None
-    stripe.api_key = settings.STRIPE_SECRET_KEY
     try:
-        intent = stripe.PaymentIntent.retrieve(payment_intent_id, expand=["payment_method"])
-    except stripe.error.StripeError:
+        return stripe_payments.retrieve_payment_method(payment_intent_id)
+    except ProviderError:
         return None
 
-    payment_method = intent.get("payment_method")
-    if payment_method and hasattr(payment_method, "get"):
-        card = payment_method.get("card") or {}
-        return {
-            "paymentIntent": intent.get("id"),
-            "paymentMethodId": payment_method.get("id"),
-            "brand": card.get("brand"),
-            "last4": card.get("last4"),
-            "funding": card.get("funding"),
-        }
-    return {
-        "paymentIntent": intent.get("id"),
-        "paymentMethodId": payment_method if isinstance(payment_method, str) else None,
-    }
+

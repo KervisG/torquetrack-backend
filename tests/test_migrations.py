@@ -1,10 +1,11 @@
 """El ORM de Django es dueño de todas las tablas del backend.
 
-La base de test se arma solo con `migrate` (no hay `schema.sql`). Estos
+La base de test se arma solo con `migrate`, sin ningún SQL externo. Estos
 tests prueban que no queda ningún modelo `managed = False`, que `migrate`
 crea cada tabla de dominio y que el estado de las migraciones coincide con
 los modelos (`makemigrations --check`).
 """
+from importlib import import_module
 from io import StringIO
 
 import pytest
@@ -15,6 +16,7 @@ from django.db import connection
 DOMAIN_TABLES = {
     "users",
     "roles",
+    "account_tokens",
     "customers",
     "products",
     "applications",
@@ -26,7 +28,7 @@ DOMAIN_TABLES = {
     "document_sequences",
 }
 
-# Tablas del Next.js abandonado que ya no tienen dueño en el backend.
+# Tablas retiradas que ya no tienen dueño en el backend.
 RETIRED_LEGACY_TABLES = {"sessions", "employee_roles"}
 
 
@@ -46,6 +48,21 @@ def test_every_model_is_managed_by_django():
 @pytest.mark.django_db
 def test_migrate_creates_every_domain_table():
     assert DOMAIN_TABLES <= _public_tables()
+
+
+@pytest.mark.django_db
+def test_cache_table_migration_creates_the_database_cache_table():
+    # El test runner ya corre `createcachetable` al crear la base de test, así
+    # que se borra la tabla y se vuelve a correr la migración para probar que
+    # `migrate` sola la crea en un deploy.
+    migration = import_module("apps.auth.migrations.0010_cache_table")
+    with connection.schema_editor() as schema_editor:
+        schema_editor.execute("DROP TABLE IF EXISTS django_cache")
+        assert "django_cache" not in _public_tables()
+
+        migration.create_cache_tables(None, schema_editor)
+
+    assert "django_cache" in _public_tables()
 
 
 @pytest.mark.django_db

@@ -1,10 +1,7 @@
-"""Business rules for `cart/sync` (task 5.1) and `admin/carts` (task 7.3),
-ported from `app/api/cart/sync/route.ts` and `app/api/admin/carts/
-route.ts`.
+"""Reglas de negocio de `cart/sync` y `admin/carts`.
 
-Upsert-by-client-UUID, delete-on-empty. The client UUID (`cartId`) is
-generated server-side with `uuid4` when absent, mirroring the legacy
-route's `crypto.randomUUID()`.
+Upsert por UUID del cliente y borrado cuando el carrito queda vacío. Si el
+cliente no envía `cartId`, el servidor lo genera con `uuid4`.
 """
 import uuid
 
@@ -37,9 +34,8 @@ def sync_cart(payload: dict) -> dict:
 def _delete_empty_carts() -> None:
     """Borra los carritos cuyo `items` falta, no es un array o está vacío.
 
-    Replica `coalesce(jsonb_array_length(case when jsonb_typeof(items) =
-    'array' ...), 0) = 0` del legado. `items @> '[]'` solo es verdadero para
-    un array, así que su negación cubre los tipos que no son array.
+    `items @> '[]'` solo es verdadero para un array, así que su negación
+    cubre los tipos que no son array.
     """
     Cart.objects.filter(
         Q(data__items__isnull=True) | ~Q(data__items__contains=[]) | Q(data__items=[])

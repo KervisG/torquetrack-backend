@@ -1,5 +1,8 @@
 """Modelo de la bitácora `activity_logs`.
 
+Solo `apps/audit` conoce este modelo: el resto de las apps escribe con
+`record_activity` de `apps/audit/services.py`.
+
 `actor_id` no es FK: guarda el email del staff o un actor de sistema como
 `"stripe"`, y la fila tiene que sobrevivir aunque el usuario se borre.
 """
@@ -19,9 +22,6 @@ class ActivityLog(models.Model):
 
     class Meta:
         db_table = "activity_logs"
-        permissions = [
-            ("view_dashboard", "Can view dashboard"),
-        ]
 
     def __str__(self) -> str:
         return f"{self.action}:{self.entity_id}"

@@ -1,9 +1,8 @@
-"""`POST /api/cart/sync` (task 5.1), pinned against
-`app/api/cart/sync/route.ts`.
+"""Tests de `POST /api/cart/sync`.
 
-Behavior preserved: upsert-by-client-UUID, `stage` normalizes to uppercase
-(`status = "ACTIVE"` for stage `"CART"`, otherwise `status = stage`), and an
-empty/missing `items` array deletes the row instead of upserting it.
+Contrato: upsert por UUID del cliente, `stage` se normaliza a mayúsculas
+(`status = "ACTIVE"` para el stage `"CART"`; si no, `status = stage`) y un
+array `items` vacío o ausente borra la fila en lugar de hacer upsert.
 """
 
 import pytest

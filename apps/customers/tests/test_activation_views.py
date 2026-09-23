@@ -20,7 +20,7 @@ STRONG_PASSWORD = "Diesel-Torque-2026!"
 
 
 @pytest.fixture(autouse=True)
-def _clear_throttle_history():
+def _clear_throttle_history(db):
     cache.clear()
     yield
     cache.clear()

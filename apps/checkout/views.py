@@ -1,38 +1,43 @@
-"""`POST /api/checkout` (tasks 5.2, 5.3), matching
-`app/api/checkout/route.ts` and `lib/stripe.ts`.
-"""
-from django.conf import settings
+"""Vista de `POST /api/checkout`."""
 from django.utils import timezone
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.auth.authentication import SessionUserAuthentication
 from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
 from apps.checkout.services import (
-    calculate_sales_tax,
     create_stripe_checkout_session,
     js_number_or,
     money,
     next_order_number,
     random_id,
-    resolve_or_create_customer,
+    resolve_checkout_customer,
 )
 from apps.customers.models import Customer
 from apps.fitment.services import check_product_fitment
+from apps.integrations.exceptions import ProviderError
+from apps.integrations.payments import stripe as stripe_payments
+from apps.tax.services import calculate_sales_tax
 
 
 class CheckoutView(APIView):
-    """Server-side repricing from DB state, fitment re-check, customer
-    resolve/create, VERIFIED-exemption tax bypass, Order+Payment creation,
-    and Stripe Checkout Session creation. Never trusts client-submitted
-    prices (spec: "Server-Side Checkout Repricing")."""
+    """Recalcula precios desde la base, vuelve a chequear el fitment,
+    resuelve o crea el cliente, omite el impuesto con exención VERIFIED,
+    crea Order y Payment y abre la Checkout Session de Stripe. Nunca confía
+    en los precios que envía el cliente.
 
+    La sesión es opcional: sin ella es un checkout invitado. Con ella el
+    pedido queda en el `Customer` de la cuenta y se exige CSRF.
+    """
+
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
-        if not settings.STRIPE_SECRET_KEY:
+        if not stripe_payments.is_configured():
             return Response(
                 {
                     "error": "Payments are not configured. Add STRIPE_SECRET_KEY to "
@@ -107,8 +112,10 @@ class CheckoutView(APIView):
         else:
             shipping = money(shipping_raw)
 
-        customer = body.get("customer") or {}
-        customer_id = resolve_or_create_customer(customer) if customer.get("email") else None
+        raw_customer = body.get("customer")
+        customer_id, customer = resolve_checkout_customer(
+            request.user, raw_customer if isinstance(raw_customer, dict) else {}
+        )
 
         tax_kwargs = {
             "subtotal": subtotal,
@@ -182,7 +189,7 @@ class CheckoutView(APIView):
         try:
             session_payload = {"id": order_id, "number": number, **order_data}
             session = create_stripe_checkout_session(session_payload)
-        except Exception as exc:  # noqa: BLE001 - mirrors the route's `catch(e:any)`
+        except ProviderError as exc:
             order.status = "PAYMENT_SETUP_FAILED"
             order.save(update_fields=["status"])
             return Response({"error": str(exc) or "Could not create secure checkout"}, status=502)

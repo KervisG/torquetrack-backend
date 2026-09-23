@@ -1,18 +1,16 @@
-"""`admin/orders`, `admin/orders/[id]`, `admin/orders/[id]/payment-link`,
-`admin/orders/[id]/take-payment` business rules (task 7.4), near-verbatim
-ports of `app/api/admin/orders/route.ts`, `app/api/admin/orders/[id]/
-route.ts`, `app/api/admin/orders/[id]/payment-link/route.ts`, and
-`app/api/admin/orders/[id]/take-payment/route.ts`.
+"""Reglas de negocio de `admin/orders`, `admin/orders/[id]`,
+`admin/orders/[id]/payment-link` y `admin/orders/[id]/take-payment`.
 
-Reuses `apps.quotes.services.send_email` for the payment-link email
-instead of duplicating the Resend REST call a third time (same precedent
-as `apps.quotes.admin_services` reusing `apps.checkout.services`).
+El email del link de pago sale por el adaptador de Resend
+(`apps.integrations.email.resend`); la Checkout Session, por
+`create_stripe_checkout_session` de `apps.checkout.services`.
 """
 from __future__ import annotations
 
+from django.db.models import Prefetch
 from django.utils import timezone
 
-from apps.backoffice.models import ActivityLog
+from apps.audit.services import record_activity
 from apps.checkout.models import Order, Payment
 from apps.checkout.services import (
     create_stripe_checkout_session,
@@ -20,6 +18,8 @@ from apps.checkout.services import (
     money,
     random_id,
 )
+from apps.integrations.email import resend
+from apps.integrations.exceptions import ProviderError
 
 ORDER_STATUSES = ["OPEN", "PENDING_PAYMENT", "PROCESSING", "COMPLETED", "CANCELLED", "REJECTED"]
 CORE_STATUSES = [
@@ -49,11 +49,31 @@ def _serialize_order(order: Order) -> dict:
         "paymentStatus": order.payment_status,
         "createdAt": order.created_at,
         "customer": customer,
+        "payments": [_serialize_payment(payment) for payment in order.payments.all()],
+    }
+
+
+def _serialize_payment(payment: Payment) -> dict:
+    """Pago para el detalle del pedido. Sin `provider_id`: ver el id de la
+    transacción es `payments.transaction_id`, no `orders.view`."""
+    data = payment.data or {}
+    admin_link = "ADMIN_PAYMENT_LINK" if data.get("adminGenerated") else ""
+    return {
+        "id": payment.pk,
+        "provider": payment.provider,
+        "status": payment.status,
+        "amount": float(payment.amount),
+        "source": data.get("source") or admin_link,
+        "createdAt": payment.created_at,
     }
 
 
 def list_admin_orders() -> list[dict]:
-    orders = Order.objects.select_related("customer").order_by("created_at")
+    orders = (
+        Order.objects.select_related("customer")
+        .prefetch_related(Prefetch("payments", queryset=Payment.objects.order_by("created_at")))
+        .order_by("created_at")
+    )
     return [_serialize_order(order) for order in orders]
 
 
@@ -65,13 +85,12 @@ def _update_order_status(order: Order, raw_status: str, actor_email: str) -> dic
     order.status = status
     order.updated_at = timezone.now()
     order.save(update_fields=["status", "updated_at"])
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="ORDER_STATUS_CHANGED",
         entity_type="ORDER",
         entity_id=order.pk,
         data={"number": order.number, "status": status, "paymentStatus": order.payment_status},
-        created_at=timezone.now(),
     )
     return {"ok": True, "status": status}
 
@@ -99,13 +118,12 @@ def _update_order_workflow(order: Order, workflow: dict, actor_email: str) -> di
     order.data = {**(order.data or {}), **patch}
     order.updated_at = timezone.now()
     order.save(update_fields=["data", "updated_at"])
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="ORDER_WORKFLOW_UPDATED",
         entity_type="ORDER",
         entity_id=order.pk,
         data={"number": order.number, **patch},
-        created_at=timezone.now(),
     )
     return {"ok": True, **patch}
 
@@ -140,13 +158,12 @@ def delete_admin_order(order_id: str, actor_email: str) -> dict:
     number = order.number
     Payment.objects.filter(order=order).delete()
     order.delete()
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="UNPAID_ORDER_DELETED",
         entity_type="ORDER",
         entity_id=order_id,
         data={"number": number},
-        created_at=timezone.now(),
     )
     return {"ok": True}
 
@@ -155,8 +172,6 @@ def create_admin_payment_link(order_id: str) -> dict:
     """`POST /api/admin/orders/[id]/payment-link` — sets the order to
     `PENDING_PAYMENT` and emails the customer a pay link when an email is
     on file."""
-    from apps.quotes.services import send_email
-
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
@@ -167,7 +182,7 @@ def create_admin_payment_link(order_id: str) -> dict:
         session = create_stripe_checkout_session(
             {"id": order.pk, "number": order.number, **(order.data or {})}
         )
-    except Exception as exc:  # noqa: BLE001 - mirrors the route's `catch(e:any)`
+    except ProviderError as exc:
         return {"error": str(exc) or "Could not create payment link", "status": 502}
 
     total = money(((order.data or {}).get("totals") or {}).get("total"))
@@ -189,7 +204,7 @@ def create_admin_payment_link(order_id: str) -> dict:
     email = ((order.data or {}).get("customer") or {}).get("email")
     emailed = False
     if email:
-        sent = send_email(
+        sent = resend.send_email(
             to=email,
             subject=f"TorqueTrack payment link for Order {order.number}",
             html=(
@@ -218,7 +233,7 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
         session = create_stripe_checkout_session(
             {**(order.data or {}), "id": order.pk, "number": order.number}
         )
-    except Exception as exc:  # noqa: BLE001 - mirrors the route's `catch(e:any)`
+    except ProviderError as exc:
         return {"error": str(exc) or "Could not start secure payment", "status": 502}
 
     total = js_number_or(((order.data or {}).get("totals") or {}).get("total"), 0.0)
@@ -237,12 +252,11 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
         created_at=timezone.now(),
         updated_at=timezone.now(),
     )
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="TAKE_PAYMENT_STARTED",
         entity_type="ORDER",
         entity_id=order_id,
         data={"sessionId": session["id"]},
-        created_at=timezone.now(),
     )
     return {"ok": True, "url": session["url"]}

@@ -1,19 +1,22 @@
-"""Admin quote actions (task 6.3): convert/preview/reopen/send, pinned
-against `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`.
+"""Acciones de admin sobre cotizaciones: convert/preview/reopen/send.
 
-RBAC-gated via `SessionUserAuthentication` + `HasTorqueTrackPermission`.
+Protegidas con `SessionUserAuthentication` + `HasTorqueTrackPermission`.
 Los tests recorren el camino real cookie -> sesión -> `request.user` con
 una sesión creada en `SessionStore` y enviada como cookie de sesión (`SESSION_COOKIE_NAME`).
+
+Resend se falsea en su adaptador, `apps.integrations.email.resend.send_email`
+(`tests/fakes.py`). El chequeo "sin proveedor" usa el adaptador real sin key.
 """
 
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.backoffice.models import ActivityLog
 from apps.checkout.models import Order
 from apps.quotes.models import Quote
-from tests.factories import create_staff_user, session_client
+from apps.quotes.tests.pdf_support import requires_weasyprint
+from tests.factories import activity_count, create_staff_user, session_client
+from tests.fakes import FakeResend, install_resend
 
 
 def _insert_user(user_id, permissions=None, active=True, full_access=False):
@@ -86,7 +89,7 @@ def test_convert_creates_order_from_quote():
 
     quote = Quote.objects.get(pk="quo_admin_1")
     assert quote.status == "CONVERTED"
-    assert ActivityLog.objects.filter(action="QUOTE_CONVERTED", entity_id="quo_admin_1").exists()
+    assert activity_count(action="QUOTE_CONVERTED", entity_id="quo_admin_1") >= 1
 
 
 @pytest.mark.django_db
@@ -144,7 +147,8 @@ def test_convert_returns_404_for_unknown_quote():
 
 
 @pytest.mark.django_db
-def test_preview_generates_public_token_when_missing():
+def test_preview_generates_public_token_when_missing(settings):
+    settings.APP_URL = "https://shop.example.test"
     _insert_user("usr_preview", permissions=["quotes.view"])
     _make_quote()
     client = _admin_client("usr_preview")
@@ -156,11 +160,13 @@ def test_preview_generates_public_token_when_missing():
     quote = Quote.objects.get(pk="quo_admin_1")
     token = quote.data["publicToken"]
     assert token
-    assert url.endswith(f"/api/quote/public/{token}")
+    # El enlace abre la página del SPA, no el endpoint HTML de la API.
+    assert url == f"https://shop.example.test/quote/{token}"
 
 
 @pytest.mark.django_db
-def test_preview_reuses_existing_public_token():
+def test_preview_reuses_existing_public_token(settings):
+    settings.APP_URL = "https://shop.example.test/"
     _insert_user("usr_preview2", permissions=["quotes.view"])
     _make_quote(data={"publicToken": "already-issued-token"})
     client = _admin_client("usr_preview2")
@@ -168,7 +174,7 @@ def test_preview_reuses_existing_public_token():
     response = client.post("/api/admin/quotes/quo_admin_1/preview/")
 
     assert response.status_code == 200
-    assert response.json()["url"].endswith("/api/quote/public/already-issued-token")
+    assert response.json()["url"] == "https://shop.example.test/quote/already-issued-token"
 
 
 # --- reopen -----------------------------------------------------------------
@@ -204,25 +210,14 @@ def test_send_requires_customer_email():
 
 
 @pytest.mark.django_db
+@requires_weasyprint
 def test_send_emails_quote_with_pdf_attachment_and_logs_activity(settings, monkeypatch):
     settings.RESEND_API_KEY = "re_test_fake"
     settings.FROM_EMAIL = "sales@torquetrackdiesel.com"
     _insert_user("usr_send2", permissions=["quotes.send"])
     _make_quote(status="BUILDING")
 
-    captured = {}
-
-    class _FakeResponse:
-        ok = True
-
-        def json(self):
-            return {"id": "email_123"}
-
-    def _fake_post(url, headers=None, json=None, timeout=None):
-        captured["payload"] = json
-        return _FakeResponse()
-
-    monkeypatch.setattr("apps.quotes.services.requests.post", _fake_post)
+    resend = install_resend(monkeypatch, FakeResend({"sent": True, "id": "email_123"}))
 
     client = _admin_client("usr_send2")
     response = client.post("/api/admin/quotes/quo_admin_1/send/")
@@ -231,18 +226,19 @@ def test_send_emails_quote_with_pdf_attachment_and_logs_activity(settings, monke
     body = response.json()
     assert body["emailId"] == "email_123"
 
-    assert captured["payload"]["to"] == ["pat@example.com"]
-    assert len(captured["payload"]["attachments"]) == 1
-    assert captured["payload"]["attachments"][0]["content_type"] == "application/pdf"
+    assert resend.sent[0]["to"] == ["pat@example.com"]
+    assert len(resend.sent[0]["attachments"]) == 1
+    assert resend.sent[0]["attachments"][0]["contentType"] == "application/pdf"
 
     quote = Quote.objects.get(pk="quo_admin_1")
     assert quote.status == "CONTACTED"
     assert quote.data["publicToken"]
     assert quote.data["lastEmailedTo"] == "pat@example.com"
-    assert ActivityLog.objects.filter(action="QUOTE_EMAILED", entity_id="quo_admin_1").exists()
+    assert activity_count(action="QUOTE_EMAILED", entity_id="quo_admin_1") >= 1
 
 
 @pytest.mark.django_db
+@requires_weasyprint
 def test_send_returns_502_when_email_provider_not_configured(settings):
     settings.RESEND_API_KEY = ""
     settings.FROM_EMAIL = ""
@@ -253,3 +249,47 @@ def test_send_returns_502_when_email_provider_not_configured(settings):
     response = client.post("/api/admin/quotes/quo_admin_1/send/")
 
     assert response.status_code == 502
+
+
+@pytest.mark.django_db
+def test_send_links_the_spa_quote_page_and_the_api_pdf(settings, monkeypatch):
+    """El correo apunta a `/quote/<token>` del SPA; la descarga del PDF sigue
+    en la API porque el SPA no sirve archivos."""
+    settings.APP_URL = "https://shop.example.test"
+    settings.RESEND_API_KEY = "re_test_fake"
+    settings.FROM_EMAIL = "sales@torquetrackdiesel.com"
+    _insert_user("usr_send_links", permissions=["quotes.send"])
+    _make_quote(data={"publicToken": "tok-links"})
+
+    resend = install_resend(monkeypatch, FakeResend({"sent": True, "id": "email_links"}))
+    monkeypatch.setattr("apps.quotes.pdf.render_quote_pdf_base64", lambda quote: "UERG")
+
+    client = _admin_client("usr_send_links")
+    response = client.post("/api/admin/quotes/quo_admin_1/send/")
+
+    assert response.status_code == 200
+    assert response.json()["url"] == "https://shop.example.test/quote/tok-links"
+    html = resend.sent[0]["html"]
+    assert 'href="https://shop.example.test/quote/tok-links"' in html
+    assert 'href="https://shop.example.test/api/quote/public/tok-links/pdf/"' in html
+
+
+@pytest.mark.django_db
+def test_send_reports_unconfigured_email_before_rendering_the_pdf(settings, monkeypatch):
+    """Sin Resend el envío falla igual: se responde 502 antes de generar el
+    PDF, así el panel muestra el motivo aunque WeasyPrint no esté instalado."""
+    settings.RESEND_API_KEY = ""
+    settings.FROM_EMAIL = ""
+    _insert_user("usr_send_unconfigured", permissions=["quotes.send"])
+    _make_quote()
+
+    def _no_pdf(quote):
+        raise AssertionError("the PDF must not be rendered when email is not configured")
+
+    monkeypatch.setattr("apps.quotes.pdf.render_quote_pdf_base64", _no_pdf)
+
+    client = _admin_client("usr_send_unconfigured")
+    response = client.post("/api/admin/quotes/quo_admin_1/send/")
+
+    assert response.status_code == 502
+    assert response.json() == {"error": "Email provider not configured"}

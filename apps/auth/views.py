@@ -1,5 +1,8 @@
 """`register`, `login`, `logout` y `session`: una sola cuenta para clientes
 y staff. Entrar no da acceso al panel; eso lo decide el Role.
+
+También los enlaces por correo: `password-reset` (pedido y confirmación) y
+`verify-email` (verificación y reenvío).
 """
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
@@ -11,8 +14,12 @@ from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.models import User
 from apps.auth.services import (
     authenticate_user,
+    confirm_password_reset,
     register_customer,
+    request_password_reset,
+    resend_verification_email,
     serialize_session_user,
+    verify_email,
 )
 from apps.auth.sessions import (
     csrf_token_payload,
@@ -22,7 +29,12 @@ from apps.auth.sessions import (
 from apps.auth.utils.throttling import (
     LoginAccountRateThrottle,
     LoginRateThrottle,
+    PasswordResetAccountRateThrottle,
+    PasswordResetConfirmRateThrottle,
+    PasswordResetRateThrottle,
     RegisterRateThrottle,
+    VerifyEmailRateThrottle,
+    VerifyEmailResendRateThrottle,
 )
 
 
@@ -98,3 +110,56 @@ class SessionView(APIView):
                 {"error": "Unauthorized", **csrf_token_payload(request)}, status=401
             )
         return Response(_session_payload(request, request.user))
+
+
+def _result(result: dict) -> Response:
+    if "error" in result:
+        return Response({"error": result["error"]}, status=result["status"])
+    return Response(result)
+
+
+class PasswordResetView(APIView):
+    """`POST /api/password-reset/`. Siempre 200 con el mismo body."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordResetRateThrottle, PasswordResetAccountRateThrottle]
+
+    def post(self, request):
+        return Response(request_password_reset(_body(request)))
+
+
+class PasswordResetConfirmView(APIView):
+    """`POST /api/password-reset/confirm/`."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [PasswordResetConfirmRateThrottle]
+
+    def post(self, request):
+        return _result(confirm_password_reset(_body(request)))
+
+
+class VerifyEmailView(APIView):
+    """`POST /api/verify-email/`. Público: el token del correo es la prueba,
+    así funciona aunque el enlace se abra en otro navegador sin sesión."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [VerifyEmailRateThrottle]
+
+    def post(self, request):
+        return _result(verify_email(_body(request)))
+
+
+class VerifyEmailResendView(APIView):
+    """`POST /api/verify-email/resend/`. Exige sesión y token CSRF."""
+
+    authentication_classes = [SessionUserAuthentication]
+    permission_classes = [AllowAny]
+    throttle_classes = [VerifyEmailResendRateThrottle]
+
+    def post(self, request):
+        if not isinstance(request.user, User):
+            return Response({"error": "Unauthorized"}, status=401)
+        return Response(resend_verification_email(request.user))

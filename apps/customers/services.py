@@ -1,11 +1,9 @@
 """Reglas de `admin/customers`, del autoservicio `/api/account/**` y de la
 activación del portal (`/api/activate/`).
 
-`admin/customers` business rules (task 7.2), near-verbatim ports of
-`app/api/admin/customers/route.ts`, `app/api/admin/customers/[id]/
-route.ts`, `app/api/admin/customers/[id]/tax-exemption/route.ts`,
-`app/api/admin/customers/[id]/tax-status/route.ts`, and
-`app/api/admin/customers/portal-invite/route.ts`.
+`admin/customers` incluye `admin/customers/[id]`,
+`admin/customers/[id]/tax-exemption`, `admin/customers/[id]/tax-status` y
+`admin/customers/portal-invite`.
 """
 from __future__ import annotations
 
@@ -19,7 +17,7 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
-from apps.backoffice.models import ActivityLog
+from apps.audit.services import record_activity
 from apps.checkout.services import random_id
 from apps.customers.models import Customer
 
@@ -33,11 +31,11 @@ ALLOWED_TAX_STATUSES = [
 
 
 def _serialize_customer_masked(customer: Customer) -> dict:
-    """Mirror `route.ts`'s `view()`: mask `taxId` to its last 4 characters,
-    strip `taxId`/`certificateData` from the spread `data`, and let any
-    `id`/`email`/`portalStatus`/`taxStatus` key ALSO present inside `data`
-    win over the explicit row columns (verbatim spread order: explicit
-    columns first, `...safeData` after)."""
+    """Serializa el cliente para el panel: enmascara `taxId` dejando sus
+    últimos 4 caracteres, quita `taxId`/`certificateData` del `data`
+    expandido y deja que cualquier clave `id`/`email`/`portalStatus`/
+    `taxStatus` presente TAMBIÉN en `data` gane sobre las columnas de la fila
+    (orden intencional: primero las columnas, después `safe_data`)."""
     data = customer.data or {}
     raw_tax_id = str(data.get("taxId") or "")
     tax_id_masked = ("•" * max(0, len(raw_tax_id) - 4) + raw_tax_id[-4:]) if raw_tax_id else ""
@@ -59,11 +57,11 @@ def list_admin_customers() -> list[dict]:
 
 
 def upsert_admin_customer(payload: dict) -> dict:
-    """`POST /api/admin/customers` — create when no `id` resolves, update
-    otherwise. `reusedExistingCustomer` mirrors the legacy flag verbatim:
-    it reflects only whether the ORIGINAL payload omitted `id` and had an
-    email, not whether an existing row was actually matched — preserved
-    as-is rather than "corrected" to a more accurate signal."""
+    """`POST /api/admin/customers`: crea cuando ningún `id` resuelve y
+    actualiza en caso contrario. Comportamiento intencional del contrato:
+    `reusedExistingCustomer` solo indica si el payload ORIGINAL omitió `id` y
+    traía email, no si realmente se encontró una fila existente; los tests
+    fijan esa semántica."""
     email = str(payload.get("email") or "").strip().lower()
     had_id = bool(payload.get("id"))
     customer_id = str(payload["id"]) if had_id else ""
@@ -79,9 +77,9 @@ def upsert_admin_customer(payload: dict) -> dict:
 
         customer = Customer.objects.filter(pk=customer_id).first()
         if customer is None:
-            # Legacy `update ... where id=$1` on a non-existent id is a
-            # silent no-op; the route re-selects afterward and returns
-            # 500 "Customer could not be saved" when nothing comes back.
+            # Un `id` enviado que no existe no crea nada: se responde 500
+            # "Customer could not be saved", igual que cuando el guardado no
+            # devuelve fila.
             return {"error": "Customer could not be saved", "status": 500}
 
         customer.email = email or None
@@ -160,13 +158,12 @@ def update_customer_tax_status(customer_id: str, payload: dict, reviewer_email: 
     customer.updated_at = timezone.now()
     customer.save(update_fields=["tax_status", "data", "updated_at"])
 
-    ActivityLog.objects.create(
-        actor_id=reviewer_email,
+    record_activity(
+        actor=reviewer_email,
         action="TAX_EXEMPTION_STATUS_CHANGED",
         entity_type="CUSTOMER",
         entity_id=customer_id,
         data={"status": status, "reviewedAt": reviewed_at},
-        created_at=timezone.now(),
     )
     return {
         "ok": True,
@@ -255,7 +252,13 @@ def activate_customer_account(payload: dict) -> dict:
         if "error" in result:
             return result
 
-        customer.user = result["user"]
+        # La invitación llegó a este correo y quien la abrió eligió la
+        # contraseña: eso ya prueba que controla la casilla.
+        user = result["user"]
+        user.email_verified_at = timezone.now()
+        user.save(update_fields=["email_verified_at"])
+
+        customer.user = user
         customer.activation_token_hash = None
         customer.activation_expires_at = None
         customer.updated_at = timezone.now()
@@ -296,6 +299,49 @@ _INVALID_CERTIFICATE = {"error": "Certificate must be a PDF, PNG or JPEG file", 
 
 def customer_for_user(user) -> Customer | None:
     return Customer.objects.filter(user=user).first()
+
+
+def link_guest_history(user) -> dict:
+    """Pasa al perfil de `user` el historial de los `Customer` invitados
+    (`user IS NULL`) con su mismo email, sin distinguir mayúsculas.
+
+    Solo se llama después de verificar el correo, dentro de esa transacción.
+    Se mueven los FKs de `Order` y `Quote` al perfil propio y se borra el
+    invitado, en lugar de fusionar los `data`: pedidos y cotizaciones son lo
+    único que apunta a `Customer`, así que no queda ninguna fila huérfana y
+    el perfil que el cliente ya editó no se pisa con datos del checkout. Si
+    la cuenta todavía no tiene perfil (por ejemplo, staff), adopta el primer
+    invitado y el resto se mueve a ese.
+
+    Devuelve `{"linkedOrders", "linkedQuotes"}`.
+    """
+    from apps.checkout.models import Order
+    from apps.quotes.models import Quote
+
+    guests = list(
+        Customer.objects.select_for_update()
+        .filter(user__isnull=True, email__iexact=user.email)
+        .order_by("created_at")
+    )
+    if not guests:
+        return {"linkedOrders": 0, "linkedQuotes": 0}
+
+    own = Customer.objects.select_for_update().filter(user=user).first()
+    linked_orders = linked_quotes = 0
+    if own is None:
+        own = guests.pop(0)
+        own.user = user
+        own.updated_at = timezone.now()
+        own.save(update_fields=["user", "updated_at"])
+        linked_orders += Order.objects.filter(customer=own).count()
+        linked_quotes += Quote.objects.filter(customer=own).count()
+
+    guest_ids = [guest.pk for guest in guests]
+    if guest_ids:
+        linked_orders += Order.objects.filter(customer_id__in=guest_ids).update(customer=own)
+        linked_quotes += Quote.objects.filter(customer_id__in=guest_ids).update(customer=own)
+        Customer.objects.filter(pk__in=guest_ids).delete()
+    return {"linkedOrders": linked_orders, "linkedQuotes": linked_quotes}
 
 
 def serialize_account(customer: Customer) -> dict:
@@ -389,9 +435,8 @@ def _certificate_error(certificate_data: str) -> dict | None:
 
 
 def submit_tax_exemption(customer: Customer, payload: dict) -> dict:
-    """`POST /api/account/tax-exemption/` — port de
-    `app/api/customer/tax-exemption/route.ts`, más validación de tipo y
-    tamaño del certificado, que el legado no hacía."""
+    """`POST /api/account/tax-exemption/`: registra la solicitud de exención
+    y valida tipo y tamaño del certificado."""
     tax_id = str(payload.get("taxId") or "").strip()
     company = str(payload.get("company") or "").strip()
     tax_state = str(payload.get("taxState") or "").strip().upper()

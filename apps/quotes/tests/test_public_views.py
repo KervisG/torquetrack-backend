@@ -1,15 +1,15 @@
-"""`POST /api/quote/request`, `GET /api/quote/public/<token>`, and
-`POST /api/quote/public/<token>/checkout` (task 6.1), pinned against
-`app/api/quote/request/route.ts`, `app/api/quote/public/[token]/route.ts`,
-and `app/api/quote/public/[token]/checkout/route.ts`.
+"""Tests de `POST /api/quote/request`, `GET /api/quote/public/<token>`,
+`GET /api/quote/public/<token>/details/` y
+`POST /api/quote/public/<token>/checkout`.
 
-Spec deviation (documented, matching Phase 5's precedent of intentional,
-documented improvements over a legacy gap): the legacy GET and PDF public
-routes never checked `expires_at`, only the checkout sub-route did (409).
-The spec's "Public Magic-Link Quote Access" requirement explicitly demands
-expired-token denial on every public action, so this phase adds that check
-to the GET view too (410 Gone) — a read-only `expires_at` comparison, never
-mutating `status`, so "no auto-reopen" holds trivially.
+`details/` es el JSON que consume la página `/quote/<token>` del SPA: expone
+solo lo que ve el cliente (sin token, memo interno ni email) y trae el total
+de cada línea calculado en el backend, porque el SPA nunca recalcula dinero.
+
+Un token vencido se rechaza en todas las acciones públicas: el checkout
+responde 409 y las vistas GET (HTML y PDF) responden 410 Gone. Es una
+comparación de solo lectura contra `expires_at` que nunca cambia `status`,
+así que la cotización no se reabre sola.
 """
 
 import pytest
@@ -19,6 +19,8 @@ from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
 from apps.quotes.models import Quote
+
+CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
 PRODUCT_ID = "cummins-5.9-turbo-holset-hx35"
 PRODUCT_DATA = {
@@ -217,6 +219,73 @@ def test_public_view_denies_expired_token(client):
     assert quote.status == "ACTIVE"
 
 
+# --- quote/public/<token>/details (GET, JSON para el SPA) ---------------
+
+
+@pytest.mark.django_db
+def test_public_details_returns_the_customer_facing_quote(client):
+    _make_quote(data={"memo": "Internal note", "createdBy": "rep@example.com"})
+
+    response = client.get(f"/api/quote/public/{'tok_' + 'a' * 48}/details/")
+
+    assert response.status_code == 200
+    assert response["Cache-Control"] == "no-store"
+    body = response.json()
+    assert body["number"] == "Q10001"
+    assert body["status"] == "ACTIVE"
+    assert body["customer"] == {"name": "Jane Diesel", "company": ""}
+    assert body["vehicle"] == {"year": 2004, "make": "Dodge", "model": "Ram 2500"}
+    assert body["items"] == [
+        {
+            "title": "5.9L Cummins HX35 Turbocharger",
+            "partNumber": "HX35-590",
+            "quantity": 1,
+            "unitPrice": 429.0,
+            "coreCharge": 150.0,
+            "lineTotal": 579.0,
+        }
+    ]
+    assert body["totals"] == {
+        "subtotal": 429.0,
+        "core": 150.0,
+        "shipping": 0,
+        "tax": 0,
+        "total": 579.0,
+    }
+    assert body["expiresAt"]
+    assert body["createdAt"]
+    serialized = response.content.decode()
+    assert "tok_" not in serialized
+    assert "Internal note" not in serialized
+    assert "jane@example.com" not in serialized
+    assert "rep@example.com" not in serialized
+
+
+@pytest.mark.django_db
+def test_public_details_returns_404_for_unknown_token(client):
+    response = client.get("/api/quote/public/does-not-exist/details/")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Quote not found"}
+
+
+@pytest.mark.django_db
+def test_public_details_denies_expired_token(client):
+    token = "tok_" + "c" * 48
+    _make_quote(
+        quote_id="quo_pub_expired_json",
+        number="Q10003",
+        token=token,
+        expires_at=timezone.now() - timezone.timedelta(days=1),
+    )
+
+    response = client.get(f"/api/quote/public/{token}/details/")
+
+    assert response.status_code == 410
+    assert response.json() == {"error": "This quote has expired"}
+    assert Quote.objects.get(pk="quo_pub_expired_json").status == "ACTIVE"
+
+
 # --- quote/public/<token>/checkout (POST) -------------------------------
 
 
@@ -224,7 +293,7 @@ def test_public_view_denies_expired_token(client):
 def test_public_checkout_creates_order_and_stripe_session(client, monkeypatch):
     token = "tok_" + "c" * 48
     _make_quote(quote_id="quo_checkout_1", number="Q10003", token=token)
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = client.post(f"/api/quote/public/{token}/checkout/")
 
@@ -259,7 +328,7 @@ def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
         created_at=timezone.now(),
         updated_at=timezone.now(),
     )
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = client.post(f"/api/quote/public/{token}/checkout/")
 

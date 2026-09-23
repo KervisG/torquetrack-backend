@@ -1,11 +1,10 @@
 {% comment %}
-Visually equivalent (not pixel-identical) port of `lib/quote.ts`'s
-`quoteHtml()` template (design decision #8, task 6.2). Used for three
-renders: the public `GET /api/quote/public/<token>` HTML page (screen
-media, interactive checkout button), the WeasyPrint PDF (WeasyPrint
-renders as print media by default, which the `@media print` rule below
-already uses to hide the action buttons — no separate "PDF-only" template
-needed), and the admin "send" email body.
+Plantilla de la cotización, usada en tres renders: la página HTML pública de
+`GET /api/quote/public/<token>` (medio screen, con botón de checkout
+interactivo), el PDF de WeasyPrint (que renderiza como medio print por
+defecto; la regla `@media print` de abajo oculta los botones de acción, así
+que no hace falta una plantilla solo para PDF) y el cuerpo del email "send"
+de admin.
 {% endcomment %}
 <!doctype html>
 <html>
@@ -128,8 +127,9 @@ needed), and the admin "send" email body.
   </div>
 
   <div class="actions">
-    <button class="btn" style="border:0;cursor:pointer" onclick="checkoutQuote()">View / Checkout Quote &rarr;</button>
-    <a class="btn" style="background:transparent;color:#42ee8a;border:1px solid #42ee8a" href="{{ public_url }}/pdf">Download PDF</a>
+    {# Enlace real: en el correo (sin JS) abre la página del SPA; en la página HTML el onclick abre el checkout. #}
+    <a class="btn" style="border:0;cursor:pointer" href="{{ public_url }}" onclick="checkoutQuote(); return false;">View / Checkout Quote &rarr;</a>
+    <a class="btn" style="background:transparent;color:#42ee8a;border:1px solid #42ee8a" href="{{ pdf_url }}">Download PDF</a>
   </div>
 
   <footer class="footer">

@@ -1,35 +1,40 @@
-"""Admin quote action business rules (task 6.3): convert/preview/reopen/
-send, near-verbatim ports of
-`app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`.
+"""Reglas de negocio de admin de cotizaciones: acciones convert/preview/
+reopen/send y listado, alta y baja.
 
-Separate module from `apps/quotes/services.py` (task 6.1's `quote/request`
-+ `quote/public/<token>` business rules) for clean commit splitting, same
-precedent as Phase 5's `webhook_views.py`. Reuses `services.py`'s
-`serialize_quote`, `render_quote_html`, `send_email`, and `quote_token`,
-and `apps.checkout.services.next_order_number`/`random_id` rather than
-duplicating them.
+Separado de `apps/quotes/services.py` (reglas públicas de `quote/request` y
+`quote/public/<token>`). Reutiliza `serialize_quote`, `render_quote_html`
+y `quote_token` de `services.py`, y `next_order_number`/
+`random_id` de `apps.checkout.services`, en lugar de duplicarlos. El correo
+con el PDF sale por el adaptador `apps.integrations.email.resend`.
 """
 from __future__ import annotations
 
 from django.conf import settings
 from django.utils import timezone
 
-from apps.backoffice.models import ActivityLog
+from apps.audit.services import record_activity
 from apps.checkout.models import Order
 from apps.checkout.services import money, next_order_number, random_id
+from apps.integrations.email import resend
 from apps.quotes.models import Quote
 from apps.quotes.services import (
     next_quote_number,
+    public_quote_pdf_url,
+    public_quote_url,
     quote_token,
     render_quote_html,
-    send_email,
     serialize_quote,
 )
 
+# Claves que escribe el sistema y no el editor del panel. El editor manda la
+# cotización completa; sin conservarlas, un update rompería el enlace ya
+# enviado y el convert idempotente (`orderNumber`).
+_SYSTEM_QUOTE_KEYS = ("publicToken", "orderNumber", "lastEmailedAt", "lastEmailedTo", "source")
+
 
 def ensure_public_token(quote: Quote) -> str:
-    """`POST /api/admin/quotes/[id]/preview` — generate (or reuse) the
-    magic-link token and return the public URL."""
+    """`POST /api/admin/quotes/[id]/preview`: genera (o reutiliza) el token
+    del magic link y devuelve la URL de la página `/quote/<token>` del SPA."""
     data = quote.data or {}
     token = data.get("publicToken")
     if not token:
@@ -37,14 +42,13 @@ def ensure_public_token(quote: Quote) -> str:
         quote.data = {**data, "publicToken": token}
         quote.updated_at = timezone.now()
         quote.save(update_fields=["data", "updated_at"])
-    base = settings.APP_URL or "http://localhost:3000"
-    return f"{base}/api/quote/public/{token}"
+    return public_quote_url(token)
 
 
 def reopen_quote(quote: Quote) -> None:
-    """`POST /api/admin/quotes/[id]/reopen` — explicit admin action, the
-    ONLY thing allowed to un-expire a quote (spec: "no reopen MUST occur
-    without an explicit admin reopen action")."""
+    """`POST /api/admin/quotes/[id]/reopen`: acción explícita de admin y la
+    ÚNICA forma de reactivar una cotización vencida; nada la reabre de forma
+    automática."""
     quote.status = "ACTIVE"
     quote.expires_at = timezone.now() + timezone.timedelta(days=30)
     quote.updated_at = timezone.now()
@@ -87,13 +91,12 @@ def convert_quote_to_order(quote: Quote, actor_email: str) -> dict:
     quote.updated_at = timezone.now()
     quote.save(update_fields=["status", "data", "updated_at"])
 
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="QUOTE_CONVERTED",
         entity_type="QUOTE",
         entity_id=quote.pk,
         data={"quoteNumber": quote.number, "orderNumber": number},
-        created_at=timezone.now(),
     )
     return {"ok": True, "order": {"id": order_id, "number": number}}
 
@@ -105,17 +108,19 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
     email = str(customer.get("email") or "").strip()
     if not email:
         return {"error": "Customer email is required", "status": 400}
+    # Sin proveedor el envío fallaría igual: se corta antes de generar el PDF
+    # para que el panel reciba el motivo aunque WeasyPrint no esté instalado.
+    if not resend.is_configured():
+        return {"error": "Email provider not configured", "status": 502}
 
-    ensure_public_token(quote)  # mutates + saves quote.data in place if needed
-    base = settings.APP_URL or "http://localhost:3000"
+    url = ensure_public_token(quote)  # guarda el token en quote.data si faltaba
     public_token = (quote.data or {}).get("publicToken")
-    url = f"{base}/api/quote/public/{public_token}"
     quote_dict = serialize_quote(quote)
-    html = render_quote_html(quote_dict, public_url=url)
+    html = render_quote_html(quote_dict, public_url=url, pdf_url=public_quote_pdf_url(public_token))
 
     from apps.quotes.pdf import render_quote_pdf_base64
 
-    sent = send_email(
+    sent = resend.send_email(
         to=email,
         subject=f"Your TorqueTrack Quote {quote.number}",
         html=html,
@@ -131,13 +136,12 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
     if not sent["sent"]:
         return {"error": sent.get("reason") or "Email could not be sent", "status": 502}
 
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="QUOTE_EMAILED",
         entity_type="QUOTE",
         entity_id=quote.pk,
         data={"quoteNumber": quote.number, "to": email, "emailId": sent.get("id")},
-        created_at=timezone.now(),
     )
 
     data = quote.data or {}
@@ -154,14 +158,13 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
     return {"ok": True, "url": url, "emailId": sent.get("id")}
 
 
-# --- list/create/delete (task 7.6), pinned against
-# `app/api/admin/quotes/route.ts` and `app/api/admin/quotes/[id]/route.ts` --
+# --- listado, alta y baja: `admin/quotes` y `admin/quotes/[id]` ---
 
 
 def _num(value, default: float = 0.0) -> float:
-    """Mirror JS `Number(x)`, falling back to `default` on `None`/parse
-    failure (the `||default` half of each legacy expression is applied by
-    the caller, matching JS's per-expression falsy-zero fallback)."""
+    """Convierte `value` a número con la semántica de JS `Number(x)` y
+    devuelve `default` ante `None` o un valor no parseable. El respaldo para
+    cero u otros falsy (`|| default`) lo aplica cada llamador."""
     if value is None:
         return default
     try:
@@ -171,7 +174,7 @@ def _num(value, default: float = 0.0) -> float:
 
 
 def _quote_totals(payload: dict) -> dict:
-    """Mirror `app/api/admin/quotes/route.ts`'s inline `totals()` helper."""
+    """Calcula subtotal, cores, envío, impuesto y total de la cotización."""
     items = payload.get("items") or []
 
     def qty(item):
@@ -229,9 +232,15 @@ def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
         number = quote.number
         created_at = quote.created_at
         expires_at = quote.expires_at
+        previous = quote.data or {}
+        kept = {
+            key: previous[key]
+            for key in _SYSTEM_QUOTE_KEYS
+            if key in previous and key not in payload
+        }
         quote.customer_id = customer_id
         quote.status = status
-        quote.data = quote_data
+        quote.data = {**quote_data, **kept}
         quote.updated_at = now
         quote.save(update_fields=["customer_id", "status", "data", "updated_at"])
         updated = True
@@ -281,13 +290,12 @@ def delete_or_archive_quote(quote: Quote, actor_email: str) -> dict:
         }
         quote.updated_at = timezone.now()
         quote.save(update_fields=["data", "updated_at"])
-        ActivityLog.objects.create(
-            actor_id=actor_email,
+        record_activity(
+            actor=actor_email,
             action="QUOTE_ARCHIVED",
             entity_type="QUOTE",
             entity_id=quote.pk,
             data={"number": quote.number, "orderNumber": order_number},
-            created_at=timezone.now(),
         )
         return {
             "ok": True,
@@ -300,12 +308,11 @@ def delete_or_archive_quote(quote: Quote, actor_email: str) -> dict:
     status = quote.status
     quote_id = quote.pk
     quote.delete()
-    ActivityLog.objects.create(
-        actor_id=actor_email,
+    record_activity(
+        actor=actor_email,
         action="QUOTE_DELETED",
         entity_type="QUOTE",
         entity_id=quote_id,
         data={"number": number, "status": status},
-        created_at=timezone.now(),
     )
     return {"ok": True, "archived": False, "deletedQuote": number}

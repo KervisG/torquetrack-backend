@@ -1,14 +1,11 @@
-"""`POST /api/webhooks/stripe` (task 5.4), pinned against
-`app/api/webhooks/stripe/route.ts`.
+"""Tests de `POST /api/webhooks/stripe`.
 
-Signature verification uses the REAL official `stripe` SDK
-(`stripe.Webhook.construct_event`) — this is a pure local HMAC check, no
-network call and no real API key required, so the test computes a valid
-signature the exact way Stripe's own SDK does (the same `t=<ts>,v1=<hmac>`
-scheme the legacy hand-rolled code also implemented) and lets the real SDK
-verify it. `stripe.PaymentIntent.retrieve` (used to enrich the paid order
-with card brand/last4) IS monkeypatched, since that call would otherwise
-hit the real Stripe API.
+La verificación de firma pasa por el adaptador real
+(`apps.integrations.payments.stripe.construct_webhook_event`), que usa el SDK
+oficial: es un chequeo HMAC local, sin red ni API key real, así que el test
+calcula una firma válida igual que Stripe (esquema `t=<ts>,v1=<hmac>`).
+`retrieve_payment_method` del adaptador (marca/últimos 4 de la tarjeta del
+pedido pagado) SÍ se parchea, porque llamaría a la API real de Stripe.
 """
 import hashlib
 import hmac
@@ -19,16 +16,15 @@ from decimal import Decimal
 import pytest
 from rest_framework.test import APIClient
 
-from apps.backoffice.models import ActivityLog
 from apps.checkout.models import Order, Payment
+from tests.factories import activity_count
 
 WEBHOOK_SECRET = "whsec_test_fake_not_real"
 
 
 def _sign(payload: bytes, secret: str = WEBHOOK_SECRET, timestamp=None) -> str:
-    """Mirror Stripe's own signature scheme (and the legacy hand-rolled
-    verifier's exact algorithm): `t=<unix ts>,v1=hmac_sha256(secret,
-    f"{t}.{payload}")`."""
+    """Replica el esquema de firma de Stripe: `t=<unix ts>,v1=hmac_sha256(
+    secret, f"{t}.{payload}")`."""
     ts = timestamp if timestamp is not None else int(time.time())
     signed_payload = f"{ts}.{payload.decode()}".encode()
     signature = hmac.new(secret.encode(), signed_payload, hashlib.sha256).hexdigest()
@@ -128,7 +124,7 @@ def test_missing_signature_header_is_rejected():
 @pytest.mark.django_db
 def test_valid_signature_marks_order_paid_and_reconciles_payment(monkeypatch):
     monkeypatch.setattr(
-        "apps.checkout.webhook_views.get_stripe_payment_method",
+        "apps.integrations.payments.stripe.retrieve_payment_method",
         lambda payment_intent_id: {"brand": "visa", "last4": "4242", "funding": "credit"},
     )
     _insert_order(
@@ -164,13 +160,13 @@ def test_valid_signature_marks_order_paid_and_reconciles_payment(monkeypatch):
     assert payment.provider_id == "cs_test_1"
     assert payment.data["customer_email"] == "buyer@example.com"
 
-    assert ActivityLog.objects.filter(entity_id="ord_paid_1", action="PAYMENT_PAID").count() == 1
+    assert activity_count(entity_id="ord_paid_1", action="PAYMENT_PAID") == 1
 
 
 @pytest.mark.django_db
 def test_core_charge_opens_core_case_when_core_amount_present(monkeypatch):
     monkeypatch.setattr(
-        "apps.checkout.webhook_views.get_stripe_payment_method", lambda payment_intent_id: None
+        "apps.integrations.payments.stripe.retrieve_payment_method", lambda payment_intent_id: None
     )
     _insert_order("ord_core_1", "O10002", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 50.0}})
     _insert_payment("pay_core_1", "ord_core_1", "PENDING", {"sessionId": "cs_test_2"})
@@ -195,7 +191,7 @@ def test_replaying_the_same_event_id_is_idempotent(monkeypatch):
     same (or an equivalent) success event for an already-paid order must
     not duplicate the audit log entry or re-run the payment reconciliation."""
     monkeypatch.setattr(
-        "apps.checkout.webhook_views.get_stripe_payment_method",
+        "apps.integrations.payments.stripe.retrieve_payment_method",
         lambda payment_intent_id: {"brand": "visa", "last4": "4242", "funding": "credit"},
     )
     _insert_order("ord_replay_1", "O10003", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
@@ -221,7 +217,7 @@ def test_replaying_the_same_event_id_is_idempotent(monkeypatch):
 
     assert first.status_code == 200
     assert second.status_code == 200
-    assert ActivityLog.objects.filter(entity_id="ord_replay_1", action="PAYMENT_PAID").count() == 1
+    assert activity_count(entity_id="ord_replay_1", action="PAYMENT_PAID") == 1
     order = Order.objects.get(pk="ord_replay_1")
     assert order.status == "OPEN"
     assert order.payment_status == "PAID"
@@ -253,7 +249,7 @@ def test_async_payment_failed_marks_order_and_payment_failed():
 @pytest.mark.django_db
 def test_client_reference_id_fallback_used_when_metadata_order_id_missing(monkeypatch):
     monkeypatch.setattr(
-        "apps.checkout.webhook_views.get_stripe_payment_method", lambda payment_intent_id: None
+        "apps.integrations.payments.stripe.retrieve_payment_method", lambda payment_intent_id: None
     )
     _insert_order("ord_fallback_1", "O10005", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
     _insert_payment("pay_fallback_1", "ord_fallback_1", "PENDING", {"sessionId": "cs_test_5"})

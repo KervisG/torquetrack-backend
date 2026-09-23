@@ -1,10 +1,7 @@
-"""Near-verbatim port of `lib/fitment.ts`'s pure fitment-matching logic.
+"""Lógica pura de compatibilidad (fitment) entre producto y vehículo.
 
-Kept as a direct, line-for-line translation (per the tasks artifact:
-"near-verbatim port") rather than a redesign — the source is small, pure,
-and has no I/O, so there is no reason to diverge from its exact behavior,
-including its quirks (raw, non-normalized values inside reason/warning
-messages).
+No tiene I/O. Los mensajes de `reasons`/`warnings` usan a propósito los
+valores crudos, sin normalizar, de los campos de producto y vehículo.
 """
 import re
 

@@ -1,6 +1,6 @@
 """Tests de los modelos `Product` y `Application`. Las formas del JSON copian
-filas reales de `data/products.json` y `data/applications.json` (los
-fixtures de respaldo del Next.js), no formas inventadas.
+filas reales del catálogo semilla (`apps/catalog/data/products.json` y
+`apps/catalog/data/applications.json`), no formas inventadas.
 """
 
 import pytest

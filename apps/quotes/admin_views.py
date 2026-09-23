@@ -1,10 +1,9 @@
-"""Admin quote actions (task 6.3): convert/preview/reopen/send, plus
-list/create/delete (task 7.6, closing the scope gap flagged by Phase 6),
-matching `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`,
-`app/api/admin/quotes/route.ts`, and `app/api/admin/quotes/[id]/route.ts`.
+"""Vistas de admin de cotizaciones: acciones convert/preview/reopen/send
+(`admin/quotes/[id]/*`) más listado, alta y baja (`admin/quotes` y
+`admin/quotes/[id]`).
 
-RBAC-gated via `HasTorqueTrackPermission` + `SessionUserAuthentication`
-(Phase 6 prerequisite, see `apps/auth/authentication.py`).
+Protegidas con `HasTorqueTrackPermission` + `SessionUserAuthentication`
+(ver `apps/auth/authentication.py`).
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -46,9 +45,9 @@ class QuoteConvertView(_AdminQuoteActionView):
 
 
 class QuotePreviewView(_AdminQuoteActionView):
-    """Despite the legacy route's name, this generates/reuses the public
-    magic-link token and returns its URL — it does not render a preview
-    body (see `app/api/admin/quotes/[id]/preview/route.ts`)."""
+    """Pese al nombre de la ruta, genera o reutiliza el token público del
+    magic link y devuelve su URL: no renderiza ningún cuerpo de vista
+    previa."""
 
     required_permission = "quotes.view"
 
@@ -88,11 +87,11 @@ class QuoteSendView(_AdminQuoteActionView):
 
 
 class AdminQuoteListCreateView(APIView):
-    """`GET/POST /api/admin/quotes` (task 7.6): list (`quotes.view`) and
-    create/update (`quotes.create`) share one URL, so the required
-    permission depends on the request method — `HasTorqueTrackPermission`
-    reads `required_permission` before the handler runs, hence the
-    property (evaluated once `self.request` exists in `initial()`)."""
+    """`GET/POST /api/admin/quotes`: el listado (`quotes.view`) y el alta o
+    edición (`quotes.create`) comparten URL, así que el permiso exigido
+    depende del método. `HasTorqueTrackPermission` lee `required_permission`
+    antes del handler; por eso es una property, evaluada cuando
+    `self.request` ya existe en `initial()`."""
 
     authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]

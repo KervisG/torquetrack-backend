@@ -1,6 +1,4 @@
-"""`POST /api/fitment/check` (task 4.2), pinned against
-`app/api/fitment/check/route.ts`.
-"""
+"""Tests de `POST /api/fitment/check`."""
 
 import pytest
 from rest_framework.test import APIClient
@@ -87,8 +85,8 @@ def test_inactive_product_is_silently_excluded_from_results():
 
     assert response.status_code == 200
     body = response.json()
-    # Legacy quirk preserved: `[].every(...)` is `true`, so an empty
-    # results array is reported as "compatible" overall.
+    # Comportamiento intencional del contrato: `all([])` es verdadero, así
+    # que una lista de resultados vacía se reporta como compatible.
     assert body == {"compatible": True, "results": []}
 
 

@@ -2,8 +2,12 @@
 marcador. El Role Employee y el grupo `employee_default` tienen los 15
 por defecto.
 """
+from importlib import import_module
+
 import pytest
+from django.apps import apps as global_apps
 from django.contrib.auth.models import Group, Permission
+from django.contrib.contenttypes.models import ContentType
 
 from apps.auth.models import Role
 from apps.auth.permission_catalog import DEFAULT_ROLE_LEGACY, STAFF_PERMISSIONS
@@ -11,7 +15,10 @@ from apps.auth.permission_catalog import DEFAULT_ROLE_LEGACY, STAFF_PERMISSIONS
 
 @pytest.mark.django_db
 def test_staff_permissions_hang_off_domain_models():
-    expected = {(app_label, model, codename) for _legacy, app_label, model, codename in STAFF_PERMISSIONS}
+    expected = {
+        (app_label, model, codename)
+        for _legacy, app_label, model, codename in STAFF_PERMISSIONS
+    }
     found = set(
         Permission.objects.filter(
             content_type__app_label__in={item[1] for item in STAFF_PERMISSIONS},
@@ -33,7 +40,11 @@ def test_legacy_marker_content_type_is_gone():
 def test_employee_default_group_has_the_default_role_permissions():
     group = Group.objects.get(name="employee_default")
     pairs = set(group.permissions.values_list("content_type__app_label", "codename"))
-    expected = {(app, code) for legacy, app, _model, code in STAFF_PERMISSIONS if legacy in DEFAULT_ROLE_LEGACY}
+    expected = {
+        (app, code)
+        for legacy, app, _model, code in STAFF_PERMISSIONS
+        if legacy in DEFAULT_ROLE_LEGACY
+    }
     assert pairs == expected
     assert group.permissions.count() == 15
 
@@ -42,6 +53,38 @@ def test_employee_default_group_has_the_default_role_permissions():
 def test_employee_role_has_the_default_permissions():
     employee = Role.objects.get(slug="employee")
     pairs = set(employee.permissions.values_list("content_type__app_label", "codename"))
-    expected = {(app, code) for legacy, app, _model, code in STAFF_PERMISSIONS if legacy in DEFAULT_ROLE_LEGACY}
+    expected = {
+        (app, code)
+        for legacy, app, _model, code in STAFF_PERMISSIONS
+        if legacy in DEFAULT_ROLE_LEGACY
+    }
     assert pairs == expected
     assert Role.objects.get(slug="admin").full_access is True
+
+
+@pytest.mark.django_db
+def test_backoffice_permissions_move_to_their_new_owners_keeping_role_grants():
+    # Simula una base que corrió `backoffice`: los dos permisos cuelgan de
+    # `backoffice.activitylog` y un Role y un Group los tienen.
+    migration = import_module("apps.auth.migrations.0011_move_backoffice_permissions")
+    old_type = ContentType.objects.create(app_label="backoffice", model="activitylog")
+    old_dashboard = Permission.objects.create(
+        content_type=old_type, codename="view_dashboard", name="Can view dashboard"
+    )
+    old_activity = Permission.objects.create(
+        content_type=old_type, codename="view_activitylog", name="Can view activity log"
+    )
+    role = Role.objects.create(name="Sales", slug="sales-legacy")
+    role.permissions.set([old_dashboard, old_activity])
+    group = Group.objects.create(name="legacy-group")
+    group.permissions.set([old_dashboard])
+
+    migration.move_backoffice_permissions(global_apps, None)
+
+    assert not ContentType.objects.filter(app_label="backoffice").exists()
+    assert set(
+        role.permissions.values_list("content_type__app_label", "content_type__model", "codename")
+    ) == {("tt_auth", "user", "view_dashboard"), ("audit", "activitylog", "view_activitylog")}
+    assert set(group.permissions.values_list("content_type__app_label", "codename")) == {
+        ("tt_auth", "view_dashboard")
+    }

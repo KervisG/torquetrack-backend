@@ -1,10 +1,9 @@
-"""`admin/orders` views (task 7.4), matching the route files documented in
-`apps/checkout/admin_services.py`.
+"""Vistas de `admin/orders`.
 
-`PATCH`/`DELETE` intentionally do NOT use `HasTorqueTrackPermission` — the
-legacy routes gate on `requireAdmin()` (401) plus one or more
-per-field `hasPermission()` checks (403), not a single static
-`required_permission`. See the test module's docstring.
+`PATCH`/`DELETE` no usan `HasTorqueTrackPermission` a propósito: exigen una
+sesión de staff (`is_staff_user`, 401) más uno o varios chequeos de permiso
+por campo (`has_torquetrack_permission`, 403), en lugar de un único
+`required_permission` estático. Ver el docstring del módulo de tests.
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView

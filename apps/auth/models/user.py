@@ -37,13 +37,25 @@ class User(models.Model):
     first_name = models.TextField(null=True, blank=True)
     last_name = models.TextField(null=True, blank=True)
     display_name = models.TextField(null=True, blank=True)
+    # Cuándo se probó que la persona controla `email` (enlace de verificación
+    # o invitación al portal). Sin verificar no se vincula el historial de
+    # compras como invitado.
+    email_verified_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
         db_table = "users"
         default_permissions = ()
+        # `view_dashboard` vive aquí aunque el dashboard no sea de `auth`:
+        # `apps.dashboard` no tiene modelos y el proyecto retiró el marcador
+        # sin tabla (`TorqueTrackPermission`, migración 0006), así que todo
+        # permiso cuelga de un modelo real. `dashboard.view` es el permiso de
+        # entrada al panel de staff, que ya gobierna `auth` (Roles y
+        # `manage_users`); colgarlo de `Order`, `Quote` o `Cart` ataría el
+        # agregado a una de sus fuentes de forma arbitraria.
         permissions = [
             ("manage_users", "Can manage users"),
+            ("view_dashboard", "Can view dashboard"),
         ]
 
     # DRF y los helpers de Django preguntan esto sobre `request.user`.

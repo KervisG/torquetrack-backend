@@ -1,64 +1,66 @@
-"""`GET /api/vin/decode` (task 4.3), pinned against
-`app/api/vin/decode/route.ts`.
+"""Tests de `GET /api/vin/decode`.
 
-The real NHTSA vPIC HTTP call is mocked with `responses` (per the design's
-testing strategy). Field names and the general `{Results: [...]}` envelope
-shape below mirror the actual `DecodeVinValuesExtended` response format
-(https://vpic.nhtsa.dot.gov docs) — this is NOT a live call, but the mocked
-payload shape matches the real API's documented contract, not an invented
-one.
+Mocking: NHTSA se falsea en su adaptador,
+`apps.integrations.vehicles.nhtsa.decode_vin`, con el dict plano que
+devuelve. El formato real de vPIC y el mapeo HTTP se prueban en
+`apps/integrations/tests/test_nhtsa.py`.
 """
-import responses
-from requests.exceptions import ConnectionError as RequestsConnectionError
 from rest_framework.test import APIClient
 
+from apps.integrations.exceptions import ProviderError, ProviderUnavailable
+
 VALID_VIN = "1FTSW21P34EB12345"
-NHTSA_URL = (
-    f"https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVinValuesExtended/"
-    f"{VALID_VIN}?format=json"
-)
+DECODED = {
+    "model_year": "2004",
+    "make": "FORD",
+    "model": "F-250",
+    "displacement_l": "6.0",
+    "engine_model": "POWER STROKE",
+    "fuel_type": "Diesel",
+}
 
 
-def test_malformed_vin_returns_400():
+def _nhtsa(monkeypatch, result=None, error=None):
+    calls = []
+
+    def _decode(vin):
+        calls.append(vin)
+        if error is not None:
+            raise error
+        return result
+
+    monkeypatch.setattr("apps.integrations.vehicles.nhtsa.decode_vin", _decode)
+    return calls
+
+
+def _boom(vin):
+    raise AssertionError("NHTSA must not be called for a malformed VIN")
+
+
+def test_malformed_vin_returns_400(monkeypatch):
+    monkeypatch.setattr("apps.integrations.vehicles.nhtsa.decode_vin", _boom)
+
     response = APIClient().get("/api/vin/decode/", {"vin": "TOO-SHORT"})
 
     assert response.status_code == 400
     assert response.json()["error"] == "VIN must contain 17 valid characters"
 
 
-def test_vin_with_excluded_characters_i_o_q_returns_400():
-    # VIN charset never contains I, O, or Q — matches the Next.js regex
-    # `[A-HJ-NPR-Z0-9]{17}` exactly.
+def test_vin_with_excluded_characters_i_o_q_returns_400(monkeypatch):
+    monkeypatch.setattr("apps.integrations.vehicles.nhtsa.decode_vin", _boom)
+
     response = APIClient().get("/api/vin/decode/", {"vin": "IOQ" + "1" * 14})
 
     assert response.status_code == 400
 
 
-@responses.activate
-def test_valid_vin_returns_decoded_vehicle():
-    responses.add(
-        responses.GET,
-        NHTSA_URL,
-        json={
-            "Count": 1,
-            "Message": "Results returned successfully",
-            "Results": [
-                {
-                    "ModelYear": "2004",
-                    "Make": "FORD",
-                    "Model": "F-250",
-                    "DisplacementL": "6.0",
-                    "EngineModel": "POWER STROKE",
-                    "FuelTypePrimary": "Diesel",
-                }
-            ],
-        },
-        status=200,
-    )
+def test_valid_vin_returns_decoded_vehicle(monkeypatch):
+    calls = _nhtsa(monkeypatch, result=DECODED)
 
     response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN.lower()})
 
     assert response.status_code == 200
+    assert calls == [VALID_VIN]
     assert response.json() == {
         "vehicle": {
             "vin": VALID_VIN,
@@ -72,23 +74,16 @@ def test_valid_vin_returns_decoded_vehicle():
     }
 
 
-@responses.activate
-def test_engine_falls_back_to_engine_model_when_displacement_missing():
-    responses.add(
-        responses.GET,
-        NHTSA_URL,
-        json={"Results": [{"ModelYear": "2004", "Make": "FORD", "EngineModel": "6.0L V8"}]},
-        status=200,
-    )
+def test_engine_falls_back_to_engine_model_when_displacement_missing(monkeypatch):
+    _nhtsa(monkeypatch, result={**DECODED, "displacement_l": None, "engine_model": "6.0L V8"})
 
     response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
 
     assert response.json()["vehicle"]["engine"] == "6.0L V8"
 
 
-@responses.activate
-def test_empty_results_returns_404():
-    responses.add(responses.GET, NHTSA_URL, json={"Results": []}, status=200)
+def test_empty_results_returns_404(monkeypatch):
+    _nhtsa(monkeypatch, result=None)
 
     response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
 
@@ -96,9 +91,8 @@ def test_empty_results_returns_404():
     assert response.json()["error"] == "Vehicle not found"
 
 
-@responses.activate
-def test_upstream_5xx_returns_502_vin_service_unavailable():
-    responses.add(responses.GET, NHTSA_URL, json={"error": "boom"}, status=500)
+def test_upstream_http_error_returns_502_vin_service_unavailable(monkeypatch):
+    _nhtsa(monkeypatch, error=ProviderUnavailable("NHTSA responded 500"))
 
     response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
 
@@ -106,13 +100,8 @@ def test_upstream_5xx_returns_502_vin_service_unavailable():
     assert response.json()["error"] == "VIN service unavailable"
 
 
-@responses.activate
-def test_network_failure_returns_502_vin_verification_failed():
-    responses.add(
-        responses.GET,
-        NHTSA_URL,
-        body=RequestsConnectionError("network unreachable"),
-    )
+def test_network_failure_returns_502_vin_verification_failed(monkeypatch):
+    _nhtsa(monkeypatch, error=ProviderError("NHTSA request failed"))
 
     response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
 

@@ -1,8 +1,8 @@
 """Numeración de pedidos (`O<n>`) y cotizaciones (`Q<n>`).
 
-El legado calculaba `max(substring(number)) + 1`, así que dos requests
-concurrentes podían recibir el mismo número. Ahora cada serie vive en una
-fila de `DocumentSequence` que se bloquea con `select_for_update()`; estos
+Cada serie vive en una fila de `DocumentSequence` que se bloquea con
+`select_for_update()`, así que dos requests concurrentes nunca reciben el
+mismo número; estos
 tests fijan el formato, el arranque en 10001, la independencia de las series
 y la unicidad bajo concurrencia real (hilos con conexiones propias).
 """

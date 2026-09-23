@@ -1,9 +1,8 @@
-"""`POST /api/checkout` (tasks 5.2, 5.3), pinned against
-`app/api/checkout/route.ts`, `lib/stripe.ts`, and `lib/tax.ts`.
+"""Tests de `POST /api/checkout`.
 
-The real Stripe Checkout Session API is never called: `stripe.checkout.
-Session.create` is monkeypatched at the SDK boundary (never a raw HTTP
-mock), and no real `STRIPE_SECRET_KEY` is ever used.
+La API real de Stripe nunca se llama: se parchea su adaptador,
+`apps.integrations.payments.stripe.create_checkout_session`, y nunca se usa
+un `STRIPE_SECRET_KEY` real.
 """
 
 import pytest
@@ -12,7 +11,10 @@ from rest_framework.test import APIClient
 from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
+from apps.integrations.exceptions import ProviderError
 from tests.factories import create_customer
+
+CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
 PRODUCT_ID = "gm-65-injection-pump-dorman-502550"
 PRODUCT_DATA = {
@@ -81,7 +83,7 @@ def test_returns_400_when_no_valid_products_in_cart():
 @pytest.mark.django_db
 def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch):
     _insert_product()
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",
@@ -101,7 +103,7 @@ def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch):
 @pytest.mark.django_db
 def test_returns_409_when_fitment_check_fails(monkeypatch):
     _insert_product()
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",
@@ -121,7 +123,7 @@ def test_returns_409_when_fitment_check_fails(monkeypatch):
 def test_verified_customer_pays_zero_tax(monkeypatch):
     _insert_product()
     _insert_customer("cus_verified_1", "verified@example.com", tax_status="VERIFIED")
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",
@@ -144,7 +146,7 @@ def test_verified_customer_pays_zero_tax(monkeypatch):
 def test_non_verified_customer_gets_fallback_table_tax(monkeypatch, settings):
     settings.TAXJAR_API_KEY = ""
     _insert_product()
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",
@@ -166,7 +168,7 @@ def test_non_verified_customer_gets_fallback_table_tax(monkeypatch, settings):
 def test_creates_order_and_pending_payment_via_stripe_sdk(monkeypatch):
     _insert_product()
     monkeypatch.setattr(
-        "stripe.checkout.Session.create",
+        CREATE_SESSION,
         lambda **kwargs: _fake_session("cs_test_created", "https://checkout.stripe.com/pay/cs_test_created"),
     )
 
@@ -198,9 +200,9 @@ def test_stripe_session_failure_marks_order_payment_setup_failed(monkeypatch):
     _insert_product()
 
     def _boom(**kwargs):
-        raise RuntimeError("Could not create secure checkout")
+        raise ProviderError("Could not create secure checkout")
 
-    monkeypatch.setattr("stripe.checkout.Session.create", _boom)
+    monkeypatch.setattr(CREATE_SESSION, _boom)
 
     response = APIClient().post(
         "/api/checkout/",
@@ -221,7 +223,7 @@ def test_stripe_session_failure_marks_order_payment_setup_failed(monkeypatch):
 def test_resolves_existing_customer_by_email_and_merges_submitted_fields(monkeypatch):
     _insert_product()
     _insert_customer("cus_existing_1", "repeat@example.com")
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",
@@ -249,7 +251,7 @@ def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypa
     create_customer(
         "cus_registered", email="owner@example.com", user=owner, data={"city": "Tampa"}
     )
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",
@@ -273,7 +275,7 @@ def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypa
 def test_cart_transitions_to_checkout_stage_when_cart_id_present(monkeypatch):
     _insert_product()
     _insert_cart("cart_uuid_checkout_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
-    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = APIClient().post(
         "/api/checkout/",

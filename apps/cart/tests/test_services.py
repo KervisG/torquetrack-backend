@@ -1,9 +1,7 @@
 """`list_admin_carts` borra primero los carritos vacíos.
 
-Fija la semántica de `app/api/admin/carts/route.ts`
-(`coalesce(jsonb_array_length(case when jsonb_typeof(items) = 'array' ...),
-0) = 0`): se borra el carrito cuando `items` falta, no es un array o es un
-array vacío. Solo sobrevive un array con al menos un elemento.
+Se borra el carrito cuando `items` falta, no es un array o es un array
+vacío. Solo sobrevive un array con al menos un elemento.
 """
 import pytest
 from django.utils import timezone

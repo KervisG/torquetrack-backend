@@ -1,36 +1,55 @@
-"""`POST /api/shipping/rates` (task 7.5), pinned against
-`app/api/shipping/rates/route.ts`.
+"""Tests de `POST /api/shipping/rates`.
 
-The real EasyPost REST API is never called: `requests.post` is monkeypatched
-at `apps.shipping.services.requests.post`, and no real `EASYPOST_API_KEY` is
-ever used.
+La API REST real de EasyPost nunca se llama: se parchea su adaptador,
+`apps.integrations.shipping.easypost.get_rates`, con el dict plano que
+devuelve, y nunca se usa un `EASYPOST_API_KEY` real. El request HTTP y el
+mapeo de cada tarifa se prueban en `apps/integrations/tests/test_easypost.py`.
 """
 
 import pytest
 from rest_framework.test import APIClient
 
 from apps.catalog.models import Product
+from apps.integrations.exceptions import ProviderError
 
 PRODUCT_ID = "gm-65-injection-pump-dorman-502550"
+GET_RATES = "apps.integrations.shipping.easypost.get_rates"
 
 
 def _insert_product(product_id=PRODUCT_ID, data=None):
     Product.objects.create(id=product_id, data=data or {}, active=True)
 
 
-class _FakeResponse:
-    def __init__(self, payload, ok=True, status_code=200):
-        self._payload = payload
-        self.ok = ok
-        self.status_code = status_code
+def _rate(rate_id, carrier, service, rate, delivery_days, guaranteed=False):
+    return {
+        "id": rate_id,
+        "carrier": carrier,
+        "service": service,
+        "rate": rate,
+        "delivery_days": delivery_days,
+        "guaranteed": guaranteed,
+    }
 
-    def json(self):
-        return self._payload
+
+def _fake_easypost(monkeypatch, shipment_id="shp_1", rates=()):
+    captured = {}
+
+    def _get_rates(**kwargs):
+        captured.update(kwargs)
+        return {"shipment_id": shipment_id, "rates": list(rates)}
+
+    monkeypatch.setattr(GET_RATES, _get_rates)
+    return captured
 
 
 @pytest.mark.django_db
-def test_returns_not_configured_when_no_api_key(settings):
+def test_returns_not_configured_when_no_api_key(settings, monkeypatch):
     settings.EASYPOST_API_KEY = ""
+
+    def _boom(**kwargs):
+        raise AssertionError("EasyPost must not be called without a key")
+
+    monkeypatch.setattr(GET_RATES, _boom)
 
     response = APIClient().post("/api/shipping/rates/", {}, format="json")
 
@@ -38,6 +57,8 @@ def test_returns_not_configured_when_no_api_key(settings):
     body = response.json()
     assert body["configured"] is False
     assert "EASYPOST_API_KEY" in body["message"]
+    # `.env.local` era el archivo de Next.js; Django lee el entorno del servidor.
+    assert ".env.local" not in body["message"]
 
 
 @pytest.mark.django_db
@@ -55,22 +76,19 @@ def test_builds_parcel_from_product_when_no_parcel_given(settings, monkeypatch):
     settings.EASYPOST_API_KEY = "ep_test_fake"
     _insert_product(data={"shippingWeight": 2, "packageLength": 14})
 
-    captured = {}
-
-    def _fake_post(url, headers=None, json=None, timeout=None):
-        captured["payload"] = json
-        return _FakeResponse({"id": "shp_1", "rates": []})
-
-    monkeypatch.setattr("apps.shipping.services.requests.post", _fake_post)
+    captured = _fake_easypost(monkeypatch)
 
     response = APIClient().post(
         "/api/shipping/rates/", {"productId": PRODUCT_ID, "to": {"zip": "30301"}}, format="json"
     )
 
     assert response.status_code == 200
-    parcel = captured["payload"]["shipment"]["parcel"]
-    # shippingWeight=2 -> 2*16=32oz built from product, then the <50 check
-    # multiplies again (verbatim legacy behavior, see route.ts) -> 32*16=512.
+    parcel = captured["parcel"]
+    assert captured["to_address"] == {"zip": "30301"}
+    assert captured["from_address"]["country"] == "US"
+    # shippingWeight=2 -> 2*16=32oz desde el producto; luego el chequeo <50
+    # vuelve a multiplicar (comportamiento intencional, ver
+    # `get_shipping_rates`) -> 32*16=512.
     assert parcel["weight"] == 512
     assert parcel["length"] == 14
 
@@ -79,10 +97,10 @@ def test_builds_parcel_from_product_when_no_parcel_given(settings, monkeypatch):
 def test_returns_502_on_easypost_error(settings, monkeypatch):
     settings.EASYPOST_API_KEY = "ep_test_fake"
 
-    def _fake_post(url, headers=None, json=None, timeout=None):
-        return _FakeResponse({"error": {"message": "Invalid address"}}, ok=False, status_code=422)
+    def _fail(**kwargs):
+        raise ProviderError("Invalid address")
 
-    monkeypatch.setattr("apps.shipping.services.requests.post", _fake_post)
+    monkeypatch.setattr(GET_RATES, _fail)
 
     response = APIClient().post(
         "/api/shipping/rates/",
@@ -99,36 +117,11 @@ def test_picks_ground_second_day_and_overnight_rates(settings, monkeypatch):
     settings.EASYPOST_API_KEY = "ep_test_fake"
 
     rates = [
-        {
-            "id": "rate_ground",
-            "carrier": "USPS",
-            "service": "Ground Advantage",
-            "rate": "8.50",
-            "delivery_days": 5,
-            "delivery_date_guaranteed": False,
-        },
-        {
-            "id": "rate_overnight",
-            "carrier": "USPS",
-            "service": "Priority Mail Express",
-            "rate": "35.00",
-            "delivery_days": 1,
-            "delivery_date_guaranteed": True,
-        },
-        {
-            "id": "rate_2day",
-            "carrier": "UPS",
-            "service": "UPS 2nd Day Air",
-            "rate": "15.00",
-            "delivery_days": 2,
-            "delivery_date_guaranteed": False,
-        },
+        _rate("rate_ground", "USPS", "Ground Advantage", 8.5, 5),
+        _rate("rate_overnight", "USPS", "Priority Mail Express", 35.0, 1, guaranteed=True),
+        _rate("rate_2day", "UPS", "UPS 2nd Day Air", 15.0, 2),
     ]
-
-    def _fake_post(url, headers=None, json=None, timeout=None):
-        return _FakeResponse({"id": "shp_2", "rates": rates})
-
-    monkeypatch.setattr("apps.shipping.services.requests.post", _fake_post)
+    _fake_easypost(monkeypatch, shipment_id="shp_2", rates=rates)
 
     response = APIClient().post(
         "/api/shipping/rates/",
@@ -151,13 +144,7 @@ def test_picks_ground_second_day_and_overnight_rates(settings, monkeypatch):
 def test_does_not_double_convert_weight_at_or_above_50(settings, monkeypatch):
     settings.EASYPOST_API_KEY = "ep_test_fake"
 
-    captured = {}
-
-    def _fake_post(url, headers=None, json=None, timeout=None):
-        captured["payload"] = json
-        return _FakeResponse({"id": "shp_3", "rates": []})
-
-    monkeypatch.setattr("apps.shipping.services.requests.post", _fake_post)
+    captured = _fake_easypost(monkeypatch, shipment_id="shp_3")
 
     response = APIClient().post(
         "/api/shipping/rates/",
@@ -166,4 +153,4 @@ def test_does_not_double_convert_weight_at_or_above_50(settings, monkeypatch):
     )
 
     assert response.status_code == 200
-    assert captured["payload"]["shipment"]["parcel"]["weight"] == 60
+    assert captured["parcel"]["weight"] == 60

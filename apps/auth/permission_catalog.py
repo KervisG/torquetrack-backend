@@ -1,12 +1,13 @@
 """Mapa de los 26 permisos de staff a modelos Django reales.
 
-`legacy` es lo que aún entiende el panel y el jsonb. `app_label` +
+`legacy` es el código con punto (p. ej. `dashboard.view`) que usan el panel
+y el jsonb. `app_label` +
 `codename` es el `Permission` de Django.
 """
 
 # (legacy, app_label, model, codename)
 STAFF_PERMISSIONS = [
-    ("dashboard.view", "backoffice", "activitylog", "view_dashboard"),
+    ("dashboard.view", "tt_auth", "user", "view_dashboard"),
     ("products.view", "catalog", "product", "view_product"),
     ("products.edit", "catalog", "product", "change_product"),
     ("pricing.edit", "catalog", "product", "edit_pricing"),
@@ -30,7 +31,7 @@ STAFF_PERMISSIONS = [
     ("customers.edit", "customers", "customer", "change_customer"),
     ("customers.delete", "customers", "customer", "delete_customer"),
     ("tax_exemptions.review", "customers", "customer", "review_tax_exemption"),
-    ("activity.view", "backoffice", "activitylog", "view_activitylog"),
+    ("activity.view", "audit", "activitylog", "view_activitylog"),
     ("users.manage", "tt_auth", "user", "manage_users"),
 ]
 

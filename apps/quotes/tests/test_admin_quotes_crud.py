@@ -1,14 +1,12 @@
-"""Admin quotes list/create/delete (task 7.6, flagged by Phase 6 as a
-scope gap not covered by task 6.3), pinned against
-`app/api/admin/quotes/route.ts` and `app/api/admin/quotes/[id]/route.ts`.
+"""Tests del listado, alta y baja de cotizaciones en admin
+(`admin/quotes` y `admin/quotes/[id]`).
 """
 
 import pytest
 from django.utils import timezone
 
-from apps.backoffice.models import ActivityLog
 from apps.quotes.models import Quote
-from tests.factories import create_staff_user, session_client
+from tests.factories import activity_count, create_staff_user, session_client
 
 
 def _insert_user(user_id, permissions=None, active=True, full_access=False):
@@ -142,6 +140,31 @@ def test_update_existing_quote_preserves_number_and_dates():
 
 
 @pytest.mark.django_db
+def test_update_keeps_the_public_link_and_the_linked_order():
+    """El editor manda la cotización completa, pero no conoce el token del
+    enlace ya enviado ni el pedido vinculado: perderlos rompería el correo y
+    el convert idempotente."""
+    _insert_user("usr_update_keep", permissions=["quotes.create"])
+    quote = _make_quote(
+        number="Q40006",
+        data={"publicToken": "tok-sent", "orderNumber": "O50001", "memo": "old"},
+    )
+
+    client = _admin_client("usr_update_keep")
+    response = client.post(
+        "/api/admin/quotes/",
+        {"id": "quo_crud_1", "status": "CONTACTED", "items": [], "memo": "new"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    quote.refresh_from_db()
+    assert quote.data["publicToken"] == "tok-sent"
+    assert quote.data["orderNumber"] == "O50001"
+    assert quote.data["memo"] == "new"
+
+
+@pytest.mark.django_db
 def test_update_returns_404_for_unknown_quote_id():
     _insert_user("usr_update2", permissions=["quotes.create"])
     client = _admin_client("usr_update2")
@@ -177,7 +200,7 @@ def test_delete_removes_quote_with_no_linked_order():
     body = response.json()
     assert body == {"ok": True, "archived": False, "deletedQuote": "Q40007"}
     assert not Quote.objects.filter(pk="quo_del_2").exists()
-    assert ActivityLog.objects.filter(action="QUOTE_DELETED", entity_id="quo_del_2").exists()
+    assert activity_count(action="QUOTE_DELETED", entity_id="quo_del_2") >= 1
 
 
 @pytest.mark.django_db
@@ -199,7 +222,7 @@ def test_delete_archives_quote_linked_to_an_order_instead_of_deleting():
     quote = Quote.objects.get(pk="quo_del_3")
     assert quote.data["archived"] is True
     assert quote.data["archivedBy"] == "usr_archive@example.com"
-    assert ActivityLog.objects.filter(action="QUOTE_ARCHIVED", entity_id="quo_del_3").exists()
+    assert activity_count(action="QUOTE_ARCHIVED", entity_id="quo_del_3") >= 1
 
 
 @pytest.mark.django_db

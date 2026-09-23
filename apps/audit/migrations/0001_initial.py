@@ -1,9 +1,9 @@
-# `activity_logs` pasa a ser una tabla administrada por Django.
+# `ActivityLog` pasa de `apps.backoffice` (retirada) a `apps.audit`.
 #
-# El proyecto no está en producción: la tabla heredada de
-# `scripts/schema.sql` se descarta (si existe) y se crea desde el modelo. El
-# `DeleteModel` de estado conserva el `ContentType` y el permiso
-# `view_dashboard`.
+# El proyecto no está en producción y la bitácora no tiene datos que
+# conservar: se descarta la tabla que dejó `backoffice` (si existe) y se crea
+# desde el modelo. Los permisos del ContentType viejo los mueve
+# `tt_auth.0011_move_backoffice_permissions`.
 import django.db.models.functions.datetime
 import django.utils.timezone
 from django.db import migrations, models
@@ -11,19 +11,14 @@ from django.db import migrations, models
 
 class Migration(migrations.Migration):
 
-    dependencies = [
-        ("backoffice", "0002_activitylog_permissions"),
-    ]
+    initial = True
+
+    dependencies = []
 
     operations = [
-        migrations.SeparateDatabaseAndState(
-            state_operations=[migrations.DeleteModel(name="ActivityLog")],
-            database_operations=[
-                migrations.RunSQL(
-                    "DROP TABLE IF EXISTS activity_logs CASCADE",
-                    reverse_sql=migrations.RunSQL.noop,
-                ),
-            ],
+        migrations.RunSQL(
+            "DROP TABLE IF EXISTS activity_logs CASCADE",
+            reverse_sql=migrations.RunSQL.noop,
         ),
         migrations.CreateModel(
             name="ActivityLog",
@@ -44,7 +39,6 @@ class Migration(migrations.Migration):
             ],
             options={
                 "db_table": "activity_logs",
-                "permissions": [("view_dashboard", "Can view dashboard")],
             },
         ),
     ]

@@ -1,10 +1,8 @@
-"""Shared Django settings for all environments.
+"""Settings de Django comunes a todos los entornos.
 
-Environment variable names for the integrations shared with the existing
-Next.js app (Stripe, TaxJar, EasyPost, Resend, RingCentral, DATABASE_URL,
-DATABASE_SSL) are verified against real source usage in
-`docs/migration/phase-0-infra-env-validation.md` (Phase 0 output) and MUST
-stay in sync with that document.
+Las integraciones (Stripe, TaxJar, EasyPost, Resend, RingCentral) y la base
+de datos (DATABASE_URL, DATABASE_SSL) se configuran por variables de entorno;
+`env.example` lista los nombres esperados.
 """
 from pathlib import Path
 
@@ -17,7 +15,9 @@ env_file = BASE_DIR / ".env"
 if env_file.exists():
     environ.Env.read_env(env_file)
 
-SECRET_KEY = env("DJANGO_SECRET_KEY", default="insecure-dev-key-change-me")
+# Solo sirve en local: `prod.py` se niega a arrancar con este valor.
+INSECURE_DEV_SECRET_KEY = "insecure-dev-key-change-me"
+SECRET_KEY = env("DJANGO_SECRET_KEY", default=INSECURE_DEV_SECRET_KEY)
 
 INSTALLED_APPS = [
     "django.contrib.admin",
@@ -34,7 +34,8 @@ INSTALLED_APPS = [
     "apps.cart",
     "apps.checkout",
     "apps.quotes",
-    "apps.backoffice",
+    "apps.audit",
+    "apps.dashboard",
     "apps.shipping",
     "apps.tax",
     "apps.vin",
@@ -72,9 +73,8 @@ TEMPLATES = [
 WSGI_APPLICATION = "config.wsgi.application"
 ASGI_APPLICATION = "config.asgi.application"
 
-# DATABASE_URL / DATABASE_SSL are shared with the existing Next.js app during
-# the strangler migration (design decision #2: one Neon Postgres for both
-# stacks). Default points at the local Docker Compose `db` service.
+# DATABASE_URL / DATABASE_SSL apuntan al Postgres de la app. Por defecto se
+# usa el servicio `db` de Docker Compose local.
 DATABASES = {
     "default": env.db(
         "DATABASE_URL",
@@ -83,6 +83,16 @@ DATABASES = {
 }
 if env.bool("DATABASE_SSL", default=False):
     DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
+
+# Cache compartido en Postgres (tabla `django_cache`, la crea la migración
+# `tt_auth.0010_cache_table`). Los contadores de los throttles viven aquí y
+# tienen que verse desde todos los workers y sobrevivir a un deploy; un
+# LocMemCache es por proceso y se vacía al reiniciar. `CACHE_URL` permite
+# cambiar de backend sin tocar código (p. ej. `redis://host:6379/1`); vacío
+# cuenta como no definida.
+CACHES = {
+    "default": env.cache_url_config(env("CACHE_URL", default="") or "dbcache://django_cache"),
+}
 
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
@@ -130,6 +140,11 @@ REST_FRAMEWORK = {
         "login_account": env("LOGIN_ACCOUNT_THROTTLE_RATE", default="20/hour"),
         "register": env("REGISTER_THROTTLE_RATE", default="10/hour"),
         "activate": env("ACTIVATE_THROTTLE_RATE", default="10/hour"),
+        "password_reset": env("PASSWORD_RESET_THROTTLE_RATE", default="10/hour"),
+        "password_reset_account": env("PASSWORD_RESET_ACCOUNT_THROTTLE_RATE", default="5/hour"),
+        "password_reset_confirm": env("PASSWORD_RESET_CONFIRM_THROTTLE_RATE", default="10/hour"),
+        "verify_email": env("VERIFY_EMAIL_THROTTLE_RATE", default="20/hour"),
+        "verify_email_resend": env("VERIFY_EMAIL_RESEND_THROTTLE_RATE", default="5/hour"),
     },
 }
 
@@ -140,21 +155,17 @@ REST_FRAMEWORK = {
 # `REMOTE_ADDR`.
 CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
 
-# Phase 5 (checkout/webhook) integration env vars, names verified against
-# real `process.env.*` usage in `docs/migration/phase-0-infra-env-validation.md`
-# (Stripe and TaxJar tables) — not assumed.
+# Integraciones de checkout y webhook: Stripe y TaxJar.
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="")
-APP_URL = env("APP_URL", default="http://localhost:3000")
+APP_URL = env("APP_URL", default="http://localhost:5173")
 
-# Phase 7 (shipping/rates) — EasyPost, name verified against
-# `docs/migration/phase-0-infra-env-validation.md` (Phase 0 output).
+# Cotización de envíos: EasyPost.
 EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
 
-# Phase 6 (quotes/PDF) — Resend email, names verified against
-# `docs/migration/phase-0-infra-env-validation.md` (Phase 0 output).
+# Emails de cotizaciones, restablecer contraseña y verificar el email: Resend.
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
 FROM_EMAIL = env("FROM_EMAIL", default="")
 SALES_EMAIL = env("SALES_EMAIL", default="")

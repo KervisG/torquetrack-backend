@@ -1,24 +1,18 @@
-"""Business rules for `quote/request` and `quote/public/<token>` (view +
-checkout) — task 6.1 — near-verbatim ports of
-`app/api/quote/request/route.ts`, `app/api/quote/public/[token]/route.ts`,
-`app/api/quote/public/[token]/checkout/route.ts`, and
-`lib/quote.ts`/`lib/email.ts`. `serialize_quote`, `is_expired`,
-`render_quote_html`, `send_email`, and `quote_token` are also reused by
-`apps/quotes/admin_services.py` (task 6.3) — they live here because
-`quote/public/<token>` (this module) needs them first.
+"""Reglas de negocio de `quote/request` y `quote/public/<token>` (vista y
+checkout). `serialize_quote`, `is_expired`, `render_quote_html`,
+y `quote_token` también los usa `apps/quotes/admin_services.py`; viven aquí
+porque `quote/public/<token>` los necesita primero. Los correos salen por el
+adaptador de Resend (`apps.integrations.email.resend`).
 
-Reuses `apps.checkout.services` for the small pure-JS-port helpers
-(`money`, `js_number_or`, `random_id`) and for Stripe Checkout Session
-creation (`create_stripe_checkout_session`) rather than duplicating them —
-cross-app service imports are an established pattern in this codebase
-(`apps.checkout.views` already imports from `apps.fitment.services`,
-`apps.cart.models`, `apps.customers.models`).
+Reutiliza de `apps.checkout.services` los helpers numéricos (`money`,
+`js_number_or`, `random_id`) y la creación de la Checkout Session de Stripe
+(`create_stripe_checkout_session`) en lugar de duplicarlos; importar
+servicios entre apps es un patrón habitual del proyecto.
 """
 from __future__ import annotations
 
 import secrets
 
-import requests
 from django.conf import settings
 from django.template.loader import render_to_string
 from django.utils import timezone
@@ -27,18 +21,21 @@ from apps.checkout.models import Order, Payment
 from apps.checkout.services import (
     create_stripe_checkout_session,
     js_number_or,
+    linked_customer,
     money,
     next_document_number,
     next_order_number,
     random_id,
 )
 from apps.customers.models import Customer
+from apps.integrations.email import resend
+from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 
 
 def quote_token() -> str:
-    """Mirror `lib/quote.ts`'s `quoteToken()`:
-    `crypto.randomBytes(24).toString("hex")` -> 48 hex chars."""
+    """Token del magic link: 24 bytes aleatorios en hexadecimal (48
+    caracteres)."""
     return secrets.token_hex(24)
 
 
@@ -46,55 +43,25 @@ def next_quote_number() -> str:
     return next_document_number("quote", "Q")
 
 
-def send_email(*, to, subject, html, attachments=None, reply_to=None) -> dict:
-    """Near-verbatim port of `lib/email.ts`'s `sendEmail` — a direct
-    `requests` call to the Resend REST API (no Resend SDK dependency, same
-    as the legacy hand-rolled `fetch`)."""
-    api_key = settings.RESEND_API_KEY
-    from_email = settings.FROM_EMAIL
-    if not api_key or not from_email:
-        return {"sent": False, "reason": "Email provider not configured"}
+def _app_base_url() -> str:
+    return (settings.APP_URL or "http://localhost:5173").rstrip("/")
 
-    recipients = to if isinstance(to, list) else [to]
-    payload = {"from": from_email, "to": recipients, "subject": subject, "html": html}
-    if reply_to:
-        payload["reply_to"] = reply_to
-    if attachments:
-        payload["attachments"] = [
-            {
-                "filename": a["filename"],
-                "content": a["content"],
-                "content_type": a.get("contentType", "application/pdf"),
-            }
-            for a in attachments
-        ]
 
-    try:
-        response = requests.post(
-            "https://api.resend.com/emails",
-            headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
-            json=payload,
-            timeout=15,
-        )
-    except requests.RequestException as exc:
-        return {"sent": False, "reason": str(exc)}
+def public_quote_url(token: str) -> str:
+    """Enlace que recibe el cliente: la página `/quote/<token>` del SPA, que
+    lee `GET /api/quote/public/<token>/details/`. Nunca el endpoint HTML."""
+    return f"{_app_base_url()}/quote/{token}"
 
-    try:
-        body = response.json()
-    except ValueError:
-        body = {}
 
-    if not response.ok:
-        return {"sent": False, "reason": body.get("message") or "Email failed"}
-    return {"sent": True, "id": body.get("id")}
+def public_quote_pdf_url(token: str) -> str:
+    """El PDF lo sirve la API, así que su enlace no pasa por el SPA."""
+    return f"{_app_base_url()}/api/quote/public/{token}/pdf/"
 
 
 def serialize_quote(quote: Quote) -> dict:
-    """Mirror the legacy routes' `{...q.data, id, number, status, createdAt,
-    expiresAt, customer}` shape, preferring the linked `Customer` row's data
-    over the jsonb-embedded snapshot (matches the SQL `left join
-    customers` + coalesce pattern used everywhere in the legacy quote
-    routes)."""
+    """Serializa la cotización como `{...data, id, number, status, createdAt,
+    expiresAt, customer}`. Para `customer` se prefieren los datos de la fila
+    `Customer` vinculada sobre el snapshot guardado en el jsonb."""
     data = quote.data or {}
     if quote.customer_id and quote.customer is not None:
         customer = {**(quote.customer.data or {}), "email": quote.customer.email}
@@ -116,31 +83,62 @@ def is_expired(quote: Quote) -> bool:
     return bool(quote.expires_at and quote.expires_at < timezone.now())
 
 
+def _quote_line(item: dict) -> dict:
+    """Normaliza una línea (`quantity`/`qty`, `unitPrice`/`price`) y calcula
+    su total en el backend: ni el correo ni el SPA recalculan dinero."""
+    qty = js_number_or(item.get("quantity") or item.get("qty"), 1)
+    has_unit_price = item.get("unitPrice") is not None
+    raw_price = item.get("unitPrice") if has_unit_price else item.get("price")
+    unit_price = money(raw_price)
+    core_charge = money(item.get("coreCharge"))
+    return {
+        **item,
+        "quantity": qty,
+        "unitPrice": unit_price,
+        "coreCharge": core_charge,
+        "lineTotal": money((unit_price + core_charge) * qty),
+    }
+
+
+_PUBLIC_LINE_KEYS = ("title", "partNumber", "quantity", "unitPrice", "coreCharge", "lineTotal")
+
+
+def serialize_public_quote(quote: Quote) -> dict:
+    """`GET /api/quote/public/<token>/details/`: solo lo que ve el cliente.
+    Sin token, memo interno, vendedor ni email, porque el enlace se reenvía."""
+    serialized = serialize_quote(quote)
+    customer = serialized.get("customer") or {}
+    lines = [_quote_line(item) for item in serialized.get("items") or []]
+    return {
+        "number": quote.number,
+        "status": quote.status,
+        "createdAt": quote.created_at,
+        "expiresAt": quote.expires_at,
+        "customer": {
+            "name": str(customer.get("name") or ""),
+            "company": str(customer.get("company") or ""),
+        },
+        "vehicle": serialized.get("vehicle") or {},
+        "items": [{key: line.get(key) for key in _PUBLIC_LINE_KEYS} for line in lines],
+        "totals": serialized.get("totals") or {},
+    }
+
+
 def render_quote_html(
-    quote: dict, *, public_url: str | None = None, print_mode: bool = False
+    quote: dict,
+    *,
+    public_url: str | None = None,
+    pdf_url: str | None = None,
+    print_mode: bool = False,
 ) -> str:
-    """Renders the same visual template as `lib/quote.ts`'s `quoteHtml()`
-    (design decision #8: "layout may differ" from the legacy renderer is
-    acceptable; line items/totals/customer/vehicle data must match)."""
+    """Renderiza la plantilla `quotes/quote.html`, compartida por la página
+    pública, el PDF y el email de la cotización. `pdf_url` por defecto es
+    `<public_url>/pdf`, que solo vale cuando `public_url` es la ruta HTML de
+    la API; el correo manda el suyo porque enlaza al SPA."""
     customer = quote.get("customer") or {}
     vehicle = quote.get("vehicle") or {}
     totals = quote.get("totals") or {}
-    items = []
-    for item in quote.get("items") or []:
-        qty = js_number_or(item.get("quantity") or item.get("qty"), 1)
-        has_unit_price = item.get("unitPrice") is not None
-        raw_price = item.get("unitPrice") if has_unit_price else item.get("price")
-        unit_price = money(raw_price)
-        core_charge = money(item.get("coreCharge"))
-        items.append(
-            {
-                **item,
-                "quantity": qty,
-                "unitPrice": unit_price,
-                "coreCharge": core_charge,
-                "lineTotal": money((unit_price + core_charge) * qty),
-            }
-        )
+    items = [_quote_line(item) for item in quote.get("items") or []]
     greeting_name = (customer.get("name") or customer.get("company") or "Customer").split(" ")[0]
     return render_to_string(
         "quotes/quote.html",
@@ -151,18 +149,30 @@ def render_quote_html(
             "totals": totals,
             "items": items,
             "public_url": public_url or "#",
+            "pdf_url": pdf_url or (f"{public_url}/pdf" if public_url else "#"),
             "print_mode": print_mode,
             "greeting_name": greeting_name,
         },
     )
 
 
-def create_quote_from_request(payload: dict) -> dict:
-    """`POST /api/quote/request` — storefront quote request."""
-    customer_in = payload.get("customer") or {}
-    name = str(customer_in.get("name") or "").strip()
+def create_quote_from_request(payload: dict, user=None) -> dict:
+    """`POST /api/quote/request` — storefront quote request.
+
+    Con un `Customer` vinculado a la sesión, la cotización es de ese perfil:
+    el email es el de la cuenta, el nombre y el teléfono del body solo
+    completan el snapshot y el perfil no se reescribe.
+    """
+    customer_in = payload.get("customer")
+    if not isinstance(customer_in, dict):
+        customer_in = {}
+    profile = linked_customer(user)
+    profile_data = (profile.data or {}) if profile is not None else {}
+    name = str(customer_in.get("name") or profile_data.get("name") or "").strip()
     email = str(customer_in.get("email") or "").strip()
-    phone = str(customer_in.get("phone") or "").strip()
+    phone = str(customer_in.get("phone") or profile_data.get("phone") or "").strip()
+    if profile is not None:
+        email = profile.email or user.email
     if not name:
         return {"error": "Name or company is required", "status": 400}
 
@@ -200,7 +210,9 @@ def create_quote_from_request(payload: dict) -> dict:
         return {"error": "No valid products", "status": 400}
 
     customer_id = None
-    if email:
+    if profile is not None:
+        customer_id = profile.pk
+    elif email:
         customer_id = _resolve_or_merge_customer(name, email, phone)
 
     quote_id = random_id("QID")
@@ -248,7 +260,7 @@ def create_quote_from_request(payload: dict) -> dict:
         items_html = "<br>".join(
             f"{i['quantity']} × {i['title']} ({i['partNumber']})" for i in items
         )
-        staff_result = send_email(
+        staff_result = resend.send_email(
             to=sales_email,
             subject=f"New TorqueTrack Quote Request {number}",
             html=(
@@ -261,7 +273,7 @@ def create_quote_from_request(payload: dict) -> dict:
 
     customer_result = {"sent": False}
     if email:
-        customer_result = send_email(
+        customer_result = resend.send_email(
             to=email,
             subject=f"TorqueTrack received your quote request {number}",
             html=(
@@ -365,7 +377,7 @@ def checkout_from_quote(quote: Quote) -> dict:
     try:
         session_payload = {"id": order.pk, "number": order.number, **(order.data or {})}
         session = create_stripe_checkout_session(session_payload)
-    except Exception as exc:  # noqa: BLE001 - mirrors the route's `catch(e:any)`
+    except ProviderError as exc:
         return {"error": str(exc) or "Could not create secure checkout", "status": 502}
 
     Payment.objects.create(

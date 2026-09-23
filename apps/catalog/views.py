@@ -1,10 +1,7 @@
-"""Public read views for the catalog app (task 4.1).
+"""Vistas públicas de lectura del catálogo.
 
-`retrieve` (detail) has no legacy Next.js equivalent — the frozen app has
-no `products/[id]`/`applications/[id]` route. Adding it here is a
-DRF-native addition per the design's `ModelViewSet` convention; it is not a
-contract this phase needs to match against a legacy response, only against
-the same whitelist rules as `list`.
+`retrieve` (detalle) sale de la convención `ReadOnlyModelViewSet` de DRF y
+aplica las mismas reglas de lista blanca que `list`.
 """
 from rest_framework.permissions import AllowAny
 from rest_framework.viewsets import ReadOnlyModelViewSet
@@ -16,8 +13,8 @@ from apps.catalog.serializers import ApplicationPublicSerializer, ProductPublicS
 class ProductPublicViewSet(ReadOnlyModelViewSet):
     """`GET /api/products/`, `GET /api/products/<id>/`.
 
-    Matches `app/api/products/route.ts`: only `active=true` rows, ordered
-    by `id`, internal cost/supplier fields stripped.
+    Solo filas `active=true`, ordenadas por `id`, sin los campos internos de
+    costo y proveedor.
     """
 
     queryset = Product.objects.filter(active=True).order_by("id")
@@ -29,8 +26,7 @@ class ProductPublicViewSet(ReadOnlyModelViewSet):
 class ApplicationPublicViewSet(ReadOnlyModelViewSet):
     """`GET /api/applications/`, `GET /api/applications/<id>/`.
 
-    Matches `app/api/applications/route.ts`: all rows, ordered by `id`, no
-    field stripping.
+    Todas las filas, ordenadas por `id`, sin quitar ningún campo.
     """
 
     queryset = Application.objects.order_by("id")

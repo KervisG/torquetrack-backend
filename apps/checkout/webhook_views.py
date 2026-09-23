@@ -1,39 +1,31 @@
-"""`POST /api/webhooks/stripe` (task 5.4), matching
-`app/api/webhooks/stripe/route.ts`.
-"""
-import stripe
-from django.conf import settings
+"""Vista de `POST /api/webhooks/stripe`."""
 from django.utils import timezone
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.backoffice.models import ActivityLog
+from apps.audit.services import record_activity
 from apps.checkout.models import Order, Payment
 from apps.checkout.services import get_stripe_payment_method, money
+from apps.integrations.exceptions import ProviderNotConfigured, WebhookSignatureError
+from apps.integrations.payments import stripe as stripe_payments
 
 
 class StripeWebhookView(APIView):
-    """Verifies `Stripe-Signature` with the official SDK's
-    `stripe.Webhook.construct_event` (design decision #7 — replaces the
-    legacy route's hand-rolled HMAC/300s-window check) and reconciles the
-    matching Order/Payment via `metadata.order_id` with `client_reference_id`
-    fallback (spec: "Stripe Webhook Signature & Metadata Reconciliation")."""
+    """Verifica `Stripe-Signature` con el adaptador de Stripe
+    (`construct_webhook_event`) y concilia el Order/Payment correspondiente por
+    `metadata.order_id`, con `client_reference_id` como respaldo."""
 
     permission_classes = [AllowAny]
 
     def post(self, request):
-        secret = settings.STRIPE_WEBHOOK_SECRET
-        if not secret:
-            return Response({"error": "Webhook secret not configured"}, status=503)
-
-        payload = request.body
         sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")
         try:
-            event = stripe.Webhook.construct_event(payload, sig_header, secret)
-        except (ValueError, stripe.error.SignatureVerificationError):
-            # No order/payment state is touched below this point — mirrors
-            # the spec scenario "Invalid signature is rejected".
+            event = stripe_payments.construct_webhook_event(request.body, sig_header)
+        except ProviderNotConfigured:
+            return Response({"error": "Webhook secret not configured"}, status=503)
+        except WebhookSignatureError:
+            # Con firma inválida no se toca ningún estado de order/payment.
             return Response({"error": "Invalid signature"}, status=400)
 
         event_type = event["type"]
@@ -54,15 +46,11 @@ class StripeWebhookView(APIView):
         if order is None:
             return
         if order.payment_status == "PAID":
-            # Idempotent replay guard: Stripe may resend the same event (or
-            # a related success event) for an order already reconciled.
-            # The legacy Next.js handler had no explicit event-id dedup —
-            # its `payments` UPDATE ... WHERE status='PENDING' made a
-            # second delivery a harmless no-op there, but it always
-            # re-wrote `orders` and always inserted another `activity_logs`
-            # row. Guarding on the order's own persisted `payment_status`
-            # here gives true idempotency (no duplicate audit rows, no
-            # redundant writes) without introducing a new table.
+            # Guarda de idempotencia: Stripe puede reenviar el mismo evento (o
+            # otro evento de éxito relacionado) para un pedido ya conciliado.
+            # Chequear el `payment_status` persistido del pedido evita filas
+            # duplicadas en `activity_logs` y escrituras redundantes sin
+            # necesidad de una tabla de deduplicación por id de evento.
             return
 
         method = get_stripe_payment_method(session_obj.get("payment_intent"))
@@ -112,8 +100,8 @@ class StripeWebhookView(APIView):
             }
             payment.save(update_fields=["status", "provider_id", "updated_at", "data"])
 
-        ActivityLog.objects.create(
-            actor_id="stripe",
+        record_activity(
+            actor="stripe",
             action="PAYMENT_PAID",
             entity_type="ORDER",
             entity_id=order_id,
@@ -124,7 +112,6 @@ class StripeWebhookView(APIView):
                 "brand": (method or {}).get("brand"),
                 "last4": (method or {}).get("last4"),
             },
-            created_at=timezone.now(),
         )
 
     def _mark_failed(self, order_id):

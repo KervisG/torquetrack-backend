@@ -12,6 +12,7 @@ from django.contrib.auth.models import Permission
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.audit.models import ActivityLog
 from apps.auth.models import Role, User
 from apps.auth.permission_catalog import LEGACY_TO_DJANGO
 from apps.auth.sessions import SESSION_USER_KEY
@@ -96,3 +97,13 @@ def session_client(user_id, *, enforce_csrf=False):
     client = APIClient(enforce_csrf_checks=enforce_csrf)
     client.cookies[settings.SESSION_COOKIE_NAME] = store.session_key
     return client, store.session_key
+
+
+def activity_count(**filters) -> int:
+    """Cuenta filas de `activity_logs` que cumplen `filters`.
+
+    Los tests de otras apps assertean la bitácora con este helper para no
+    importar `ActivityLog`: fuera de `apps/audit` solo se usa
+    `record_activity` (ver `tests/test_audit_boundary.py`).
+    """
+    return ActivityLog.objects.filter(**filters).count()

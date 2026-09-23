@@ -1,6 +1,4 @@
-"""`PUT/DELETE /api/admin/products/[id]` (task 7.3), matching
-`app/api/admin/products/[id]/route.ts`.
-"""
+"""Vista de `PUT/DELETE /api/admin/products/[id]`."""
 from rest_framework.response import Response
 from rest_framework.views import APIView
 

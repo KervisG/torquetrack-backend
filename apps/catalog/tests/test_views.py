@@ -1,16 +1,14 @@
-"""Public read endpoints for `products` and `applications` (task 4.1).
+"""Tests de los endpoints públicos de lectura de `products` y `applications`.
 
-Contract is pinned against the frozen Next.js routes, not invented:
-- `app/api/products/route.ts`: `select data from products where
-  active=true order by id`, then strips `purchaseCost`, `supplierCost`,
-  `internalNotes`, `supplierSku`, `supplierEmail`, `supplierPhone` from each
-  row's `data` before returning a bare JSON array (`ok(p.map(clean))`).
-- `app/api/applications/route.ts`: `select data from applications order by
-  id`, no field stripping, bare JSON array of `data`.
+Contrato:
+- `products`: solo filas `active=true` ordenadas por `id`; de cada `data` se
+  quitan `purchaseCost`, `supplierCost`, `internalNotes`, `supplierSku`,
+  `supplierEmail` y `supplierPhone`, y se devuelve un array JSON plano.
+- `applications`: todas las filas ordenadas por `id`, sin quitar campos,
+  como array JSON plano de `data`.
 
-Detail (retrieve) actions do not exist in the legacy Next.js app; this is a
-DRF-native addition per the design's `ModelViewSet` convention (documented
-as a deviation in apply-progress).
+Las acciones de detalle (retrieve) vienen de la convención
+`ReadOnlyModelViewSet` de DRF.
 """
 
 import pytest

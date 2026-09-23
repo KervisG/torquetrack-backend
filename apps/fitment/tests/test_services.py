@@ -1,15 +1,13 @@
-"""Near-verbatim port of `lib/fitment.ts`'s `checkProductFitment` (task 4.2).
+"""Tests de `check_product_fitment`.
 
-Every case here is pinned to the actual TypeScript source read this run,
-not a paraphrase:
-- `makeMatches`: `"chevrolet / gmc"`/`"chevrolet/gmc"` alias, exact `"ram"`
-  aliasing to `dodge`, otherwise substring match either direction.
-- Year range: only checked when vehicle year AND product yearFrom AND
-  product yearTo are all truthy (falsy year/range silently skips the
-  check, matching JS's `year && from && to` guard).
-- Engine: `Math.abs(pe-ve) > .15` on the FIRST number found by regex in
-  each raw string (`engineFamily` falls back to `engine`); the warning and
-  reason messages both use the RAW field values, not the parsed numbers.
+Reglas fijadas:
+- Marca: alias `"chevrolet / gmc"`/`"chevrolet/gmc"`, `"ram"` exacto como
+  alias de `dodge` y, si no, coincidencia por subcadena en cualquier sentido.
+- Rango de años: solo se chequea cuando el año del vehículo, `yearFrom` y
+  `yearTo` del producto son todos verdaderos; si alguno falta, se omite.
+- Motor: `abs(pe - ve) > 0.15` sobre el PRIMER número que encuentra la regex
+  en cada string crudo (`engineFamily` cae a `engine`); los mensajes de
+  warning y reason usan los valores CRUDOS, no los números parseados.
 """
 from apps.fitment.services import check_product_fitment
 

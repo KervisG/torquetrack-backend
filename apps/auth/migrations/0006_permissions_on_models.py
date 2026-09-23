@@ -80,7 +80,6 @@ class Migration(migrations.Migration):
         ("quotes", "0002_quote_permissions"),
         ("checkout", "0002_order_payment_permissions"),
         ("customers", "0002_customer_permissions"),
-        ("backoffice", "0002_activitylog_permissions"),
         ("cart", "0001_initial"),
         ("auth", "0001_initial"),
         ("contenttypes", "0001_initial"),

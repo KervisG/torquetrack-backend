@@ -250,6 +250,37 @@ def test_resolves_existing_customer_by_email_and_merges_submitted_fields(monkeyp
 
 
 @pytest.mark.django_db
+def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypatch):
+    # Un invitado solo escribe un email: si se mezclara con el perfil de una
+    # cuenta registrada, cualquiera podría pisar su dirección o sumarle pedidos.
+    from tests.factories import create_customer, create_user
+
+    _insert_product()
+    owner = create_user("U_REGISTERED", email="owner@example.com")
+    create_customer(
+        "cus_registered", email="owner@example.com", user=owner, data={"city": "Tampa"}
+    )
+    monkeypatch.setattr("stripe.checkout.Session.create", lambda **kwargs: _fake_session())
+
+    response = APIClient().post(
+        "/api/checkout/",
+        {
+            "items": [{"id": PRODUCT_ID, "qty": 1}],
+            "vehicle": {"make": "Chevrolet", "year": 1996, "engine": "6.5"},
+            "customer": {"email": "owner@example.com", "city": "Elsewhere"},
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.customer_id != "cus_registered"
+    from apps.customers.models import Customer
+
+    assert Customer.objects.get(pk="cus_registered").data == {"city": "Tampa"}
+
+
+@pytest.mark.django_db
 def test_cart_transitions_to_checkout_stage_when_cart_id_present(monkeypatch):
     _insert_product()
     _insert_cart("cart_uuid_checkout_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})

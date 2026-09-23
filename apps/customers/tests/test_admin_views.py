@@ -12,42 +12,21 @@ NOT `requirePermission("customers.view")` as the spec's paraphrase might
 suggest. Verified directly against `lib/auth.ts` and both route files;
 preserved verbatim rather than "corrected" to match the spec prose.
 """
-import json
-from importlib import import_module
-
 import pytest
-from django.conf import settings
-from django.db import connection
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.backoffice.models import ActivityLog
 from apps.customers.models import Customer
+from tests.factories import create_customer, create_staff_user, create_user, session_client
 
 
-def _insert_user(user_id, role="authorized", permissions=None, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into users (id, username, password_hash, role, active, "
-            "permissions) values (%s, %s, %s, %s, %s, %s::jsonb)",
-            [
-                user_id,
-                f"{user_id}@example.com",
-                "scrypt$salt$hash",
-                role,
-                active,
-                json.dumps(permissions or []),
-            ],
-        )
+def _insert_user(user_id, permissions=None, active=True):
+    create_staff_user(user_id, permissions=permissions, active=active)
 
 
 def _admin_client(user_id):
-    engine = import_module(settings.SESSION_ENGINE)
-    store = engine.SessionStore()
-    store["user_id"] = user_id
-    store.save()
-    client = APIClient()
-    client.cookies["tt_admin"] = store.session_key
+    client, _ = session_client(user_id)
     return client
 
 
@@ -355,8 +334,48 @@ def test_portal_invite_returns_400_without_customer_id():
 
 
 @pytest.mark.django_db
-def test_portal_invite_sets_token_and_returns_activation_url(settings):
-    settings.APP_URL = "https://torquetrackdiesel.com"
+def test_portal_invite_returns_404_for_unknown_customer():
+    _insert_user("usr_invite_unknown", permissions=["customers.edit"])
+    client = _admin_client("usr_invite_unknown")
+
+    response = client.post(
+        "/api/admin/customers/portal-invite/", {"customerId": "does-not-exist"}, format="json"
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Customer not found"}
+
+
+@pytest.mark.django_db
+def test_portal_invite_returns_400_for_a_customer_without_email():
+    _insert_user("usr_invite_no_email", permissions=["customers.edit"])
+    _make_customer(email=None)
+    client = _admin_client("usr_invite_no_email")
+
+    response = client.post(
+        "/api/admin/customers/portal-invite/", {"customerId": "cus_1"}, format="json"
+    )
+
+    assert response.status_code == 400
+
+
+@pytest.mark.django_db
+def test_portal_invite_returns_409_when_the_customer_already_has_an_account():
+    _insert_user("usr_invite_linked", permissions=["customers.edit"])
+    owner = create_user("U_LINKED", email="pat@example.com")
+    create_customer("cus_linked", email="pat@example.com", user=owner)
+    client = _admin_client("usr_invite_linked")
+
+    response = client.post(
+        "/api/admin/customers/portal-invite/", {"customerId": "cus_linked"}, format="json"
+    )
+
+    assert response.status_code == 409
+
+
+@pytest.mark.django_db
+def test_portal_invite_sets_token_and_returns_the_spa_activation_url(settings):
+    settings.APP_URL = "https://torquetrackdiesel.com/"
     _insert_user("usr_invite", permissions=["customers.edit"])
     _make_customer()
     client = _admin_client("usr_invite")
@@ -368,11 +387,28 @@ def test_portal_invite_sets_token_and_returns_activation_url(settings):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["activationUrl"].startswith(
-        "https://torquetrackdiesel.com/customer-login.html?token="
-    )
+    assert body["activationUrl"].startswith("https://torquetrackdiesel.com/activate?token=")
 
     customer = Customer.objects.get(pk="cus_1")
-    assert customer.portal_status == "INVITED"
     assert customer.activation_token_hash
     assert customer.activation_expires_at > timezone.now()
+
+    listed = _admin_client_with_view("usr_invite_list")
+    rows = listed.get("/api/admin/customers/").json()
+    assert rows[0]["portalStatus"] == "INVITED"
+
+
+def _admin_client_with_view(user_id):
+    _insert_user(user_id, permissions=["customers.view"])
+    return _admin_client(user_id)
+
+
+@pytest.mark.django_db
+def test_list_reports_active_portal_status_for_a_linked_customer():
+    owner = create_user("U_OWNER_ROW", email="pat@example.com")
+    create_customer("cus_active", email="pat@example.com", user=owner)
+    client = _admin_client_with_view("usr_portal_status")
+
+    rows = client.get("/api/admin/customers/").json()
+
+    assert rows[0]["portalStatus"] == "ACTIVE"

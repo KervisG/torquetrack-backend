@@ -128,7 +128,9 @@ def resolve_or_create_customer(customer: dict) -> str | None:
     if not email:
         return None
 
-    existing = Customer.objects.filter(email__iexact=email).first()
+    # Solo perfiles invitados: un email tipeado en el checkout no prueba nada,
+    # así que nunca debe mezclarse con el perfil de una cuenta registrada.
+    existing = Customer.objects.filter(email__iexact=email, user__isnull=True).first()
     if existing:
         existing.data = {**(existing.data or {}), **customer}
         existing.updated_at = timezone.now()

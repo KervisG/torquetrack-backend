@@ -5,8 +5,8 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.permissions import HasTorqueTrackPermission
-from apps.auth.authentication import AdminSessionAuthentication
 from apps.cart.services import list_admin_carts, sync_cart
 
 
@@ -19,7 +19,7 @@ class CartSyncView(APIView):
 
 
 class AdminCartsView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]
     required_permission = "carts.view"
 

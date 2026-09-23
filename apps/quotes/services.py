@@ -294,7 +294,9 @@ def _active_products(ids):
 
 
 def _resolve_or_merge_customer(name, email, phone) -> str:
-    existing = Customer.objects.filter(email__iexact=email).first()
+    # Solo perfiles invitados: un email tipeado en el checkout no prueba nada,
+    # así que nunca debe mezclarse con el perfil de una cuenta registrada.
+    existing = Customer.objects.filter(email__iexact=email, user__isnull=True).first()
     if existing:
         existing.data = {**(existing.data or {}), "name": name, "email": email, "phone": phone}
         existing.updated_at = timezone.now()

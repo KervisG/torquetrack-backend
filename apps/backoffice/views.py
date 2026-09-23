@@ -5,13 +5,13 @@ matching `app/api/admin/dashboard/route.ts` and
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.permissions import HasTorqueTrackPermission
-from apps.auth.authentication import AdminSessionAuthentication
 from apps.backoffice.services import get_dashboard_counts, list_recent_activity
 
 
 class AdminDashboardView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]
     required_permission = "dashboard.view"
 
@@ -20,7 +20,7 @@ class AdminDashboardView(APIView):
 
 
 class AdminActivityView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]
     required_permission = "activity.view"
 

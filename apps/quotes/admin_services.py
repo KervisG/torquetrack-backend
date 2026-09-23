@@ -51,7 +51,7 @@ def reopen_quote(quote: Quote) -> None:
     quote.save(update_fields=["status", "expires_at", "updated_at"])
 
 
-def convert_quote_to_order(quote: Quote, actor_username: str) -> dict:
+def convert_quote_to_order(quote: Quote, actor_email: str) -> dict:
     """`POST /api/admin/quotes/[id]/convert`."""
     if quote.status == "EXPIRED":
         return {"error": "Reopen this quote before converting it.", "status": 400}
@@ -69,7 +69,7 @@ def convert_quote_to_order(quote: Quote, actor_username: str) -> dict:
     order_data = {
         **data,
         "quoteNumber": quote.number,
-        "salesRep": actor_username,
+        "salesRep": actor_email,
         "totals": data.get("totals"),
     }
     Order.objects.create(
@@ -88,7 +88,7 @@ def convert_quote_to_order(quote: Quote, actor_username: str) -> dict:
     quote.save(update_fields=["status", "data", "updated_at"])
 
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="QUOTE_CONVERTED",
         entity_type="QUOTE",
         entity_id=quote.pk,
@@ -98,7 +98,7 @@ def convert_quote_to_order(quote: Quote, actor_username: str) -> dict:
     return {"ok": True, "order": {"id": order_id, "number": number}}
 
 
-def send_quote_email(quote: Quote, actor_username: str) -> dict:
+def send_quote_email(quote: Quote, actor_email: str) -> dict:
     """`POST /api/admin/quotes/[id]/send`."""
     serialized = serialize_quote(quote)
     customer = serialized.get("customer") or {}
@@ -132,7 +132,7 @@ def send_quote_email(quote: Quote, actor_username: str) -> dict:
         return {"error": sent.get("reason") or "Email could not be sent", "status": 502}
 
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="QUOTE_EMAILED",
         entity_type="QUOTE",
         entity_id=quote.pk,
@@ -210,14 +210,14 @@ def list_admin_quotes() -> list[dict]:
     return [serialize_quote(quote) for quote in quotes if not (quote.data or {}).get("archived")]
 
 
-def upsert_admin_quote(payload: dict, actor_username: str) -> dict:
+def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
     """`POST /api/admin/quotes` — creates a new quote, or updates an
     existing one when `payload["id"]` is present (preserving its `number`/
     `created_at`/`expires_at`)."""
     totals = _quote_totals(payload)
     status = payload.get("status") or "ACTIVE"
     customer_id = payload.get("customerId") or None
-    quote_data = {**payload, "totals": totals, "createdBy": actor_username}
+    quote_data = {**payload, "totals": totals, "createdBy": actor_email}
     now = timezone.now()
 
     quote_id = payload.get("id")
@@ -265,7 +265,7 @@ def upsert_admin_quote(payload: dict, actor_username: str) -> dict:
     }
 
 
-def delete_or_archive_quote(quote: Quote, actor_username: str) -> dict:
+def delete_or_archive_quote(quote: Quote, actor_email: str) -> dict:
     """`DELETE /api/admin/quotes/[id]` — archives (never deletes) a quote
     already linked to an Order, to preserve the financial/CRM trail; hard-
     deletes otherwise."""
@@ -277,12 +277,12 @@ def delete_or_archive_quote(quote: Quote, actor_username: str) -> dict:
             **data,
             "archived": True,
             "archivedAt": timezone.now().isoformat(),
-            "archivedBy": actor_username,
+            "archivedBy": actor_email,
         }
         quote.updated_at = timezone.now()
         quote.save(update_fields=["data", "updated_at"])
         ActivityLog.objects.create(
-            actor_id=actor_username,
+            actor_id=actor_email,
             action="QUOTE_ARCHIVED",
             entity_type="QUOTE",
             entity_id=quote.pk,
@@ -301,7 +301,7 @@ def delete_or_archive_quote(quote: Quote, actor_username: str) -> dict:
     quote_id = quote.pk
     quote.delete()
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="QUOTE_DELETED",
         entity_type="QUOTE",
         entity_id=quote_id,

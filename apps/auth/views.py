@@ -1,70 +1,90 @@
-"""`admin/login`, `admin/logout` y `admin/session`."""
+"""`register`, `login`, `logout` y `session`: una sola cuenta para clientes
+y staff. Entrar no da acceso al panel; eso lo decide el Role.
+"""
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth.authentication import AdminSessionAuthentication
-from apps.auth.permissions import is_active_admin_user
-from apps.auth.services import authenticate_admin_user, serialize_admin_session_user
+from apps.auth.authentication import SessionUserAuthentication
+from apps.auth.models import User
+from apps.auth.services import (
+    authenticate_user,
+    register_customer,
+    serialize_session_user,
+)
+from apps.auth.sessions import end_user_session, start_user_session
 from apps.auth.utils.throttling import (
-    AdminLoginAccountRateThrottle,
-    AdminLoginRateThrottle,
+    LoginAccountRateThrottle,
+    LoginRateThrottle,
+    RegisterRateThrottle,
 )
 
 
-class AdminLoginView(APIView):
-    """`POST /api/admin/login/`."""
+def _body(request) -> dict:
+    return request.data if isinstance(request.data, dict) else {}
+
+
+def _session_payload(user: User) -> dict:
+    return {"authenticated": True, "user": serialize_session_user(user)}
+
+
+class RegisterView(APIView):
+    """`POST /api/register/`."""
 
     authentication_classes = []
     permission_classes = [AllowAny]
-    throttle_classes = [AdminLoginRateThrottle, AdminLoginAccountRateThrottle]
+    throttle_classes = [RegisterRateThrottle]
 
     def post(self, request):
-        body = request.data if isinstance(request.data, dict) else {}
-        email = body.get("email") or body.get("username")
-        user = authenticate_admin_user(email, body.get("password"))
+        result = register_customer(_body(request))
+        if "error" in result:
+            return Response({"error": result["error"]}, status=result["status"])
+        start_user_session(request, result["user"])
+        return Response(_session_payload(result["user"]), status=201)
+
+
+class LoginView(APIView):
+    """`POST /api/login/`."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [LoginRateThrottle, LoginAccountRateThrottle]
+
+    def post(self, request):
+        body = _body(request)
+        user = authenticate_user(body.get("email"), body.get("password"))
         if user is None:
             return Response({"error": "Incorrect email or password"}, status=401)
-
-        session = request.admin_session
-        # `flush()` descarta la session key que el cliente ya traía, para que
-        # un token fijado de antemano por un tercero no quede promovido a
-        # sesión autenticada.
-        session.flush()
-        session["user_id"] = user.pk
-        return Response(
-            {
-                "ok": True,
-                "user": {
-                    "id": user.pk,
-                    "email": user.username,
-                    "username": user.username,
-                    "role": user.role,
-                },
-            }
-        )
+        start_user_session(request, user)
+        return Response(_session_payload(user))
 
 
-class AdminLogoutView(APIView):
-    """`POST /api/admin/logout/`."""
+class LogoutView(APIView):
+    """`POST /api/logout/`.
 
-    authentication_classes = []
+    Autentica con la sesión para que un logout cross-site sin token CSRF
+    no pueda cerrar la sesión de otra persona.
+    """
+
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
-        request.admin_session.flush()
+        end_user_session(request)
         return Response({"ok": True})
 
 
-class AdminSessionView(APIView):
-    """`GET /api/admin/session/`."""
+@method_decorator(ensure_csrf_cookie, name="dispatch")
+class SessionView(APIView):
+    """`GET /api/session/`. También entrega la cookie `csrftoken` al SPA,
+    aunque todavía no haya sesión."""
 
-    authentication_classes = [AdminSessionAuthentication]
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
-        if not is_active_admin_user(request.user):
+        if not isinstance(request.user, User):
             return Response({"error": "Unauthorized"}, status=401)
-        return Response(
-            {"authenticated": True, "user": serialize_admin_session_user(request.user)}
-        )
+        return Response(_session_payload(request.user))

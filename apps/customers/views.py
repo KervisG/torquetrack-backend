@@ -1,92 +1,121 @@
-"""`admin/customers` views (task 7.2), matching the route files documented
-in `apps/customers/services.py`.
+"""Endpoints públicos del cliente: autoservicio en `/api/account/**` y la
+activación del portal en `/api/activate/`.
 
-`tax-exemption` (GET) and `tax-status` (POST) intentionally do NOT use
-`HasTorqueTrackPermission` — the legacy routes gate on `requireAdmin()`
-alone (any active admin-role-or-employee session, 401-only), not a
-specific permission string. See the test module's docstring.
+El autoservicio exige una sesión (401) con un `Customer` vinculado (404).
+Los endpoints de staff viven en `admin_views.py`.
 """
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth.permissions import HasTorqueTrackPermission, is_active_admin_user
-from apps.auth.authentication import AdminSessionAuthentication
+from apps.auth.authentication import SessionUserAuthentication
+from apps.auth.models import User
+from apps.auth.services import serialize_session_user
+from apps.auth.sessions import start_user_session
+from apps.auth.utils.throttling import ActivateRateThrottle
 from apps.customers.services import (
-    create_portal_invite,
-    delete_admin_customer,
-    get_customer_tax_exemption,
-    list_admin_customers,
-    update_customer_tax_status,
-    upsert_admin_customer,
+    activate_customer_account,
+    customer_for_user,
+    list_account_orders,
+    list_account_quotes,
+    serialize_account,
+    submit_tax_exemption,
+    update_account,
 )
 
 
-class AdminCustomerListCreateView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
-    permission_classes = [HasTorqueTrackPermission]
+def _body(request) -> dict:
+    return request.data if isinstance(request.data, dict) else {}
 
-    @property
-    def required_permission(self):
-        return "customers.edit" if self.request.method == "POST" else "customers.view"
+
+def _error(result: dict) -> Response:
+    return Response({"error": result["error"]}, status=result.get("status", 400))
+
+
+class _AccountView(APIView):
+    authentication_classes = [SessionUserAuthentication]
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.customer = None
+        if isinstance(request.user, User):
+            self.customer = customer_for_user(request.user)
+
+    def _denied(self, request):
+        """Devuelve `None` si hay perfil, o el `Response` de error."""
+        if not isinstance(request.user, User):
+            return Response({"error": "Unauthorized"}, status=401)
+        if self.customer is None:
+            return Response({"error": "Customer profile not found"}, status=404)
+        return None
+
+
+class AccountView(_AccountView):
+    """`GET/PATCH /api/account/`."""
 
     def get(self, request):
-        return Response(list_admin_customers())
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        return Response({"customer": serialize_account(self.customer)})
+
+    def patch(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        result = update_account(self.customer, _body(request))
+        if "error" in result:
+            return _error(result)
+        return Response(result)
+
+
+class AccountOrdersView(_AccountView):
+    """`GET /api/account/orders/`."""
+
+    def get(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        return Response(list_account_orders(self.customer))
+
+
+class AccountQuotesView(_AccountView):
+    """`GET /api/account/quotes/`."""
+
+    def get(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        return Response(list_account_quotes(self.customer))
+
+
+class AccountTaxExemptionView(_AccountView):
+    """`POST /api/account/tax-exemption/`."""
 
     def post(self, request):
-        body = request.data if isinstance(request.data, dict) else {}
-        result = upsert_admin_customer(body)
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        result = submit_tax_exemption(self.customer, _body(request))
         if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
+            return _error(result)
         return Response(result)
 
 
-class AdminCustomerDeleteView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
-    permission_classes = [HasTorqueTrackPermission]
-    required_permission = "customers.delete"
+class ActivateAccountView(APIView):
+    """`POST /api/activate/` — `{token, password}` del enlace de invitación."""
 
-    def delete(self, request, customer_id):
-        result = delete_admin_customer(customer_id)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
-
-
-class AdminCustomerTaxExemptionView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
-
-    def get(self, request, customer_id):
-        if not is_active_admin_user(request.user):
-            return Response({"error": "Unauthorized"}, status=401)
-
-        result = get_customer_tax_exemption(customer_id)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
-
-
-class AdminCustomerTaxStatusView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
-
-    def post(self, request, customer_id):
-        if not is_active_admin_user(request.user):
-            return Response({"error": "Unauthorized"}, status=401)
-
-        body = request.data if isinstance(request.data, dict) else {}
-        result = update_customer_tax_status(customer_id, body, request.user.username)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
-
-
-class AdminCustomerPortalInviteView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
-    permission_classes = [HasTorqueTrackPermission]
-    required_permission = "customers.edit"
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ActivateRateThrottle]
 
     def post(self, request):
-        body = request.data if isinstance(request.data, dict) else {}
-        result = create_portal_invite(body)
+        result = activate_customer_account(_body(request))
         if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+            return _error(result)
+        start_user_session(request, result["user"])
+        return Response(
+            {"authenticated": True, "user": serialize_session_user(result["user"])},
+            status=201,
+        )

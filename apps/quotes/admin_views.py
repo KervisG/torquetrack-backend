@@ -3,14 +3,14 @@ list/create/delete (task 7.6, closing the scope gap flagged by Phase 6),
 matching `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`,
 `app/api/admin/quotes/route.ts`, and `app/api/admin/quotes/[id]/route.ts`.
 
-RBAC-gated via `HasTorqueTrackPermission` + `AdminSessionAuthentication`
+RBAC-gated via `HasTorqueTrackPermission` + `SessionUserAuthentication`
 (Phase 6 prerequisite, see `apps/auth/authentication.py`).
 """
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.permissions import HasTorqueTrackPermission
-from apps.auth.authentication import AdminSessionAuthentication
 from apps.quotes.admin_services import (
     convert_quote_to_order,
     delete_or_archive_quote,
@@ -24,7 +24,7 @@ from apps.quotes.models import Quote
 
 
 class _AdminQuoteActionView(APIView):
-    authentication_classes = [AdminSessionAuthentication]
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]
 
     def _get_quote(self, quote_id):
@@ -39,7 +39,7 @@ class QuoteConvertView(_AdminQuoteActionView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
 
-        result = convert_quote_to_order(quote, request.user.username)
+        result = convert_quote_to_order(quote, request.user.email)
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))
         return Response(result)
@@ -81,7 +81,7 @@ class QuoteSendView(_AdminQuoteActionView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
 
-        result = send_quote_email(quote, request.user.username)
+        result = send_quote_email(quote, request.user.email)
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))
         return Response(result)
@@ -94,7 +94,7 @@ class AdminQuoteListCreateView(APIView):
     reads `required_permission` before the handler runs, hence the
     property (evaluated once `self.request` exists in `initial()`)."""
 
-    authentication_classes = [AdminSessionAuthentication]
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [HasTorqueTrackPermission]
 
     @property
@@ -106,7 +106,7 @@ class AdminQuoteListCreateView(APIView):
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        result = upsert_admin_quote(body, request.user.username)
+        result = upsert_admin_quote(body, request.user.email)
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))
         return Response(result)
@@ -120,5 +120,5 @@ class QuoteDeleteView(_AdminQuoteActionView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
 
-        result = delete_or_archive_quote(quote, request.user.username)
+        result = delete_or_archive_quote(quote, request.user.email)
         return Response(result)

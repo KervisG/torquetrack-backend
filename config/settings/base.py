@@ -47,13 +47,6 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
-    # Design decision #5 (auth/RBAC): dual session scopes equivalent to
-    # the frozen Next.js app's tt_admin/tt_customer cookies. Additive to
-    # the generic single-cookie SessionMiddleware above (kept for Django's
-    # own admin site and any future generic use); these two attach
-    # `request.admin_session` / `request.customer_session` independently.
-    "apps.auth.sessions.AdminSessionMiddleware",
-    "apps.auth.sessions.CustomerSessionMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
@@ -91,15 +84,8 @@ DATABASES = {
 if env.bool("DATABASE_SSL", default=False):
     DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}
 
-# Design decision #5 (auth): `ScryptLegacyHasher` verifies the existing
-# Next.js `scrypt$salt$hash` rows and rehashes to PBKDF2 (Django's default)
-# on next successful login. Django's OWN `ScryptPasswordHasher` also uses
-# `algorithm = "scrypt"` but a different 6-part encoding — it is
-# deliberately NOT listed here to avoid colliding with `ScryptLegacyHasher`
-# for that same algorithm name (see `apps/auth/utils/hashers.py`).
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
-    "apps.auth.utils.hashers.ScryptLegacyHasher",
 ]
 
 AUTH_PASSWORD_VALIDATORS = [
@@ -118,22 +104,29 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Design decision #5 (auth): 7-day default expiry for both admin and
-# customer session scopes (`apps/auth/sessions.py`), matching
-# `lib/auth.ts`'s `newSession(kind, subjectId, days=7)`.
+# Una sola sesión para clientes y staff (`apps/auth/sessions.py`), con la
+# cookie `tt_session`, 7 días de vida, httpOnly y SameSite=Lax.
+SESSION_COOKIE_NAME = "tt_session"
 SESSION_COOKIE_AGE = 7 * 24 * 60 * 60
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+
+# El SPA lee `csrftoken` y lo manda en `X-CSRFToken` en cada request que muta.
+# El proxy de Vite reescribe el Host, así que el origen del SPA tiene que
+# figurar como confiable o Django rechaza el `Origin`.
+CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=["http://localhost:5173"])
 
 REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
-    # Solo el scope del login de admin: el resto de los endpoints sigue sin
-    # tope para no desviarse del contrato legado en esta fase
-    # (`apps/auth/utils/throttling.py`).
+    # Scopes de los endpoints públicos de cuenta (`apps/auth/utils/throttling.py`).
+    # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
     "DEFAULT_THROTTLE_RATES": {
-        "admin_login": env("ADMIN_LOGIN_THROTTLE_RATE", default="10/min"),
-        # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
-        "admin_login_account": env("ADMIN_LOGIN_ACCOUNT_THROTTLE_RATE", default="20/hour"),
+        "login": env("LOGIN_THROTTLE_RATE", default="10/min"),
+        "login_account": env("LOGIN_ACCOUNT_THROTTLE_RATE", default="20/hour"),
+        "register": env("REGISTER_THROTTLE_RATE", default="10/hour"),
+        "activate": env("ACTIVATE_THROTTLE_RATE", default="10/hour"),
     },
 }
 

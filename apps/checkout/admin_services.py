@@ -57,7 +57,7 @@ def list_admin_orders() -> list[dict]:
     return [_serialize_order(order) for order in orders]
 
 
-def _update_order_status(order: Order, raw_status: str, actor_username: str) -> dict:
+def _update_order_status(order: Order, raw_status: str, actor_email: str) -> dict:
     status = raw_status.upper()
     if status not in ORDER_STATUSES:
         return {"error": "Invalid order status", "status": 400}
@@ -66,7 +66,7 @@ def _update_order_status(order: Order, raw_status: str, actor_username: str) -> 
     order.updated_at = timezone.now()
     order.save(update_fields=["status", "updated_at"])
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="ORDER_STATUS_CHANGED",
         entity_type="ORDER",
         entity_id=order.pk,
@@ -76,7 +76,7 @@ def _update_order_status(order: Order, raw_status: str, actor_username: str) -> 
     return {"ok": True, "status": status}
 
 
-def _update_order_workflow(order: Order, workflow: dict, actor_username: str) -> dict:
+def _update_order_workflow(order: Order, workflow: dict, actor_email: str) -> dict:
     patch: dict = {}
 
     core_case = workflow.get("coreCase")
@@ -84,14 +84,14 @@ def _update_order_workflow(order: Order, workflow: dict, actor_username: str) ->
         core_status = str(core_case.get("status") or "").upper()
         if core_status not in CORE_STATUSES:
             return {"error": "Invalid core status", "status": 400}
-        patch["coreCase"] = {**core_case, "status": core_status, "updatedBy": actor_username}
+        patch["coreCase"] = {**core_case, "status": core_status, "updatedBy": actor_email}
 
     return_case = workflow.get("returnCase")
     if return_case:
         return_status = str(return_case.get("status") or "").upper()
         if return_status not in RETURN_STATUSES:
             return {"error": "Invalid return status", "status": 400}
-        patch["returnCase"] = {**return_case, "status": return_status, "updatedBy": actor_username}
+        patch["returnCase"] = {**return_case, "status": return_status, "updatedBy": actor_email}
 
     if not patch:
         return {"error": "No workflow changes supplied", "status": 400}
@@ -100,7 +100,7 @@ def _update_order_workflow(order: Order, workflow: dict, actor_username: str) ->
     order.updated_at = timezone.now()
     order.save(update_fields=["data", "updated_at"])
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="ORDER_WORKFLOW_UPDATED",
         entity_type="ORDER",
         entity_id=order.pk,
@@ -110,22 +110,22 @@ def _update_order_workflow(order: Order, workflow: dict, actor_username: str) ->
     return {"ok": True, **patch}
 
 
-def patch_admin_order(order_id: str, payload: dict, actor_username: str) -> dict:
+def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
 
     if payload.get("status"):
-        return _update_order_status(order, str(payload["status"]), actor_username)
+        return _update_order_status(order, str(payload["status"]), actor_email)
 
     workflow = payload.get("workflow")
     if isinstance(workflow, dict):
-        return _update_order_workflow(order, workflow, actor_username)
+        return _update_order_workflow(order, workflow, actor_email)
 
     return {"error": "No supported changes supplied", "status": 400}
 
 
-def delete_admin_order(order_id: str, actor_username: str) -> dict:
+def delete_admin_order(order_id: str, actor_email: str) -> dict:
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
@@ -141,7 +141,7 @@ def delete_admin_order(order_id: str, actor_username: str) -> dict:
     Payment.objects.filter(order=order).delete()
     order.delete()
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="UNPAID_ORDER_DELETED",
         entity_type="ORDER",
         entity_id=order_id,
@@ -204,7 +204,7 @@ def create_admin_payment_link(order_id: str) -> dict:
     return {"ok": True, "url": session["url"], "emailed": emailed}
 
 
-def take_admin_payment(order_id: str, actor_username: str) -> dict:
+def take_admin_payment(order_id: str, actor_email: str) -> dict:
     """`POST /api/admin/orders/[id]/take-payment` — unlike payment-link,
     does NOT change `order.status` and logs `TAKE_PAYMENT_STARTED` instead
     of emailing the customer."""
@@ -231,14 +231,14 @@ def take_admin_payment(order_id: str, actor_username: str) -> dict:
         amount=total,
         data={
             "sessionId": session["id"],
-            "employee": actor_username,
+            "employee": actor_email,
             "source": "EMPLOYEE_TAKE_PAYMENT",
         },
         created_at=timezone.now(),
         updated_at=timezone.now(),
     )
     ActivityLog.objects.create(
-        actor_id=actor_username,
+        actor_id=actor_email,
         action="TAKE_PAYMENT_STARTED",
         entity_type="ORDER",
         entity_id=order_id,

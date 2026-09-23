@@ -1,6 +1,8 @@
-"""Rate limit del login de admin (`POST /api/admin/login/`).
+"""Rate limit de los endpoints públicos de cuenta: login, registro y
+activación del portal.
 
-Un login de staff sin tope es fuerza bruta gratis contra el hash.
+Un login sin tope es fuerza bruta gratis contra el hash, y un registro o
+una activación sin tope sirven para crear cuentas en masa o adivinar tokens.
 """
 import hashlib
 
@@ -33,20 +35,27 @@ class _IpRateThrottle(SimpleRateThrottle):
         }
 
 
-class AdminLoginRateThrottle(_IpRateThrottle):
-    scope = "admin_login"
+class LoginRateThrottle(_IpRateThrottle):
+    scope = "login"
 
 
-class AdminLoginAccountRateThrottle(SimpleRateThrottle):
+class RegisterRateThrottle(_IpRateThrottle):
+    scope = "register"
+
+
+class ActivateRateThrottle(_IpRateThrottle):
+    scope = "activate"
+
+
+class LoginAccountRateThrottle(SimpleRateThrottle):
     """Tope por cuenta atacada, para que repartir el ataque entre muchas IPs
     no esquive el límite por IP."""
 
-    scope = "admin_login_account"
+    scope = "login_account"
 
     def get_cache_key(self, request, view):
         body = request.data if isinstance(request.data, dict) else {}
-        # Mismo campo que resuelve `AdminLoginView.post`.
-        identifier = body.get("email") or body.get("username")
+        identifier = body.get("email")
         if not isinstance(identifier, str) or not identifier.strip():
             return None
         # Se hashea para que los emails no queden en claro en las keys del cache.

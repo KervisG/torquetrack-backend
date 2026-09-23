@@ -1,62 +1,62 @@
-"""RED/GREEN evidence for `AdminSessionAuthentication` (Phase 6 task 6.3
-prerequisite — see `apps/auth/authentication.py`).
+"""`SessionUserAuthentication`: puente de `request.session` a `request.user`.
+
+Nunca devuelve `None`: sin sesión válida resuelve a `AnonymousUser`, así las
+permission classes responden 403 y no el 401 por defecto de DRF.
 """
 import pytest
-from django.db import connection
+from django.contrib.sessions.backends.db import SessionStore
+from rest_framework.request import Request
 from rest_framework.test import APIRequestFactory
 
+from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.models import User
-from apps.auth.authentication import AdminSessionAuthentication
+from tests.factories import create_staff_user, create_user
 
 
-def _insert_user(user_id, role="authorized", permissions=None, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into users (id, username, password_hash, role, active, "
-            "permissions) values (%s, %s, %s, %s, %s, %s::jsonb)",
-            [user_id, f"{user_id}@example.com", "scrypt$salt$hash", role, active,
-             "[]" if permissions is None else __import__("json").dumps(permissions)],
-        )
+def _request_with_session(data):
+    django_request = APIRequestFactory().get("/")
+    session = SessionStore()
+    session.update(data)
+    django_request.session = session
+    return Request(django_request)
 
 
 @pytest.mark.django_db
-def test_no_session_resolves_to_anonymous_but_authenticated():
-    request = APIRequestFactory().get("/")
-    request.admin_session = {}
-
-    user, _ = AdminSessionAuthentication().authenticate(request)
+def test_no_session_resolves_to_anonymous():
+    user, _ = SessionUserAuthentication().authenticate(_request_with_session({}))
 
     assert user.is_anonymous
 
 
 @pytest.mark.django_db
 def test_session_with_unknown_user_id_resolves_to_anonymous():
-    request = APIRequestFactory().get("/")
-    request.admin_session = {"user_id": "does-not-exist"}
+    request = _request_with_session({"user_id": "does-not-exist"})
 
-    user, _ = AdminSessionAuthentication().authenticate(request)
+    user, _ = SessionUserAuthentication().authenticate(request)
 
     assert user.is_anonymous
 
 
 @pytest.mark.django_db
 def test_session_with_inactive_user_resolves_to_anonymous():
-    _insert_user("usr_inactive", active=False)
-    request = APIRequestFactory().get("/")
-    request.admin_session = {"user_id": "usr_inactive"}
+    create_user("U_INACTIVE", active=False)
 
-    user, _ = AdminSessionAuthentication().authenticate(request)
+    user, _ = SessionUserAuthentication().authenticate(
+        _request_with_session({"user_id": "U_INACTIVE"})
+    )
 
     assert user.is_anonymous
 
 
 @pytest.mark.django_db
-def test_session_with_active_user_id_resolves_to_that_user():
-    _insert_user("usr_active", role="admin")
-    request = APIRequestFactory().get("/")
-    request.admin_session = {"user_id": "usr_active"}
+def test_session_with_active_user_id_resolves_to_that_user_with_its_role():
+    create_staff_user("U_ACTIVE", full_access=True)
 
-    user, _ = AdminSessionAuthentication().authenticate(request)
+    user, _ = SessionUserAuthentication().authenticate(
+        _request_with_session({"user_id": "U_ACTIVE"})
+    )
 
     assert isinstance(user, User)
-    assert user.pk == "usr_active"
+    assert user.pk == "U_ACTIVE"
+    assert user.is_authenticated is True
+    assert user.role.full_access is True

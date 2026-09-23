@@ -1,50 +1,29 @@
 """Admin quote actions (task 6.3): convert/preview/reopen/send, pinned
 against `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`.
 
-RBAC-gated via `AdminSessionAuthentication` + `HasTorqueTrackPermission`
-(Phase 6 prerequisite). Tests exercise the REAL cookie -> session ->
-`request.user` round trip (not `force_authenticate`), by creating a
-session directly via Django's `SessionStore` — exactly what a login view
-would do — and sending it as the `tt_admin` cookie, matching
-`AdminSessionMiddleware`'s cookie name.
+RBAC-gated via `SessionUserAuthentication` + `HasTorqueTrackPermission`.
+Los tests recorren el camino real cookie -> sesión -> `request.user` con
+una sesión creada en `SessionStore` y enviada como cookie `tt_session`.
 """
-import json
-from importlib import import_module
 
 import pytest
-from django.conf import settings
-from django.db import connection
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.backoffice.models import ActivityLog
 from apps.checkout.models import Order
 from apps.quotes.models import Quote
+from tests.factories import create_staff_user, session_client
 
 
-def _insert_user(user_id, role="authorized", permissions=None, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into users (id, username, password_hash, role, active, "
-            "permissions) values (%s, %s, %s, %s, %s, %s::jsonb)",
-            [
-                user_id,
-                f"{user_id}@example.com",
-                "scrypt$salt$hash",
-                role,
-                active,
-                json.dumps(permissions or []),
-            ],
-        )
+def _insert_user(user_id, permissions=None, active=True, full_access=False):
+    create_staff_user(
+        user_id, permissions=permissions, active=active, full_access=full_access
+    )
 
 
 def _admin_client(user_id):
-    engine = import_module(settings.SESSION_ENGINE)
-    store = engine.SessionStore()
-    store["user_id"] = user_id
-    store.save()
-    client = APIClient()
-    client.cookies["tt_admin"] = store.session_key
+    client, _ = session_client(user_id)
     return client
 
 
@@ -79,7 +58,7 @@ def test_admin_action_returns_403_without_session():
 
 @pytest.mark.django_db
 def test_admin_action_returns_403_without_the_required_permission():
-    _insert_user("usr_no_perm", role="authorized", permissions=["quotes.view"])
+    _insert_user("usr_no_perm", permissions=["quotes.view"])
     _make_quote()
     client = _admin_client("usr_no_perm")
 
@@ -93,7 +72,7 @@ def test_admin_action_returns_403_without_the_required_permission():
 
 @pytest.mark.django_db
 def test_convert_creates_order_from_quote():
-    _insert_user("usr_convert", role="authorized", permissions=["quotes.convert"])
+    _insert_user("usr_convert", permissions=["quotes.convert"])
     _make_quote()
     client = _admin_client("usr_convert")
 
@@ -112,7 +91,7 @@ def test_convert_creates_order_from_quote():
 
 @pytest.mark.django_db
 def test_convert_rejects_expired_status_quote():
-    _insert_user("usr_convert2", role="admin")
+    _insert_user("usr_convert2", full_access=True)
     _make_quote(quote_id="quo_admin_expired", number="Q30002", status="EXPIRED")
     client = _admin_client("usr_convert2")
 
@@ -124,7 +103,7 @@ def test_convert_rejects_expired_status_quote():
 
 @pytest.mark.django_db
 def test_convert_reuses_existing_order_when_already_converted():
-    _insert_user("usr_convert3", role="admin")
+    _insert_user("usr_convert3", full_access=True)
     Order.objects.create(
         id="OID_PRIOR",
         number="O80001",
@@ -153,7 +132,7 @@ def test_convert_reuses_existing_order_when_already_converted():
 
 @pytest.mark.django_db
 def test_convert_returns_404_for_unknown_quote():
-    _insert_user("usr_convert4", role="admin")
+    _insert_user("usr_convert4", full_access=True)
     client = _admin_client("usr_convert4")
 
     response = client.post("/api/admin/quotes/does-not-exist/convert/")
@@ -166,7 +145,7 @@ def test_convert_returns_404_for_unknown_quote():
 
 @pytest.mark.django_db
 def test_preview_generates_public_token_when_missing():
-    _insert_user("usr_preview", role="authorized", permissions=["quotes.view"])
+    _insert_user("usr_preview", permissions=["quotes.view"])
     _make_quote()
     client = _admin_client("usr_preview")
 
@@ -182,7 +161,7 @@ def test_preview_generates_public_token_when_missing():
 
 @pytest.mark.django_db
 def test_preview_reuses_existing_public_token():
-    _insert_user("usr_preview2", role="authorized", permissions=["quotes.view"])
+    _insert_user("usr_preview2", permissions=["quotes.view"])
     _make_quote(data={"publicToken": "already-issued-token"})
     client = _admin_client("usr_preview2")
 
@@ -197,7 +176,7 @@ def test_preview_reuses_existing_public_token():
 
 @pytest.mark.django_db
 def test_reopen_resets_status_and_expiry():
-    _insert_user("usr_reopen", role="authorized", permissions=["quotes.edit"])
+    _insert_user("usr_reopen", permissions=["quotes.edit"])
     _make_quote(status="EXPIRED")
 
     client = _admin_client("usr_reopen")
@@ -214,7 +193,7 @@ def test_reopen_resets_status_and_expiry():
 
 @pytest.mark.django_db
 def test_send_requires_customer_email():
-    _insert_user("usr_send", role="authorized", permissions=["quotes.send"])
+    _insert_user("usr_send", permissions=["quotes.send"])
     _make_quote(data={"customer": {"name": "No Email"}})
     client = _admin_client("usr_send")
 
@@ -228,7 +207,7 @@ def test_send_requires_customer_email():
 def test_send_emails_quote_with_pdf_attachment_and_logs_activity(settings, monkeypatch):
     settings.RESEND_API_KEY = "re_test_fake"
     settings.FROM_EMAIL = "sales@torquetrackdiesel.com"
-    _insert_user("usr_send2", role="authorized", permissions=["quotes.send"])
+    _insert_user("usr_send2", permissions=["quotes.send"])
     _make_quote(status="BUILDING")
 
     captured = {}
@@ -267,7 +246,7 @@ def test_send_emails_quote_with_pdf_attachment_and_logs_activity(settings, monke
 def test_send_returns_502_when_email_provider_not_configured(settings):
     settings.RESEND_API_KEY = ""
     settings.FROM_EMAIL = ""
-    _insert_user("usr_send3", role="authorized", permissions=["quotes.send"])
+    _insert_user("usr_send3", permissions=["quotes.send"])
     _make_quote()
     client = _admin_client("usr_send3")
 

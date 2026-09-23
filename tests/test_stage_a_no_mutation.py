@@ -17,14 +17,19 @@ from io import StringIO
 import pytest
 from django.core.management import call_command
 
-from tests.stage_a_tables import STAGE_A_TABLES
+from tests.stage_a_tables import DJANGO_MANAGED_TABLES, STAGE_A_TABLES
 
-STAGE_A_APPS = ["tt_auth", "customers", "catalog", "cart", "checkout", "quotes"]
+STAGE_A_APPS = ["catalog", "cart", "checkout", "quotes"]
 
 
 @pytest.mark.django_db
 def test_migrate_created_none_of_the_stage_a_tables(stage_a_tables_before_schema_sql):
     assert STAGE_A_TABLES.isdisjoint(stage_a_tables_before_schema_sql)
+
+
+@pytest.mark.django_db
+def test_migrate_creates_the_django_managed_account_tables(stage_a_tables_before_schema_sql):
+    assert DJANGO_MANAGED_TABLES.issubset(stage_a_tables_before_schema_sql)
 
 
 @pytest.mark.django_db

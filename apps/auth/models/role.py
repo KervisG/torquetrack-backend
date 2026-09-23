@@ -1,5 +1,7 @@
 """Roles de staff. Se crean en `/admin/` con nombre, slug y el selector
 de Permission de Django. `full_access` es el Admin.
+
+Un `User` con Role es staff; el Role es la única fuente de permisos.
 """
 from django.contrib.auth.models import Permission
 from django.db import models
@@ -21,18 +23,3 @@ class Role(models.Model):
 
     def __str__(self) -> str:
         return self.name
-
-
-class EmployeeRole(models.Model):
-    """Une `users.id` con un Role. Sin FK SQL a `users` porque esa tabla
-    la crea `schema.sql` después de `migrate`.
-    """
-
-    user_id = models.TextField(unique=True)
-    role = models.ForeignKey(Role, on_delete=models.PROTECT, related_name="assignments")
-
-    class Meta:
-        db_table = "employee_roles"
-
-    def __str__(self) -> str:
-        return f"{self.user_id} → {self.role.slug}"

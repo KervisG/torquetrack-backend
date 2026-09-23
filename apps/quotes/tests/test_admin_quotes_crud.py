@@ -2,42 +2,23 @@
 scope gap not covered by task 6.3), pinned against
 `app/api/admin/quotes/route.ts` and `app/api/admin/quotes/[id]/route.ts`.
 """
-import json
-from importlib import import_module
 
 import pytest
-from django.conf import settings
-from django.db import connection
 from django.utils import timezone
-from rest_framework.test import APIClient
 
 from apps.backoffice.models import ActivityLog
 from apps.quotes.models import Quote
+from tests.factories import create_staff_user, session_client
 
 
-def _insert_user(user_id, role="authorized", permissions=None, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into users (id, username, password_hash, role, active, "
-            "permissions) values (%s, %s, %s, %s, %s, %s::jsonb)",
-            [
-                user_id,
-                f"{user_id}@example.com",
-                "scrypt$salt$hash",
-                role,
-                active,
-                json.dumps(permissions or []),
-            ],
-        )
+def _insert_user(user_id, permissions=None, active=True, full_access=False):
+    create_staff_user(
+        user_id, permissions=permissions, active=active, full_access=full_access
+    )
 
 
 def _admin_client(user_id):
-    engine = import_module(settings.SESSION_ENGINE)
-    store = engine.SessionStore()
-    store["user_id"] = user_id
-    store.save()
-    client = APIClient()
-    client.cookies["tt_admin"] = store.session_key
+    client, _ = session_client(user_id)
     return client
 
 

@@ -1,68 +1,119 @@
-"""Alta, listado, edición y baja de usuarios del panel (`/api/admin/users/`).
+"""Usuarios y roles del panel (`/api/admin/users/`, `/api/admin/roles/`).
 
-El alta la hace solo quien tiene `users.manage`, con un Role explícito. En la
-edición el Role no cambia: se reasigna en `/admin/` de Django.
+Solo quien tiene `users.manage` llega aquí. El Role se identifica por
+`slug`. Dos reglas evitan escalar privilegios por encima del propio Role:
+nadie sin acceso total concede acceso total, ni edita a quien lo tiene.
 """
 from __future__ import annotations
 
 from django.contrib.auth.hashers import make_password
 from django.db import IntegrityError, transaction
-from django.db.models import Case, When
+from django.db.models import Case, IntegerField, When
 from django.utils import timezone
 
-from apps.auth.models import EmployeeRole, User
+from apps.auth.models import Role, User
 from apps.auth.permissions import (
-    assign_staff_role,
-    attach_staff_roles,
-    get_staff_role,
     is_full_access,
-    legacy_role_label,
-    permission_strings_for_role,
-    role_from_payload,
-    stored_permissions_for_role,
+    permission_codenames_for_role,
+    role_by_slug,
 )
-from apps.auth.services import compose_display_name, parse_email
-from apps.auth.sessions import revoke_admin_sessions
+from apps.auth.services import (
+    compose_display_name,
+    create_account,
+    parse_email,
+    password_error,
+    serialize_role,
+)
+from apps.auth.sessions import revoke_user_sessions
 from apps.backoffice.models import ActivityLog
-from apps.checkout.services import random_id
+
+_MISSING = object()
 
 
-def _serialize_user(user: User) -> dict:
-    role = get_staff_role(user)
+def _serialize_user(user: User, codenames_cache: dict | None = None) -> dict:
+    role = user.role if user.role_id is not None else None
+    if role is None:
+        permissions = []
+    elif codenames_cache is not None:
+        if role.pk not in codenames_cache:
+            codenames_cache[role.pk] = permission_codenames_for_role(role)
+        permissions = codenames_cache[role.pk]
+    else:
+        permissions = permission_codenames_for_role(role)
     first_name, last_name = user.given_names()
-    payload = {
+    return {
         "id": user.pk,
-        "email": user.username,
+        "email": user.email,
         "firstName": first_name,
         "lastName": last_name,
         "name": user.full_name(),
-        "username": user.username,
-        "role": legacy_role_label(role) if role is not None else user.role,
         "active": user.active,
-        "permissions": (
-            permission_strings_for_role(role)
-            if role is not None
-            else (user.permissions or [])
-        ),
+        "isStaff": user.active and role is not None,
+        "role": serialize_role(role) if role is not None else None,
+        "permissions": permissions,
         "createdAt": user.created_at,
     }
-    if role is not None:
-        payload["roleSlug"] = role.slug
-    return payload
+
+
+def _parse_active(payload: dict):
+    """`(valor, error)`. Un string `"false"` es truthy en Python: sin esta
+    validación desactivar desde un form terminaría activando."""
+    if "active" not in payload:
+        return _MISSING, None
+    value = payload["active"]
+    if not isinstance(value, bool):
+        return None, {"error": "active must be a boolean", "status": 400}
+    return value, None
+
+
+def _parse_role(payload: dict):
+    """`(role | None | _MISSING, error)`. `role: null` quita el acceso al panel."""
+    if "role" not in payload:
+        return _MISSING, None
+    raw = payload["role"]
+    if raw is None:
+        return None, None
+    role = role_by_slug(raw)
+    if role is None:
+        return None, {"error": "Valid role required", "status": 400}
+    return role, None
+
+
+def _log(actor: User, action: str, user_id: str, data: dict) -> None:
+    ActivityLog.objects.create(
+        actor_id=actor.email,
+        action=action,
+        entity_type="USER",
+        entity_id=user_id,
+        data=data,
+        created_at=timezone.now(),
+    )
+
+
+def list_admin_roles() -> list[dict]:
+    """`GET /api/admin/roles/`."""
+    return [
+        {"id": role.pk, **serialize_role(role)}
+        for role in Role.objects.order_by("-full_access", "name")
+    ]
 
 
 def list_admin_users() -> list[dict]:
-    """`GET /api/admin/users/` — el rol admin primero, luego por `created_at`."""
-    users = list(
-        User.objects.order_by(
-            Case(When(role="admin", then=0), default=1), "created_at"
-        )
+    """`GET /api/admin/users/` — acceso total, luego staff, luego clientes."""
+    users = User.objects.select_related("role").order_by(
+        Case(
+            When(role__full_access=True, then=0),
+            When(role__isnull=False, then=1),
+            default=2,
+            output_field=IntegerField(),
+        ),
+        "created_at",
     )
-    attach_staff_roles(users)
-    return [_serialize_user(user) for user in users]
+    cache: dict = {}
+    return [_serialize_user(user, cache) for user in users]
 
 
-def create_admin_user(payload: dict, actor) -> dict:
+def create_admin_user(payload: dict, actor: User) -> dict:
     """`POST /api/admin/users/` — correo, contraseña, nombre, apellidos y Role.
 
     El id lo genera el servidor; un `id` en el body se ignora.
@@ -77,176 +128,160 @@ def create_admin_user(payload: dict, actor) -> dict:
             "status": 400,
         }
 
-    role = role_from_payload(payload.get("role"))
-    if role is None:
+    role, error = _parse_role(payload)
+    if error is not None or role is None or role is _MISSING:
         return {"error": "Valid role required", "status": 400}
-    # `users.manage` no basta para crear un acceso total: sería escalar
-    # privilegios por encima del propio Role.
     if role.full_access and not is_full_access(actor):
         return {"error": "Only a full access user can grant full access", "status": 403}
 
-    user_id = random_id("U")
-    display_name = compose_display_name(first_name, last_name)
-    users_role = legacy_role_label(role)
+    active, error = _parse_active(payload)
+    if error is not None:
+        return error
 
-    try:
-        with transaction.atomic():
-            user = User.objects.create(
-                id=user_id,
-                first_name=first_name,
-                last_name=last_name,
-                display_name=display_name,
-                username=email,
-                password_hash=make_password(str(password)),
-                role=users_role,
-                active=True,
-                permissions=stored_permissions_for_role(role),
-                created_at=timezone.now(),
-            )
-            assign_staff_role(user_id, role)
-    except IntegrityError:
-        return {"error": "Email already exists", "status": 409}
+    with transaction.atomic():
+        result = create_account(
+            email=email,
+            password=str(password),
+            first_name=first_name,
+            last_name=last_name,
+            role=role,
+        )
+        if "error" in result:
+            return result
+        user = result["user"]
+        if active is False:
+            user.active = False
+            user.save(update_fields=["active"])
 
-    ActivityLog.objects.create(
-        actor_id=actor.username,
-        action="USER_CREATED",
-        entity_type="USER",
-        entity_id=user_id,
-        data={"email": email, "role": role.slug},
-        created_at=timezone.now(),
-    )
-    user._staff_role = role
+    _log(actor, "USER_CREATED", user.pk, {"email": email, "role": role.slug})
     return {"ok": True, "user": _serialize_user(user)}
 
 
-def update_admin_user(user_id: str, payload: dict, actor_username: str) -> dict:
-    """`PUT /api/admin/users/[id]/`.
+def _has_full_access_role(user: User) -> bool:
+    """Mira el Role aunque la cuenta esté inactiva: una cuenta de acceso
+    total desactivada sigue sin poder tocarla quien no tiene acceso total."""
+    return user.role_id is not None and user.role.full_access
 
-    Quien tiene un Role de acceso total no se desactiva. El Role no se
-    cambia aquí.
+
+def _is_last_full_access_user(target: User) -> bool:
+    return not User.objects.filter(
+        active=True, role__full_access=True
+    ).exclude(pk=target.pk).exists()
+
+
+def update_admin_user(user_id: str, payload: dict, actor: User) -> dict:
+    """`PUT /api/admin/users/[id]/` — email, nombres, contraseña, `active` y
+    `role` (slug, o `null` para quitar el acceso al panel).
+
+    Cambiar el Role, la contraseña o desactivar corta sus sesiones vivas.
     """
-    target = User.objects.filter(pk=user_id).first()
+    target = User.objects.select_related("role").filter(pk=user_id).first()
     if target is None:
         return {"error": "User not found", "status": 404}
 
-    email = None
-    if payload.get("email") is not None or payload.get("username") is not None:
-        email = parse_email(payload.get("email") or payload.get("username"))
-        if email is None:
-            return {"error": "Valid email required", "status": 400}
+    target_full_access = _has_full_access_role(target)
+    if target_full_access and not is_full_access(actor):
+        return {
+            "error": "Only a full access user can modify a full access user",
+            "status": 403,
+        }
 
-    first_name = (
-        str(payload.get("firstName")).strip()
-        if payload.get("firstName") is not None
-        else None
-    )
-    last_name = (
-        str(payload.get("lastName")).strip()
-        if payload.get("lastName") is not None
-        else None
-    )
+    active, error = _parse_active(payload)
+    if error is not None:
+        return error
+    new_role, error = _parse_role(payload)
+    if error is not None:
+        return error
 
-    if is_full_access(target):
-        if payload.get("active") is False:
+    if new_role is not _MISSING and new_role is not None and new_role.full_access:
+        if not is_full_access(actor):
+            return {"error": "Only a full access user can grant full access", "status": 403}
+
+    if target_full_access:
+        if active is False:
+            return {"error": "A full access user must remain active", "status": 403}
+        loses_full_access = new_role is not _MISSING and (
+            new_role is None or not new_role.full_access
+        )
+        if loses_full_access and _is_last_full_access_user(target):
             return {
-                "error": "The primary Admin must remain active with full access",
+                "error": "At least one active full access user is required",
                 "status": 403,
             }
 
-        if first_name is not None:
-            target.first_name = first_name
-        if last_name is not None:
-            target.last_name = last_name
-        if first_name is not None or last_name is not None:
-            target.display_name = compose_display_name(
-                (target.first_name or "").strip(),
-                (target.last_name or "").strip(),
-            )
-        if email is not None:
-            target.username = email
-        if payload.get("password"):
-            target.password_hash = make_password(str(payload["password"]))
-        target.save(
-            update_fields=[
-                "first_name",
-                "last_name",
-                "display_name",
-                "username",
-                "password_hash",
-            ]
-        )
-        permissions_for_log = ["*"]
-    else:
-        if first_name is not None:
-            target.first_name = first_name
-        if last_name is not None:
-            target.last_name = last_name
-        if first_name is not None or last_name is not None:
-            target.display_name = compose_display_name(
-                (target.first_name or "").strip(),
-                (target.last_name or "").strip(),
-            )
-        if email is not None:
-            target.username = email
-        if payload.get("active") is not None:
-            target.active = payload["active"]
-        if payload.get("password"):
-            target.password_hash = make_password(str(payload["password"]))
-        target.save(
-            update_fields=[
-                "first_name",
-                "last_name",
-                "display_name",
-                "username",
-                "active",
-                "password_hash",
-            ]
-        )
-        current_role = get_staff_role(target)
-        permissions_for_log = (
-            stored_permissions_for_role(current_role)
-            if current_role is not None
-            else (target.permissions or [])
-        )
-        if payload.get("active") is False:
-            revoke_admin_sessions(user_id)
+    email = None
+    if payload.get("email") is not None:
+        email = parse_email(payload.get("email"))
+        if email is None:
+            return {"error": "Valid email required", "status": 400}
+        if User.objects.filter(email=email).exclude(pk=target.pk).exists():
+            return {"error": "Email already exists", "status": 409}
 
-    ActivityLog.objects.create(
-        actor_id=actor_username,
-        action="USER_UPDATED",
-        entity_type="USER",
-        entity_id=user_id,
-        data={
-            "email": email or target.username,
-            "permissions": permissions_for_log,
-        },
-        created_at=timezone.now(),
+    password = payload.get("password")
+    if password:
+        error_message = password_error(str(password), target)
+        if error_message is not None:
+            return {"error": error_message, "status": 400}
+
+    if payload.get("firstName") is not None:
+        target.first_name = str(payload["firstName"]).strip()
+    if payload.get("lastName") is not None:
+        target.last_name = str(payload["lastName"]).strip()
+    target.display_name = compose_display_name(
+        (target.first_name or "").strip(), (target.last_name or "").strip()
     )
-    return {"ok": True}
+    if email is not None:
+        target.email = email
+
+    previous_role_id = target.role_id
+    if new_role is not _MISSING:
+        target.role = new_role
+    role_changed = target.role_id != previous_role_id
+
+    was_active = target.active
+    if active is not _MISSING:
+        target.active = active
+    if password:
+        target.password_hash = make_password(str(password))
+
+    try:
+        with transaction.atomic():
+            target.save()
+    except IntegrityError:
+        return {"error": "Email already exists", "status": 409}
+
+    deactivated = was_active and not target.active
+    if deactivated or role_changed or password:
+        revoke_user_sessions(target.pk)
+
+    _log(
+        actor,
+        "USER_UPDATED",
+        target.pk,
+        {
+            "email": target.email,
+            "role": target.role.slug if target.role_id else None,
+            "active": target.active,
+        },
+    )
+    return {"ok": True, "user": _serialize_user(target)}
 
 
-def delete_admin_user(user_id: str, actor_user_id: str, actor_username: str) -> dict:
-    """`DELETE /api/admin/users/[id]/`."""
-    if user_id == actor_user_id:
+def delete_admin_user(user_id: str, actor: User) -> dict:
+    """`DELETE /api/admin/users/[id]/`. El Customer vinculado se conserva
+    (`on_delete=SET_NULL`) para no perder el historial de pedidos."""
+    if user_id == actor.pk:
         return {"error": "You cannot delete your own account", "status": 400}
 
-    target = User.objects.filter(pk=user_id).first()
+    target = User.objects.select_related("role").filter(pk=user_id).first()
     if target is None:
         return {"error": "User not found", "status": 404}
 
-    if is_full_access(target):
-        return {"error": "The primary Admin account cannot be deleted", "status": 403}
+    if _has_full_access_role(target):
+        return {"error": "A full access account cannot be deleted", "status": 403}
 
-    email = target.username
-    revoke_admin_sessions(user_id)
-    EmployeeRole.objects.filter(user_id=user_id).delete()
+    email = target.email
+    revoke_user_sessions(user_id)
     target.delete()
-    ActivityLog.objects.create(
-        actor_id=actor_username,
-        action="USER_DELETED",
-        entity_type="USER",
-        entity_id=user_id,
-        data={"email": email},
-        created_at=timezone.now(),
-    )
+    _log(actor, "USER_DELETED", user_id, {"email": email})
     return {"ok": True}

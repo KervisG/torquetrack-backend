@@ -1,4 +1,5 @@
-"""El `id` es el UUID que genera el cliente."""
+"""El `id` lo genera el servidor y vive en la sesión (`cart_id`); el cliente
+nunca lo elige."""
 from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone

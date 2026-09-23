@@ -10,12 +10,10 @@ from django.db.models.fields.json import KT
 from django.db.models.functions import Cast
 from django.utils import timezone
 
-from apps.cart.models import Cart
+from apps.cart.services import count_carts_by_status
 from apps.checkout.models import Order
 from apps.quotes.models import Quote
-
-# Un carrito sin cambios por más de esta ventana cuenta como abandonado.
-CART_IDLE_WINDOW = timedelta(minutes=30)
+from apps.quotes.services import unexpired_quotes_q
 
 # `data.totals.total` es un número JSON; se suma como numeric (no float) para
 # no arrastrar error de coma flotante.
@@ -26,19 +24,16 @@ _ORDER_TOTAL = Cast(
 
 def get_dashboard_counts() -> dict:
     now = timezone.now()
-    idle_cutoff = now - CART_IDLE_WINDOW
     # "Hoy" es el día calendario en UTC, sin importar la zona horaria del
     # servidor ni la del usuario.
     today_start = datetime.combine(now.astimezone(UTC).date(), time.min, UTC)
 
-    quotes = Quote.objects.aggregate(
+    # Una cotización vencida que todavía no pasó por `expire_quotes` no cuenta.
+    quotes = Quote.objects.filter(unexpired_quotes_q()).aggregate(
         active=Count("pk", filter=Q(status="ACTIVE")),
         building=Count("pk", filter=Q(status="BUILDING")),
     )
-    carts = Cart.objects.aggregate(
-        active=Count("pk", filter=Q(updated_at__gt=idle_cutoff)),
-        abandoned=Count("pk", filter=Q(updated_at__lte=idle_cutoff)),
-    )
+    carts = count_carts_by_status()
     sales_today = Order.objects.filter(
         created_at__gte=today_start,
         created_at__lt=today_start + timedelta(days=1),
@@ -50,8 +45,8 @@ def get_dashboard_counts() -> dict:
             "orders": Order.objects.count(),
             "activeQuotes": quotes["active"],
             "buildingQuotes": quotes["building"],
-            "activeCarts": carts["active"],
-            "abandonedCarts": carts["abandoned"],
+            "activeCarts": carts["ACTIVE"],
+            "abandonedCarts": carts["ABANDONED"],
             "salesToday": float(sales_today),
         }
     }

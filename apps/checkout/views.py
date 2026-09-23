@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth.authentication import SessionUserAuthentication
+from apps.auth.sessions import CART_SESSION_KEY
 from apps.checkout.services import create_storefront_checkout
 from apps.integrations.payments import stripe as stripe_payments
 
@@ -25,5 +26,7 @@ class CheckoutView(APIView):
             )
 
         body = request.data if isinstance(request.data, dict) else {}
-        payload, status = create_storefront_checkout(request.user, body)
+        payload, status = create_storefront_checkout(
+            request.user, body, cart_id=request.session.get(CART_SESSION_KEY)
+        )
         return Response(payload, status=status)

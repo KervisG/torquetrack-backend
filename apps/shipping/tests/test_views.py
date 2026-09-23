@@ -209,19 +209,23 @@ def test_parcel_weighs_at_least_one_pound(settings, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_returns_502_on_easypost_error(settings, monkeypatch):
+def test_easypost_error_returns_a_generic_502_and_logs_the_detail(settings, monkeypatch, caplog):
     settings.EASYPOST_API_KEY = "ep_test_fake"
     _insert_product(data={"shippingWeight": 2})
 
     def _fail(**kwargs):
-        raise ProviderError("Invalid address")
+        raise ProviderError("Wrong API key for account acct_internal_123")
 
     monkeypatch.setattr(GET_RATES, _fail)
 
-    response = _post_rates({"to": {"zip": "30301"}, "items": _items((PRODUCT_ID, 1))})
+    with caplog.at_level("WARNING", logger="apps.shipping.services"):
+        response = _post_rates({"to": {"zip": "30301"}, "items": _items((PRODUCT_ID, 1))})
 
     assert response.status_code == 502
-    assert response.json()["error"] == "Invalid address"
+    assert response.json() == {
+        "error": "Shipping rates are temporarily unavailable. Please try again."
+    }
+    assert "acct_internal_123" in caplog.text
 
 
 @pytest.mark.django_db

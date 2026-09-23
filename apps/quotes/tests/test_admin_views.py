@@ -21,7 +21,9 @@ def _admin_client(user_id):
     return client
 
 
-def _make_quote(quote_id="quo_admin_1", number="Q30001", status="ACTIVE", data=None):
+def _make_quote(
+    quote_id="quo_admin_1", number="Q30001", status="ACTIVE", data=None, expires_at=None
+):
     return Quote.objects.create(
         id=quote_id,
         number=number,
@@ -33,7 +35,7 @@ def _make_quote(quote_id="quo_admin_1", number="Q30001", status="ACTIVE", data=N
             **(data or {}),
         },
         created_at=timezone.now(),
-        expires_at=timezone.now() + timezone.timedelta(days=30),
+        expires_at=expires_at or timezone.now() + timezone.timedelta(days=30),
         updated_at=timezone.now(),
     )
 
@@ -81,6 +83,17 @@ def test_convert_creates_order_from_quote():
     quote = Quote.objects.get(pk="quo_admin_1")
     assert quote.status == "CONVERTED"
     assert activity_count(action="QUOTE_CONVERTED", entity_id="quo_admin_1") >= 1
+
+
+@pytest.mark.django_db
+def test_convert_rejects_a_quote_past_its_expiry_date():
+    _insert_user("usr_convert_past", permissions=["quotes.convert"])
+    _make_quote(expires_at=timezone.now() - timezone.timedelta(days=1))
+
+    response = _admin_client("usr_convert_past").post("/api/admin/quotes/quo_admin_1/convert/")
+
+    assert response.status_code == 400
+    assert not Order.objects.exists()
 
 
 @pytest.mark.django_db

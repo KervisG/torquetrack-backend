@@ -11,6 +11,7 @@ from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
 from apps.customers.models import Customer
 from apps.quotes.models import Quote
+from tests.factories import guest_cart_client
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
@@ -174,24 +175,44 @@ def test_quote_request_never_overwrites_an_existing_guest_profile(client):
 
 
 @pytest.mark.django_db
-def test_quote_request_links_cart_when_cart_id_present(client):
+def test_quote_request_links_the_session_cart():
     _insert_product()
     _insert_cart("cart_quote_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
 
-    response = client.post(
+    response = guest_cart_client("cart_quote_1").post(
         "/api/quote/request/",
         {
             "customer": {"name": "Jane Diesel"},
             "items": [{"productId": PRODUCT_ID, "quantity": 1}],
-            "cartId": "cart_quote_1",
         },
-        content_type="application/json",
+        format="json",
     )
 
     assert response.status_code == 200
     data = Cart.objects.get(pk="cart_quote_1").data
     assert data["stage"] == "BUILDING_QUOTE"
     assert data["quoteId"] == response.json()["quoteId"]
+
+
+@pytest.mark.django_db
+def test_quote_request_ignores_a_body_cart_id(client):
+    _insert_product()
+    victim = {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"}
+    _insert_cart("cart_victim", victim)
+
+    response = client.post(
+        "/api/quote/request/",
+        {
+            "customer": {"name": "Jane Diesel"},
+            "items": [{"productId": PRODUCT_ID, "quantity": 1}],
+            "cartId": "cart_victim",
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    assert Cart.objects.get(pk="cart_victim").data == victim
+    assert "cart_victim" not in Quote.objects.get().data["memo"]
 
 
 # --- quote/public/<token> (GET) ----------------------------------------

@@ -1,3 +1,8 @@
+"""`POST /api/fitment/check/`. Sin proveedores: solo lee `Product`.
+
+Un producto inexistente o inactivo no es compatible: nunca puede pasar el
+chequeo previo al pago.
+"""
 import pytest
 from rest_framework.test import APIClient
 
@@ -68,9 +73,22 @@ def test_batch_match_returns_per_product_result():
     ]
 
 
+def _unavailable(product_id):
+    return {
+        "id": product_id,
+        "title": "",
+        "partNumber": "",
+        "compatible": False,
+        "reasons": ["product is not available"],
+        "warnings": [],
+    }
+
+
 @pytest.mark.django_db
-def test_inactive_product_is_silently_excluded_from_results():
-    _insert_product("ford-73-injector-alliant-ap63992", PRODUCT_DATA, active=False)
+@pytest.mark.parametrize("active", [False, None], ids=["inactive", "unknown"])
+def test_inactive_or_unknown_product_is_not_compatible(active):
+    if active is not None:
+        _insert_product("ford-73-injector-alliant-ap63992", PRODUCT_DATA, active=active)
 
     response = APIClient().post(
         "/api/fitment/check/",
@@ -82,8 +100,46 @@ def test_inactive_product_is_silently_excluded_from_results():
     )
 
     assert response.status_code == 200
+    assert response.json() == {
+        "compatible": False,
+        "results": [_unavailable("ford-73-injector-alliant-ap63992")],
+    }
+
+
+@pytest.mark.django_db
+def test_one_unknown_product_makes_the_cart_incompatible():
+    _insert_product("ford-73-injector-alliant-ap63992", PRODUCT_DATA, active=True)
+
+    response = APIClient().post(
+        "/api/fitment/check/",
+        {
+            "vehicle": {"make": "Ford", "year": 1996, "engine": "7.3"},
+            "items": [{"id": "ford-73-injector-alliant-ap63992"}, {"id": "ghost-part"}],
+        },
+        format="json",
+    )
+
     body = response.json()
-    assert body == {"compatible": True, "results": []}
+    assert body["compatible"] is False
+    assert [result["compatible"] for result in body["results"]] == [True, False]
+    assert body["results"][1] == _unavailable("ghost-part")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "items",
+    [[{}], [{"id": ""}], ["ford-73"], [None], "ford-73"],
+    ids=["no-id", "blank-id", "string-item", "null-item", "not-a-list"],
+)
+def test_items_without_a_product_id_return_400(items):
+    response = APIClient().post(
+        "/api/fitment/check/",
+        {"vehicle": {"make": "Ford", "year": 1996}, "items": items},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert "error" in response.json()
 
 
 @pytest.mark.django_db

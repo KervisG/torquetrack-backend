@@ -25,17 +25,19 @@ ALLOWED_TAX_STATUSES = [
 
 
 def _serialize_customer_masked(customer: Customer) -> dict:
+    """Las columnas van después de `data` para que una clave vieja de `data`
+    (`id`, `email`, `taxStatus`...) nunca tape el valor real."""
     data = customer.data or {}
     raw_tax_id = str(data.get("taxId") or "")
     tax_id_masked = ("•" * max(0, len(raw_tax_id) - 4) + raw_tax_id[-4:]) if raw_tax_id else ""
     excluded_keys = ("taxId", "certificateData")
     safe_data = {key: value for key, value in data.items() if key not in excluded_keys}
     return {
+        **safe_data,
         "id": customer.pk,
         "email": customer.email,
         "portalStatus": portal_status(customer),
         "taxStatus": customer.tax_status,
-        **safe_data,
         "taxIdMasked": tax_id_masked,
     }
 
@@ -46,41 +48,45 @@ def list_admin_customers() -> list[dict]:
 
 
 def upsert_admin_customer(payload: dict) -> dict:
+    """Solo guarda en `data` los campos de perfil: el estado fiscal, el
+    certificado y el portal tienen su propio flujo."""
+    patch, error = _profile_patch(payload)
+    if error is not None:
+        return error
+
     email = str(payload.get("email") or "").strip().lower()
-    had_id = bool(payload.get("id"))
-    customer_id = str(payload["id"]) if had_id else ""
+    customer_id = str(payload.get("id") or "")
+    reused = False
 
     if not customer_id and email:
         existing = Customer.objects.filter(email__iexact=email).first()
         if existing is not None:
             customer_id = existing.pk
+            reused = True
 
     if customer_id:
+        customer = Customer.objects.filter(pk=customer_id).first()
+        if customer is None:
+            return {"error": "Customer not found", "status": 404}
         if email and Customer.objects.filter(email__iexact=email).exclude(pk=customer_id).exists():
             return {"error": "That email already belongs to another customer.", "status": 409}
 
-        customer = Customer.objects.filter(pk=customer_id).first()
-        if customer is None:
-            return {"error": "Customer could not be saved", "status": 500}
-
         customer.email = email or None
-        customer.data = {**(customer.data or {}), **payload, "id": customer_id, "email": email}
+        customer.data = {**(customer.data or {}), **patch}
         customer.updated_at = timezone.now()
         customer.save(update_fields=["email", "data", "updated_at"])
     else:
-        customer_id = random_id("C")
-        Customer.objects.create(
-            id=customer_id,
+        customer = Customer.objects.create(
+            id=random_id("C"),
             email=email or None,
-            data={**payload, "id": customer_id, "email": email},
+            data=patch,
             created_at=timezone.now(),
             updated_at=timezone.now(),
         )
 
-    customer = Customer.objects.get(pk=customer_id)
     return {
         "customer": _serialize_customer_masked(customer),
-        "reusedExistingCustomer": bool(not had_id and email),
+        "reusedExistingCustomer": reused,
     }
 
 
@@ -252,8 +258,9 @@ def activate_customer_account(payload: dict) -> dict:
 
 # --- autoservicio del cliente ----------------------------------------------
 
-# Solo estos campos de `data` los edita el propio cliente. El resto (estado
-# fiscal, certificado, email de la cuenta) lo decide el staff o su flujo.
+# Campos de perfil en `data`: los únicos que editan el propio cliente y el alta
+# de staff. El resto (estado fiscal, certificado, email de la cuenta) tiene su
+# propio flujo.
 ACCOUNT_PROFILE_FIELDS = (
     "name",
     "company",
@@ -363,7 +370,8 @@ def serialize_account(customer: Customer) -> dict:
     }
 
 
-def update_account(customer: Customer, payload: dict) -> dict:
+def _profile_patch(payload: dict) -> tuple[dict, dict | None]:
+    """`(patch, None)` con los campos de perfil presentes, o `({}, error)`."""
     patch = {}
     for field in ACCOUNT_PROFILE_FIELDS:
         if field not in payload:
@@ -372,8 +380,15 @@ def update_account(customer: Customer, payload: dict) -> dict:
         if value is None:
             value = ""
         if not isinstance(value, str):
-            return {"error": f"{field} must be a string", "status": 400}
+            return {}, {"error": f"{field} must be a string", "status": 400}
         patch[field] = value.strip()[:200]
+    return patch, None
+
+
+def update_account(customer: Customer, payload: dict) -> dict:
+    patch, error = _profile_patch(payload)
+    if error is not None:
+        return error
 
     if patch:
         customer.data = {**(customer.data or {}), **patch}

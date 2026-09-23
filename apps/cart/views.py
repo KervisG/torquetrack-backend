@@ -8,11 +8,15 @@ from apps.cart.services import list_admin_carts, sync_cart
 
 
 class CartSyncView(APIView):
+    """Sesión opcional, igual que el checkout: el invitado sincroniza su
+    carrito de sesión y con cuenta se exige CSRF."""
+
+    authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        return Response(sync_cart(body))
+        return Response(sync_cart(request.session, body))
 
 
 class AdminCartsView(APIView):

@@ -1,3 +1,5 @@
+"""`GET /api/admin/dashboard/` con `dashboard.view`. Los contadores de carritos
+salen de la misma clasificación que `GET /api/admin/carts/`."""
 
 import pytest
 from django.contrib.auth.models import Permission
@@ -25,12 +27,15 @@ def _insert_order(order_id, number, data, payment_status="UNPAID", created_at=No
     )
 
 
-def _insert_cart(cart_id, updated_at):
-    Cart.objects.create(id=cart_id, data={}, updated_at=updated_at)
+def _insert_cart(cart_id, updated_at, stage="CART", items=None):
+    items = [{"id": "p1", "qty": 1}] if items is None else items
+    Cart.objects.create(id=cart_id, data={"items": items, "stage": stage}, updated_at=updated_at)
 
 
-def _insert_quote(quote_id, number, status):
-    Quote.objects.create(id=quote_id, number=number, status=status, data={})
+def _insert_quote(quote_id, number, status, expires_at=None):
+    Quote.objects.create(
+        id=quote_id, number=number, status=status, data={}, expires_at=expires_at
+    )
 
 
 @pytest.mark.django_db
@@ -62,6 +67,39 @@ def test_dashboard_returns_aggregate_counts():
     assert counts["activeCarts"] == 1
     assert counts["abandonedCarts"] == 1
     assert counts["salesToday"] == 100.0
+
+
+@pytest.mark.django_db
+def test_dashboard_cart_counts_match_the_carts_list():
+    old = timezone.now() - timezone.timedelta(minutes=45)
+    _insert_cart("cart_active", timezone.now())
+    _insert_cart("cart_abandoned", old)
+    _insert_cart("cart_checkout", old, stage="CHECKOUT")
+    _insert_cart("cart_quote", timezone.now(), stage="BUILDING_QUOTE")
+    _insert_cart("cart_empty", old, items=[])
+    create_staff_user("usr_dash_carts", permissions=["dashboard.view", "carts.view"])
+    client, _ = session_client("usr_dash_carts")
+
+    counts = client.get("/api/admin/dashboard/").json()["counts"]
+    statuses = [row["status"] for row in client.get("/api/admin/carts/").json()]
+
+    assert counts["activeCarts"] == statuses.count("ACTIVE") == 1
+    assert counts["abandonedCarts"] == statuses.count("ABANDONED") == 1
+
+
+@pytest.mark.django_db
+def test_dashboard_does_not_count_quotes_past_their_expiry_date():
+    past = timezone.now() - timezone.timedelta(days=1)
+    _insert_quote("quo_stale_active", "Q10001", "ACTIVE", expires_at=past)
+    _insert_quote("quo_stale_building", "Q10002", "BUILDING", expires_at=past)
+    future = timezone.now() + timezone.timedelta(days=1)
+    _insert_quote("quo_live", "Q10003", "ACTIVE", expires_at=future)
+    client = _admin_client("usr_dash_quotes", ["dashboard.view"])
+
+    counts = client.get("/api/admin/dashboard/").json()["counts"]
+
+    assert counts["activeQuotes"] == 1
+    assert counts["buildingQuotes"] == 0
 
 
 @pytest.mark.django_db

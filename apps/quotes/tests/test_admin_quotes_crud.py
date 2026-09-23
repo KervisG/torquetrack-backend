@@ -1,5 +1,11 @@
+"""`/api/admin/quotes/` (listado y CRUD). Sin proveedores que mockear.
+
+El listado calcula el vencimiento al leer y nunca escribe; el estado se
+persiste con `manage.py expire_quotes`.
+"""
 
 import pytest
+from django.core.management import call_command
 from django.utils import timezone
 
 from apps.quotes.models import Quote
@@ -45,7 +51,7 @@ def test_list_returns_403_without_quotes_view_permission():
 
 
 @pytest.mark.django_db
-def test_list_expires_stale_quotes_and_excludes_archived():
+def test_list_reports_stale_quotes_as_expired_without_writing():
     _insert_user("usr_list", permissions=["quotes.view"])
     _make_quote(
         quote_id="quo_stale",
@@ -64,8 +70,43 @@ def test_list_expires_stale_quotes_and_excludes_archived():
     numbers = {q["number"] for q in body}
     assert numbers == {"Q40002", "Q40003"}
 
-    stale = Quote.objects.get(pk="quo_stale")
-    assert stale.status == "EXPIRED"
+    by_number = {q["number"]: q["status"] for q in body}
+    assert by_number == {"Q40002": "EXPIRED", "Q40003": "ACTIVE"}
+    # Un GET nunca escribe: el vencimiento se persiste con `manage.py expire_quotes`.
+    assert Quote.objects.get(pk="quo_stale").status == "ACTIVE"
+
+
+@pytest.mark.django_db
+def test_list_keeps_closed_statuses_even_after_expiry():
+    _insert_user("usr_list_closed", permissions=["quotes.view"])
+    _make_quote(
+        quote_id="quo_converted",
+        status="CONVERTED",
+        expires_at=timezone.now() - timezone.timedelta(days=1),
+    )
+
+    body = _admin_client("usr_list_closed").get("/api/admin/quotes/").json()
+
+    assert body[0]["status"] == "CONVERTED"
+
+
+@pytest.mark.django_db
+def test_expire_quotes_command_persists_expired_status():
+    past = timezone.now() - timezone.timedelta(days=1)
+    _make_quote(quote_id="quo_a", number="Q1", status="ACTIVE", expires_at=past)
+    _make_quote(quote_id="quo_b", number="Q2", status="BUILDING", expires_at=past)
+    _make_quote(quote_id="quo_c", number="Q3", status="CONVERTED", expires_at=past)
+    _make_quote(quote_id="quo_d", number="Q4", status="ACTIVE")
+
+    call_command("expire_quotes")
+
+    statuses = dict(Quote.objects.values_list("pk", "status"))
+    assert statuses == {
+        "quo_a": "EXPIRED",
+        "quo_b": "EXPIRED",
+        "quo_c": "CONVERTED",
+        "quo_d": "ACTIVE",
+    }
 
 
 # --- create/update (POST) --------------------------------------------------

@@ -22,7 +22,8 @@ RETURN_STATUSES = [
 ]
 
 
-def _serialize_order(order: Order) -> dict:
+# Ids de Stripe: verlos exige `payments.transaction_id`, no `orders.view`.
+def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
     data = order.data or {}
     if order.customer_id and order.customer is not None:
         # El snapshot del pedido gana sobre el perfil: un checkout invitado ya
@@ -36,24 +37,30 @@ def _serialize_order(order: Order) -> dict:
     else:
         customer = data.get("customer")
 
+    extra = {}
+    if isinstance(data.get("payment"), dict) and not can_view_transaction_ids:
+        extra["payment"] = {k: v for k, v in data["payment"].items() if k != "paymentIntent"}
+
     return {
         **data,
+        **extra,
         "id": order.pk,
         "number": order.number,
         "status": order.status,
         "paymentStatus": order.payment_status,
         "createdAt": order.created_at,
         "customer": customer,
-        "payments": [_serialize_payment(payment) for payment in order.payments.all()],
+        "payments": [
+            _serialize_payment(payment, can_view_transaction_ids)
+            for payment in order.payments.all()
+        ],
     }
 
 
-def _serialize_payment(payment: Payment) -> dict:
-    """Sin `provider_id`: ver el id de la transacción exige
-    `payments.transaction_id`, no `orders.view`."""
+def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict:
     data = payment.data or {}
     admin_link = "ADMIN_PAYMENT_LINK" if data.get("adminGenerated") else ""
-    return {
+    row = {
         "id": payment.pk,
         "provider": payment.provider,
         "status": payment.status,
@@ -61,39 +68,23 @@ def _serialize_payment(payment: Payment) -> dict:
         "source": data.get("source") or admin_link,
         "createdAt": payment.created_at,
     }
+    if can_view_transaction_ids:
+        row["providerId"] = payment.provider_id
+        row["paymentIntent"] = data.get("payment_intent")
+    return row
 
 
-def list_admin_orders() -> list[dict]:
+def list_admin_orders(can_view_transaction_ids: bool = False) -> list[dict]:
     orders = (
         Order.objects.select_related("customer")
         .prefetch_related(Prefetch("payments", queryset=Payment.objects.order_by("created_at")))
         .order_by("created_at")
     )
-    return [_serialize_order(order) for order in orders]
+    return [_serialize_order(order, can_view_transaction_ids) for order in orders]
 
 
-def _update_order_status(order: Order, raw_status: str, actor_email: str) -> dict:
-    status = raw_status.upper()
-    if status not in ORDER_STATUSES:
-        return {"error": "Invalid order status", "status": 400}
-
-    with transaction.atomic():
-        order.status = status
-        order.updated_at = timezone.now()
-        order.save(update_fields=["status", "updated_at"])
-        if status in CLOSED_ORDER_STATUSES:
-            cancel_pending_payments(order, f"ORDER_{status}")
-    record_activity(
-        actor=actor_email,
-        action="ORDER_STATUS_CHANGED",
-        entity_type="ORDER",
-        entity_id=order.pk,
-        data={"number": order.number, "status": status, "paymentStatus": order.payment_status},
-    )
-    return {"ok": True, "status": status}
-
-
-def _update_order_workflow(order: Order, workflow: dict, actor_email: str) -> dict:
+def _workflow_patch(workflow: dict, actor_email: str) -> dict:
+    """`{"patch": ...}` validado, o `{"error": ..., "status": 400}`."""
     patch: dict = {}
 
     core_case = workflow.get("coreCase")
@@ -112,33 +103,64 @@ def _update_order_workflow(order: Order, workflow: dict, actor_email: str) -> di
 
     if not patch:
         return {"error": "No workflow changes supplied", "status": 400}
-
-    order.data = {**(order.data or {}), **patch}
-    order.updated_at = timezone.now()
-    order.save(update_fields=["data", "updated_at"])
-    record_activity(
-        actor=actor_email,
-        action="ORDER_WORKFLOW_UPDATED",
-        entity_type="ORDER",
-        entity_id=order.pk,
-        data={"number": order.number, **patch},
-    )
-    return {"ok": True, **patch}
+    return {"patch": patch}
 
 
 def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
+    """`status` y `workflow` se validan juntos y se aplican en la misma
+    transacción: o cambian los dos o ninguno."""
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
 
-    if payload.get("status"):
-        return _update_order_status(order, str(payload["status"]), actor_email)
+    status = str(payload["status"]).upper() if payload.get("status") else None
+    if status is not None and status not in ORDER_STATUSES:
+        return {"error": "Invalid order status", "status": 400}
 
     workflow = payload.get("workflow")
+    patch = None
     if isinstance(workflow, dict):
-        return _update_order_workflow(order, workflow, actor_email)
+        result = _workflow_patch(workflow, actor_email)
+        if "error" in result:
+            return result
+        patch = result["patch"]
 
-    return {"error": "No supported changes supplied", "status": 400}
+    if status is None and patch is None:
+        return {"error": "No supported changes supplied", "status": 400}
+
+    with transaction.atomic():
+        fields = ["updated_at"]
+        if status is not None:
+            order.status = status
+            fields.append("status")
+        if patch is not None:
+            order.data = {**(order.data or {}), **patch}
+            fields.append("data")
+        order.updated_at = timezone.now()
+        order.save(update_fields=fields)
+        if status in CLOSED_ORDER_STATUSES:
+            cancel_pending_payments(order, f"ORDER_{status}")
+
+    response = {"ok": True}
+    if status is not None:
+        record_activity(
+            actor=actor_email,
+            action="ORDER_STATUS_CHANGED",
+            entity_type="ORDER",
+            entity_id=order.pk,
+            data={"number": order.number, "status": status, "paymentStatus": order.payment_status},
+        )
+        response["status"] = status
+    if patch is not None:
+        record_activity(
+            actor=actor_email,
+            action="ORDER_WORKFLOW_UPDATED",
+            entity_type="ORDER",
+            entity_id=order.pk,
+            data={"number": order.number, **patch},
+        )
+        response.update(patch)
+    return response
 
 
 def delete_admin_order(order_id: str, actor_email: str) -> dict:

@@ -48,6 +48,18 @@ python manage.py migrate
   Crearlo con `python manage.py createsuperuser` solo si hace falta entrar
   ahí.
 
+## Mantenimiento
+
+Los GET del panel son de solo lectura: el listado de cotizaciones calcula el
+vencimiento al leer y el de carritos omite los vacíos sin borrarlos. Para
+persistir esos cambios hay dos comandos idempotentes, pensados para correr a
+mano o desde el cron del host (el proyecto no trae un scheduler):
+
+- `python manage.py expire_quotes` marca `EXPIRED` las cotizaciones abiertas
+  (`BUILDING`, `ACTIVE`, `CONTACTED`) cuyo `expires_at` ya pasó.
+- `python manage.py purge_carts` borra los carritos sin `items` o con un
+  `items` vacío o que no es un array.
+
 ## Despliegue
 
 1. Definir las variables de entorno de producción; `env.example` las lista

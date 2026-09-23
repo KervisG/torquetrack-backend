@@ -302,7 +302,7 @@ def _link_cart_to_order(cart_id, order: Order, customer: dict) -> None:
     cart.save(update_fields=["data", "updated_at"])
 
 
-def create_storefront_checkout(user, body: dict) -> tuple[dict, int]:
+def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, int]:
     """Nunca confía en montos del cliente: reprecia desde la base, vuelve a
     chequear el fitment, cobra solo la tarifa de envío que el servidor cotizó
     para ese ZIP y omite el impuesto únicamente con un perfil VERIFIED
@@ -311,6 +311,9 @@ def create_storefront_checkout(user, body: dict) -> tuple[dict, int]:
     El pedido se crea antes de Stripe porque la sesión necesita su id y su
     número. Si Stripe falla, el pedido queda `CANCELLED` y el carrito no pasa a
     `CHECKOUT`: el carrito solo se vincula cuando la sesión existe.
+
+    `cart_id` es el carrito de la sesión; el `cartId` del body se ignora para
+    que nadie pueda marcar como vendido el carrito de otro.
     """
     from apps.customers.services import resolve_guest_customer
     from apps.fitment.services import check_product_fitment
@@ -372,7 +375,6 @@ def create_storefront_checkout(user, body: dict) -> tuple[dict, int]:
             address1=customer.get("address1"),
         )
     tax = money(tax_result["tax"])
-    cart_id = body.get("cartId")
 
     with transaction.atomic():
         if profile is not None:

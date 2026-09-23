@@ -18,6 +18,8 @@ OUNCES_PER_POUND = 16
 # Una tarifa cotizada solo vale para pagar durante este lapso; después el
 # cliente vuelve a pedir tarifas y el checkout cobra el precio vigente.
 SHIPPING_QUOTE_TTL_SECONDS = 60 * 60
+# El detalle de EasyPost puede nombrar la cuenta o la key: va al log, no al cliente.
+RATES_UNAVAILABLE = "Shipping rates are temporarily unavailable. Please try again."
 
 
 def _quote_cache_key(shipment_id: str) -> str:
@@ -141,7 +143,8 @@ def get_shipping_rates(payload: dict) -> tuple[dict, int]:
             parcel=parcel,
         )
     except ProviderError as exc:
-        return {"error": str(exc)}, 502
+        logger.warning("EasyPost rate request failed: %s", exc)
+        return {"error": RATES_UNAVAILABLE}, 502
 
     shipment_id = shipment["shipment_id"]
     rates = sorted(shipment["rates"], key=lambda rate: rate["rate"])

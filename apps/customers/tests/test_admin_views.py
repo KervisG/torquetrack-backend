@@ -97,7 +97,7 @@ def test_create_new_customer_without_id():
 
     assert response.status_code == 200
     body = response.json()
-    assert body["reusedExistingCustomer"] is True
+    assert body["reusedExistingCustomer"] is False
     customer = Customer.objects.get(pk=body["customer"]["id"])
     assert customer.email == "brand-new@example.com"
     assert customer.data["name"] == "Brand New"
@@ -150,6 +150,106 @@ def test_update_returns_409_when_email_belongs_to_another_customer():
     )
 
     assert response.status_code == 409
+
+
+@pytest.mark.django_db
+def test_update_returns_404_for_unknown_customer_id():
+    _insert_user("usr_update_404", permissions=["customers.edit"])
+    client = _admin_client("usr_update_404")
+
+    response = client.post(
+        "/api/admin/customers/",
+        {"id": "cus_ghost", "email": "ghost@example.com"},
+        format="json",
+    )
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Customer not found"}
+    assert not Customer.objects.exists()
+
+
+@pytest.mark.django_db
+def test_update_with_id_is_not_flagged_as_reused():
+    _insert_user("usr_update_reuse", permissions=["customers.edit"])
+    _make_customer(customer_id="cus_a", email="a@example.com")
+    client = _admin_client("usr_update_reuse")
+
+    response = client.post(
+        "/api/admin/customers/", {"id": "cus_a", "email": "a@example.com"}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["reusedExistingCustomer"] is False
+
+
+@pytest.mark.django_db
+def test_upsert_stores_only_profile_fields_in_data():
+    _insert_user("usr_whitelist", permissions=["customers.edit"])
+    _make_customer(customer_id="cus_a", email="a@example.com", data={"taxId": "12-3456789"})
+    client = _admin_client("usr_whitelist")
+
+    response = client.post(
+        "/api/admin/customers/",
+        {
+            "id": "cus_a",
+            "email": "a@example.com",
+            "name": "Pat",
+            "city": "Tampa",
+            "taxStatus": "VERIFIED",
+            "portalStatus": "ACTIVE",
+            "taxId": "99-0000000",
+            "certificateData": "data:application/pdf;base64,AAAA",
+            "taxReviewedBy": "forged@example.com",
+        },
+        format="json",
+    )
+
+    assert response.status_code == 200
+    customer = Customer.objects.get(pk="cus_a")
+    assert customer.data == {"taxId": "12-3456789", "name": "Pat", "city": "Tampa"}
+    assert customer.tax_status == "NOT SUBMITTED"
+    assert response.json()["customer"]["taxStatus"] == "NOT SUBMITTED"
+
+
+@pytest.mark.django_db
+def test_upsert_rejects_non_string_profile_fields():
+    _insert_user("usr_whitelist2", permissions=["customers.edit"])
+    client = _admin_client("usr_whitelist2")
+
+    response = client.post(
+        "/api/admin/customers/", {"email": "x@example.com", "name": {"a": 1}}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert not Customer.objects.exists()
+
+
+@pytest.mark.django_db
+def test_list_columns_win_over_stale_data_keys():
+    _insert_user("usr_stale", permissions=["customers.view", TAX_REVIEW])
+    _make_customer(
+        customer_id="cus_1",
+        email="real@example.com",
+        data={
+            "id": "cus_forged",
+            "email": "stale@example.com",
+            "taxStatus": "REJECTED",
+            "portalStatus": "ACTIVE",
+            "taxIdMasked": "1234",
+            "name": "Pat",
+        },
+    )
+    client = _admin_client("usr_stale")
+
+    client.post("/api/admin/customers/cus_1/tax-status/", {"status": "VERIFIED"}, format="json")
+    row = client.get("/api/admin/customers/").json()[0]
+
+    assert row["id"] == "cus_1"
+    assert row["email"] == "real@example.com"
+    assert row["taxStatus"] == "VERIFIED"
+    assert row["portalStatus"] == "NOT ACTIVATED"
+    assert row["taxIdMasked"] == ""
+    assert row["name"] == "Pat"
 
 
 # --- delete (DELETE) --------------------------------------------------------

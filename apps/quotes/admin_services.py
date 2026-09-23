@@ -10,6 +10,7 @@ from apps.checkout.services import money, next_order_number, random_id
 from apps.integrations.email import resend
 from apps.quotes.models import Quote
 from apps.quotes.services import (
+    effective_quote_status,
     next_quote_number,
     public_quote_pdf_url,
     public_quote_url,
@@ -45,7 +46,7 @@ def reopen_quote(quote: Quote) -> None:
 
 
 def convert_quote_to_order(quote: Quote, actor_email: str) -> dict:
-    if quote.status == "EXPIRED":
+    if effective_quote_status(quote) == "EXPIRED":
         return {"error": "Reopen this quote before converting it.", "status": 400}
 
     data = quote.data or {}
@@ -188,11 +189,7 @@ def _quote_totals(payload: dict) -> dict:
 
 
 def list_admin_quotes() -> list[dict]:
-    """Marca `EXPIRED` en la base las cotizaciones vencidas antes de listar."""
-    Quote.objects.filter(
-        status__in=["BUILDING", "ACTIVE", "CONTACTED"], expires_at__lt=timezone.now()
-    ).update(status="EXPIRED")
-
+    """Solo lectura: `serialize_quote` ya informa `EXPIRED` a las vencidas."""
     quotes = Quote.objects.select_related("customer").order_by("created_at")
     return [serialize_quote(quote) for quote in quotes if not (quote.data or {}).get("archived")]
 

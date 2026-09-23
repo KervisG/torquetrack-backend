@@ -1,3 +1,4 @@
+"""`GET /api/admin/carts/` con `carts.view`. Sin proveedores que mockear."""
 import pytest
 from django.utils import timezone
 
@@ -27,7 +28,7 @@ def test_returns_403_without_carts_view_permission():
 
 
 @pytest.mark.django_db
-def test_deletes_carts_with_no_items_before_listing():
+def test_listing_omits_carts_with_no_items_without_deleting_them():
     _insert_user("usr_carts", permissions=["carts.view"])
     Cart.objects.create(id="cart_empty", data={"items": []}, updated_at=timezone.now())
     Cart.objects.create(id="cart_no_items_key", data={}, updated_at=timezone.now())
@@ -43,8 +44,8 @@ def test_deletes_carts_with_no_items_before_listing():
     assert response.status_code == 200
     body = response.json()
     assert [row["id"] for row in body] == ["cart_with_item"]
-    assert not Cart.objects.filter(pk="cart_empty").exists()
-    assert not Cart.objects.filter(pk="cart_no_items_key").exists()
+    # Un GET nunca escribe: la limpieza es `manage.py purge_carts`.
+    assert Cart.objects.count() == 3
 
 
 @pytest.mark.django_db

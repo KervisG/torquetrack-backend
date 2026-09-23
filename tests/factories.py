@@ -11,7 +11,7 @@ from rest_framework.test import APIClient
 from apps.audit.models import ActivityLog
 from apps.auth.models import Role, User
 from apps.auth.permission_catalog import LEGACY_TO_DJANGO
-from apps.auth.sessions import SESSION_USER_KEY
+from apps.auth.sessions import CART_SESSION_KEY, SESSION_USER_KEY
 from apps.customers.models import Customer
 
 DEFAULT_PASSWORD = "diesel-pass-123"
@@ -93,6 +93,17 @@ def session_client(user_id, *, enforce_csrf=False):
     client = APIClient(enforce_csrf_checks=enforce_csrf)
     client.cookies[settings.SESSION_COOKIE_NAME] = store.session_key
     return client, store.session_key
+
+
+def guest_cart_client(cart_id):
+    """`APIClient` anónimo cuya sesión ya tiene `cart_id` como carrito propio."""
+    engine = import_module(settings.SESSION_ENGINE)
+    store = engine.SessionStore()
+    store[CART_SESSION_KEY] = cart_id
+    store.save()
+    client = APIClient()
+    client.cookies[settings.SESSION_COOKIE_NAME] = store.session_key
+    return client
 
 
 def activity_count(**filters) -> int:

@@ -8,7 +8,7 @@ from apps.checkout.admin_services import ORDER_STATUSES
 from apps.checkout.models import Order, Payment
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
-from tests.factories import create_customer
+from tests.factories import create_customer, guest_cart_client
 from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
@@ -74,8 +74,8 @@ def _body(shipping, **overrides):
     return body
 
 
-def _post(body):
-    return APIClient().post("/api/checkout/", body, format="json")
+def _post(body, client=None):
+    return (client or APIClient()).post("/api/checkout/", body, format="json")
 
 
 @pytest.mark.django_db
@@ -423,7 +423,7 @@ def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypa
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    response = _post(_body(shipping, cartId="cart_fail_1"))
+    response = _post(_body(shipping), guest_cart_client("cart_fail_1"))
 
     assert response.status_code == 502
     order = Order.objects.get()
@@ -439,14 +439,29 @@ def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypa
 
 
 @pytest.mark.django_db
-def test_cart_transitions_to_checkout_stage_when_cart_id_present(monkeypatch, shipping):
+def test_session_cart_transitions_to_checkout_stage(monkeypatch, shipping):
     _insert_product()
     _insert_cart("cart_uuid_checkout_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = _post(_body(shipping, cartId="cart_uuid_checkout_1"))
+    response = _post(_body(shipping), guest_cart_client("cart_uuid_checkout_1"))
 
     assert response.status_code == 200
     data = Cart.objects.get(pk="cart_uuid_checkout_1").data
     assert data["stage"] == "CHECKOUT"
     assert data["orderId"] == response.json()["orderId"]
+    assert Order.objects.get().data["cartId"] == "cart_uuid_checkout_1"
+
+
+@pytest.mark.django_db
+def test_body_cart_id_of_another_cart_is_ignored(monkeypatch, shipping):
+    _insert_product()
+    victim = {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"}
+    _insert_cart("cart_victim", victim)
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(shipping, cartId="cart_victim"))
+
+    assert response.status_code == 200
+    assert Cart.objects.get(pk="cart_victim").data == victim
+    assert Order.objects.get().data["cartId"] is None

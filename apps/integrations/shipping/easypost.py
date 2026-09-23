@@ -28,8 +28,8 @@ def _rate(raw: dict) -> dict:
 
 
 def get_rates(*, to_address, from_address, parcel) -> dict:
-    """El `ProviderError` lleva el mensaje de EasyPost, que el dominio muestra
-    tal cual al cliente."""
+    """El `ProviderError` lleva el mensaje de EasyPost para el log; el dominio
+    no lo muestra al cliente."""
     if not is_configured():
         raise ProviderNotConfigured("EASYPOST_API_KEY is not set")
 

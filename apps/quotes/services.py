@@ -5,6 +5,7 @@ import secrets
 
 from django.conf import settings
 from django.db import transaction
+from django.db.models import Q
 from django.template.loader import render_to_string
 from django.utils import timezone
 
@@ -65,7 +66,7 @@ def serialize_quote(quote: Quote) -> dict:
         **data,
         "id": quote.pk,
         "number": quote.number,
-        "status": quote.status,
+        "status": effective_quote_status(quote),
         "createdAt": quote.created_at,
         "expiresAt": quote.expires_at,
         "customer": customer,
@@ -74,6 +75,28 @@ def serialize_quote(quote: Quote) -> dict:
 
 def is_expired(quote: Quote) -> bool:
     return bool(quote.expires_at and quote.expires_at < timezone.now())
+
+
+# Estados abiertos que el vencimiento convierte en `EXPIRED`; los cerrados
+# (`CONVERTED`, `LOST`...) conservan el suyo.
+EXPIRABLE_QUOTE_STATUSES = ("BUILDING", "ACTIVE", "CONTACTED")
+
+
+def effective_quote_status(quote: Quote) -> str:
+    """El vencimiento se calcula al leer: ningún GET persiste `EXPIRED`."""
+    if quote.status in EXPIRABLE_QUOTE_STATUSES and is_expired(quote):
+        return "EXPIRED"
+    return quote.status
+
+
+def unexpired_quotes_q() -> Q:
+    return Q(expires_at__isnull=True) | Q(expires_at__gte=timezone.now())
+
+
+def expire_stale_quotes() -> int:
+    return Quote.objects.filter(
+        status__in=EXPIRABLE_QUOTE_STATUSES, expires_at__lt=timezone.now()
+    ).update(status="EXPIRED", updated_at=timezone.now())
 
 
 def _quote_line(item: dict) -> dict:
@@ -146,10 +169,12 @@ def render_quote_html(
     )
 
 
-def create_quote_from_request(payload: dict, user=None) -> dict:
+def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
     """Con un `Customer` vinculado a la sesión, la cotización es de ese perfil:
     el email es el de la cuenta, el nombre y el teléfono del body solo
     completan el snapshot y el perfil no se reescribe.
+
+    `cart_id` es el carrito de la sesión; el `cartId` del body se ignora.
     """
     customer_in = payload.get("customer")
     if not isinstance(customer_in, dict):
@@ -213,7 +238,6 @@ def create_quote_from_request(payload: dict, user=None) -> dict:
         "total": money(subtotal + core_total),
     }
     memo = "Storefront quote request"
-    cart_id = payload.get("cartId")
     if cart_id:
         memo += f" • Cart {cart_id}"
 

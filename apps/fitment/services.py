@@ -1,4 +1,5 @@
-"""Compatibilidad entre producto y vehículo, sin I/O. Los mensajes de
+"""Compatibilidad entre producto y vehículo. Solo `check_cart_fitment` lee la
+base; el resto no hace I/O. Los mensajes de
 `reasons`/`warnings` muestran los valores tal como los escribió el catálogo o
 el decodificador, sin normalizar."""
 import re
@@ -80,3 +81,53 @@ def check_product_fitment(product: dict | None, vehicle: dict | None) -> dict:
         )
 
     return {"compatible": len(reasons) == 0, "reasons": reasons, "warnings": warnings}
+
+
+def _item_id(item) -> str:
+    if isinstance(item, dict):
+        return str(item.get("id") or item.get("productId") or "").strip()
+    return ""
+
+
+def check_cart_fitment(items, vehicle) -> tuple[dict, int]:
+    """Un id inexistente o inactivo cuenta como incompatible: si se omitiera,
+    un carrito sin productos válidos daría `compatible: True`."""
+    from apps.catalog.models import Product
+
+    if not isinstance(items, list) or not items:
+        return {"error": "Cart is empty"}, 400
+    ids = [_item_id(item) for item in items]
+    if not all(ids):
+        return {"error": "Each cart item must have a product id"}, 400
+
+    products = {p.pk: p for p in Product.objects.filter(id__in=ids, active=True)}
+    results = []
+    for product_id in dict.fromkeys(ids):
+        product = products.get(product_id)
+        if product is None:
+            results.append(
+                {
+                    "id": product_id,
+                    "title": "",
+                    "partNumber": "",
+                    "compatible": False,
+                    "reasons": ["product is not available"],
+                    "warnings": [],
+                }
+            )
+            continue
+        data = product.data or {}
+        results.append(
+            {
+                "id": product.pk,
+                "title": data.get("title"),
+                "partNumber": data.get("partNumber")
+                or data.get("oemPart")
+                or data.get("aftermarketPart")
+                or "",
+                **check_product_fitment(data, vehicle),
+            }
+        )
+
+    compatible = all(result["compatible"] for result in results)
+    return {"compatible": compatible, "results": results}, 200

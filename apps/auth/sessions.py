@@ -6,15 +6,24 @@ from django.middleware.csrf import get_token, rotate_token
 from django.utils import timezone
 
 SESSION_USER_KEY = "user_id"
+# El carrito es de la sesión y no del body: quien no tiene la cookie no puede
+# tocarlo aunque conozca su id.
+CART_SESSION_KEY = "cart_id"
 
 
 def start_user_session(request, user) -> None:
     """`flush()` descarta la session key que el cliente ya traía, para que un
     token fijado de antemano por un tercero no quede promovido a sesión
     autenticada. El token CSRF también rota, igual que en `django.contrib.auth.login`.
+
+    El carrito sobrevive al cambio de key: el id no autentica nada y perderlo
+    dejaría un carrito huérfano que el panel contaría como abandonado.
     """
+    cart_id = request.session.get(CART_SESSION_KEY)
     request.session.flush()
     request.session[SESSION_USER_KEY] = user.pk
+    if cart_id:
+        request.session[CART_SESSION_KEY] = cart_id
     rotate_token(request)
 
 

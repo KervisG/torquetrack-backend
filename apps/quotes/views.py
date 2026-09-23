@@ -6,6 +6,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.auth.authentication import SessionUserAuthentication
+from apps.auth.sessions import CART_SESSION_KEY
 from apps.quotes.models import Quote
 from apps.quotes.services import (
     checkout_from_quote,
@@ -30,7 +31,9 @@ class QuoteRequestView(APIView):
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        result = create_quote_from_request(body, request.user)
+        result = create_quote_from_request(
+            body, request.user, cart_id=request.session.get(CART_SESSION_KEY)
+        )
         status = result.pop("status", 200) if "error" in result else 200
         return Response(result, status=status)
 

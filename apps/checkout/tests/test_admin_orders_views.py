@@ -102,6 +102,47 @@ def test_list_includes_payments_without_the_provider_transaction_id():
     assert "cs_secret_session" not in response.content.decode()
 
 
+def _paid_order_with_stripe_ids():
+    order = _make_order(
+        payment_status="PAID",
+        data={"payment": {"provider": "stripe", "last4": "4242", "paymentIntent": "pi_secret"}},
+    )
+    Payment.objects.create(
+        id="PAY_PAID",
+        order=order,
+        provider="stripe",
+        provider_id="cs_secret_session",
+        status="PAID",
+        amount=10,
+        data={"payment_intent": "pi_secret", "sessionId": "cs_secret_session"},
+    )
+
+
+@pytest.mark.django_db
+def test_list_hides_the_payment_intent_in_order_data_without_transaction_id():
+    _insert_user("usr_list_pi", permissions=["orders.view"])
+    _paid_order_with_stripe_ids()
+
+    response = _admin_client("usr_list_pi").get("/api/admin/orders/")
+
+    body = response.content.decode()
+    assert "pi_secret" not in body
+    assert "cs_secret_session" not in body
+    assert response.json()[0]["payment"] == {"provider": "stripe", "last4": "4242"}
+
+
+@pytest.mark.django_db
+def test_list_includes_stripe_ids_with_payments_transaction_id():
+    _insert_user("usr_list_tx", permissions=["orders.view", "payments.transaction_id"])
+    _paid_order_with_stripe_ids()
+
+    row = _admin_client("usr_list_tx").get("/api/admin/orders/").json()[0]
+
+    assert row["payment"]["paymentIntent"] == "pi_secret"
+    assert row["payments"][0]["providerId"] == "cs_secret_session"
+    assert row["payments"][0]["paymentIntent"] == "pi_secret"
+
+
 # --- PATCH status -----------------------------------------------------
 
 
@@ -234,6 +275,46 @@ def test_patch_workflow_merges_core_case_into_data():
     assert order.data["coreCase"]["status"] == "RECEIVED"
     assert order.data["coreCase"]["updatedBy"] == "usr_workflow3@example.com"
     assert activity_count(action="ORDER_WORKFLOW_UPDATED", entity_id="ord_1") >= 1
+
+
+@pytest.mark.django_db
+def test_patch_applies_status_and_workflow_together():
+    _insert_user("usr_both", permissions=["orders.status", "cores.manage"])
+    _make_order()
+
+    response = _admin_client("usr_both").patch(
+        "/api/admin/orders/ord_1/",
+        {"status": "processing", "workflow": {"coreCase": {"status": "received"}}},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == "PROCESSING"
+    assert body["coreCase"]["status"] == "RECEIVED"
+    order = Order.objects.get(pk="ord_1")
+    assert order.status == "PROCESSING"
+    assert order.data["coreCase"]["status"] == "RECEIVED"
+    assert activity_count(action="ORDER_STATUS_CHANGED", entity_id="ord_1") == 1
+    assert activity_count(action="ORDER_WORKFLOW_UPDATED", entity_id="ord_1") == 1
+
+
+@pytest.mark.django_db
+def test_patch_with_an_invalid_workflow_does_not_change_the_status():
+    _insert_user("usr_both2", permissions=["orders.status", "cores.manage"])
+    _make_order()
+
+    response = _admin_client("usr_both2").patch(
+        "/api/admin/orders/ord_1/",
+        {"status": "processing", "workflow": {"coreCase": {"status": "bogus"}}},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    order = Order.objects.get(pk="ord_1")
+    assert order.status == "OPEN"
+    assert "coreCase" not in order.data
+    assert activity_count(action="ORDER_STATUS_CHANGED", entity_id="ord_1") == 0
 
 
 @pytest.mark.django_db

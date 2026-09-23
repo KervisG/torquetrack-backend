@@ -25,7 +25,8 @@ class AdminOrdersListView(APIView):
     required_permission = "orders.view"
 
     def get(self, request):
-        return Response(list_admin_orders())
+        can_view_ids = has_torquetrack_permission(request.user, "payments.transaction_id")
+        return Response(list_admin_orders(can_view_transaction_ids=can_view_ids))
 
 
 class AdminOrderDetailView(APIView):

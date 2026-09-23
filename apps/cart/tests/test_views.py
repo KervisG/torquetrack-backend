@@ -5,28 +5,20 @@ Behavior preserved: upsert-by-client-UUID, `stage` normalizes to uppercase
 (`status = "ACTIVE"` for stage `"CART"`, otherwise `status = stage`), and an
 empty/missing `items` array deletes the row instead of upserting it.
 """
-import json
 
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
+
+from apps.cart.models import Cart
 
 
 def _read_cart_row(cart_id):
-    with connection.cursor() as cursor:
-        cursor.execute("select data from carts where id = %s", [cart_id])
-        row = cursor.fetchone()
-        if row is None:
-            return None
-        return row[0] if isinstance(row[0], dict) else json.loads(row[0])
+    cart = Cart.objects.filter(pk=cart_id).first()
+    return None if cart is None else cart.data
 
 
 def _insert_cart(cart_id, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into carts (id, data) values (%s, %s)",
-            [cart_id, json.dumps(data)],
-        )
+    Cart.objects.create(id=cart_id, data=data)
 
 
 @pytest.mark.django_db

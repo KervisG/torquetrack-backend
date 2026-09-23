@@ -1,49 +1,60 @@
-"""`admin/dashboard` and `admin/activity` business rules (task 7.1),
-near-verbatim ports of `app/api/admin/dashboard/route.ts` and
-`app/api/admin/activity/route.ts`.
-
-Raw SQL is used for the dashboard aggregate (same precedent as
-`apps.checkout.services.next_order_number`/`apps.quotes.services.
-next_quote_number`): summing a JSONField key across rows is a single
-well-defined query that the legacy route already expresses as SQL, and
-Django's JSON aggregation ORM API would be less direct than reusing it.
+"""Reglas de `admin/dashboard` y `admin/activity`, portadas de
+`app/api/admin/dashboard/route.ts` y `app/api/admin/activity/route.ts`.
 """
 from __future__ import annotations
 
-from django.db import connection
+from datetime import UTC, datetime, time, timedelta
+from decimal import Decimal
+
+from django.db.models import Count, DecimalField, Q, Sum
+from django.db.models.fields.json import KT
+from django.db.models.functions import Cast
+from django.utils import timezone
 
 from apps.backoffice.models import ActivityLog
+from apps.cart.models import Cart
+from apps.checkout.models import Order
+from apps.quotes.models import Quote
+
+# Un carrito sin cambios por más de esta ventana cuenta como abandonado.
+CART_IDLE_WINDOW = timedelta(minutes=30)
+
+# `data.totals.total` es un número JSON; se suma como numeric (no float) para
+# no arrastrar error de coma flotante, igual que el `::numeric` del legado.
+_ORDER_TOTAL = Cast(
+    KT("data__totals__total"), DecimalField(max_digits=20, decimal_places=6)
+)
 
 
 def get_dashboard_counts() -> dict:
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            select
-                (select count(*) from orders) as orders,
-                (select count(*) from quotes where status = 'ACTIVE') as active_quotes,
-                (select count(*) from quotes where status = 'BUILDING') as building_quotes,
-                (select count(*) from carts where updated_at > now() - interval '30 minutes')
-                    as active_carts,
-                (select count(*) from carts where updated_at <= now() - interval '30 minutes')
-                    as abandoned_carts,
-                (select coalesce(sum((data->'totals'->>'total')::numeric), 0) from orders
-                    where created_at::date = current_date and payment_status = 'PAID')
-                    as sales_today
-            """
-        )
-        columns = [column[0] for column in cursor.description]
-        row = cursor.fetchone()
+    now = timezone.now()
+    idle_cutoff = now - CART_IDLE_WINDOW
+    # El legado comparaba `created_at::date = current_date` con la sesión de
+    # Postgres en UTC; el día de hoy se calcula en UTC por la misma razón.
+    today_start = datetime.combine(now.astimezone(UTC).date(), time.min, UTC)
 
-    values = dict(zip(columns, row))
+    quotes = Quote.objects.aggregate(
+        active=Count("pk", filter=Q(status="ACTIVE")),
+        building=Count("pk", filter=Q(status="BUILDING")),
+    )
+    carts = Cart.objects.aggregate(
+        active=Count("pk", filter=Q(updated_at__gt=idle_cutoff)),
+        abandoned=Count("pk", filter=Q(updated_at__lte=idle_cutoff)),
+    )
+    sales_today = Order.objects.filter(
+        created_at__gte=today_start,
+        created_at__lt=today_start + timedelta(days=1),
+        payment_status="PAID",
+    ).aggregate(total=Sum(_ORDER_TOTAL, default=Decimal(0)))["total"]
+
     return {
         "counts": {
-            "orders": values["orders"],
-            "activeQuotes": values["active_quotes"],
-            "buildingQuotes": values["building_quotes"],
-            "activeCarts": values["active_carts"],
-            "abandonedCarts": values["abandoned_carts"],
-            "salesToday": float(values["sales_today"]),
+            "orders": Order.objects.count(),
+            "activeQuotes": quotes["active"],
+            "buildingQuotes": quotes["building"],
+            "activeCarts": carts["active"],
+            "abandonedCarts": carts["abandoned"],
+            "salesToday": float(sales_today),
         }
     }
 

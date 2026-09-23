@@ -5,21 +5,17 @@ The real EasyPost REST API is never called: `requests.post` is monkeypatched
 at `apps.shipping.services.requests.post`, and no real `EASYPOST_API_KEY` is
 ever used.
 """
-import json
 
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
+
+from apps.catalog.models import Product
 
 PRODUCT_ID = "gm-65-injection-pump-dorman-502550"
 
 
 def _insert_product(product_id=PRODUCT_ID, data=None):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into products (id, data, active) values (%s, %s, %s)",
-            [product_id, json.dumps(data or {}), True],
-        )
+    Product.objects.create(id=product_id, data=data or {}, active=True)
 
 
 class _FakeResponse:

@@ -14,9 +14,9 @@ import hashlib
 import hmac
 import json
 import time
+from decimal import Decimal
 
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
 
 from apps.backoffice.models import ActivityLog
@@ -36,25 +36,25 @@ def _sign(payload: bytes, secret: str = WEBHOOK_SECRET, timestamp=None) -> str:
 
 
 def _insert_order(order_id, number, status, payment_status, data, customer_id=None):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            insert into orders (id, number, customer_id, status, payment_status, data)
-            values (%s, %s, %s, %s, %s, %s)
-            """,
-            [order_id, number, customer_id, status, payment_status, json.dumps(data)],
-        )
+    Order.objects.create(
+        id=order_id,
+        number=number,
+        customer_id=customer_id,
+        status=status,
+        payment_status=payment_status,
+        data=data,
+    )
 
 
 def _insert_payment(payment_id, order_id, status, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            insert into payments (id, order_id, provider, status, amount, data)
-            values (%s, %s, 'stripe', %s, %s, %s)
-            """,
-            [payment_id, order_id, status, 239.99, json.dumps(data)],
-        )
+    Payment.objects.create(
+        id=payment_id,
+        order_id=order_id,
+        provider="stripe",
+        status=status,
+        amount=Decimal("239.99"),
+        data=data,
+    )
 
 
 def _checkout_completed_event(order_id, event_id="evt_test_1", payment_intent="pi_test_1"):

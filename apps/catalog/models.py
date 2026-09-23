@@ -1,16 +1,24 @@
-"""Stage A models for `products` and `applications` (design decision #3)."""
+"""Modelos de catálogo: `products` y `applications`.
+
+`Product.data` guarda la ficha completa del producto tal como la escribía el
+Next.js; el índice GIN (`idx_products_data`) acelera las búsquedas por
+contención sobre ese JSON.
+"""
+from django.contrib.postgres.indexes import GinIndex
 from django.db import models
+from django.db.models.functions import Now
+from django.utils import timezone
 
 
 class Product(models.Model):
     id = models.TextField(primary_key=True)
     data = models.JSONField(default=dict)
-    active = models.BooleanField(default=True)
-    updated_at = models.DateTimeField()
+    active = models.BooleanField(default=True, db_default=True)
+    updated_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
-        managed = False
         db_table = "products"
+        indexes = [GinIndex(fields=["data"], name="idx_products_data")]
         permissions = [
             ("edit_pricing", "Can edit pricing"),
             ("view_costs", "Can view costs"),
@@ -21,10 +29,10 @@ class Product(models.Model):
 
 
 class Application(models.Model):
+    id = models.BigAutoField(primary_key=True)
     data = models.JSONField(default=dict)
 
     class Meta:
-        managed = False
         db_table = "applications"
 
     def __str__(self) -> str:

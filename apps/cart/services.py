@@ -8,7 +8,7 @@ route's `crypto.randomUUID()`.
 """
 import uuid
 
-from django.db import connection
+from django.db.models import Q
 from django.utils import timezone
 
 from apps.cart.models import Cart
@@ -35,15 +35,15 @@ def sync_cart(payload: dict) -> dict:
 
 
 def _delete_empty_carts() -> None:
-    """`delete from carts where coalesce(jsonb_array_length(...),0)=0` —
-    raw SQL (same precedent as `apps.checkout.services.next_order_number`)
-    to match the exact jsonb-array-or-missing-key semantics verbatim."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "delete from carts where coalesce(jsonb_array_length("
-            "case when jsonb_typeof(data->'items') = 'array' then data->'items' "
-            "else '[]'::jsonb end), 0) = 0"
-        )
+    """Borra los carritos cuyo `items` falta, no es un array o está vacío.
+
+    Replica `coalesce(jsonb_array_length(case when jsonb_typeof(items) =
+    'array' ...), 0) = 0` del legado. `items @> '[]'` solo es verdadero para
+    un array, así que su negación cubre los tipos que no son array.
+    """
+    Cart.objects.filter(
+        Q(data__items__isnull=True) | ~Q(data__items__contains=[]) | Q(data__items=[])
+    ).delete()
 
 
 def list_admin_carts() -> list[dict]:

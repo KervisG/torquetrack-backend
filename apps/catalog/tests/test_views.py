@@ -12,11 +12,11 @@ Detail (retrieve) actions do not exist in the legacy Next.js app; this is a
 DRF-native addition per the design's `ModelViewSet` convention (documented
 as a deviation in apply-progress).
 """
-import json
 
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
+
+from apps.catalog.models import Application, Product
 
 REAL_PRODUCT_SHAPE = {
     "vehicleType": "Pickup",
@@ -62,20 +62,11 @@ RESTRICTED_FIELDS = [
 
 
 def _insert_product(product_id, data, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into products (id, data, active) values (%s, %s, %s)",
-            [product_id, json.dumps(data), active],
-        )
+    Product.objects.create(id=product_id, data=data, active=active)
 
 
 def _insert_application(data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into applications (data) values (%s) returning id",
-            [json.dumps(data)],
-        )
-        return cursor.fetchone()[0]
+    return Application.objects.create(data=data).pk
 
 
 @pytest.mark.django_db

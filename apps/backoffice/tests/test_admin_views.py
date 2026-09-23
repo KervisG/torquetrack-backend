@@ -2,13 +2,14 @@
 pinned against `app/api/admin/dashboard/route.ts` and
 `app/api/admin/activity/route.ts`.
 """
-import json
 
 import pytest
-from django.db import connection
 from django.utils import timezone
 
 from apps.backoffice.models import ActivityLog
+from apps.cart.models import Cart
+from apps.checkout.models import Order
+from apps.quotes.models import Quote
 from tests.factories import create_staff_user, session_client
 
 
@@ -24,29 +25,21 @@ def _admin_client(user_id):
 
 
 def _insert_order(order_id, number, data, payment_status="UNPAID", created_at=None):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into orders (id, number, status, payment_status, data, created_at)"
-            " values (%s, %s, 'OPEN', %s, %s::jsonb, %s)",
-            [order_id, number, payment_status, json.dumps(data), created_at or timezone.now()],
-        )
+    Order.objects.create(
+        id=order_id,
+        number=number,
+        payment_status=payment_status,
+        data=data,
+        created_at=created_at or timezone.now(),
+    )
 
 
 def _insert_cart(cart_id, updated_at):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into carts (id, data, updated_at) values (%s, '{}', %s)",
-            [cart_id, updated_at],
-        )
+    Cart.objects.create(id=cart_id, data={}, updated_at=updated_at)
 
 
 def _insert_quote(quote_id, number, status):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into quotes (id, number, status, data, created_at, updated_at)"
-            " values (%s, %s, %s, '{}', now(), now())",
-            [quote_id, number, status],
-        )
+    Quote.objects.create(id=quote_id, number=number, status=status, data={})
 
 
 # --- dashboard --------------------------------------------------------------
@@ -83,6 +76,45 @@ def test_dashboard_returns_aggregate_counts():
     assert counts["activeCarts"] == 1
     assert counts["abandonedCarts"] == 1
     assert counts["salesToday"] == 100.0
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_sums_exact_cents_and_skips_other_days():
+    _insert_user("usr_dash_sales", permissions=["dashboard.view"])
+    _insert_order("OID_A", "O10001", {"totals": {"total": 10.10}}, payment_status="PAID")
+    _insert_order("OID_B", "O10002", {"totals": {"total": 20.20}}, payment_status="PAID")
+    _insert_order("OID_C", "O10003", {"totals": {}}, payment_status="PAID")
+    _insert_order(
+        "OID_OLD",
+        "O10004",
+        {"totals": {"total": 999.0}},
+        payment_status="PAID",
+        created_at=timezone.now() - timezone.timedelta(days=2),
+    )
+
+    client = _admin_client("usr_dash_sales")
+    response = client.get("/api/admin/dashboard/")
+
+    assert response.status_code == 200
+    # `sum(...::numeric)` del legado: sin error de coma flotante.
+    assert response.json()["counts"]["salesToday"] == 30.3
+
+
+@pytest.mark.django_db
+def test_dashboard_returns_zeros_on_an_empty_store():
+    _insert_user("usr_dash_empty", permissions=["dashboard.view"])
+
+    client = _admin_client("usr_dash_empty")
+    response = client.get("/api/admin/dashboard/")
+
+    assert response.json()["counts"] == {
+        "orders": 0,
+        "activeQuotes": 0,
+        "buildingQuotes": 0,
+        "activeCarts": 0,
+        "abandonedCarts": 0,
+        "salesToday": 0.0,
+    }
 
 
 # --- activity -----------------------------------------------------------

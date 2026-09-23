@@ -7,16 +7,13 @@ this view reuses — see `apps.tax.services` module docstring), and no real
 `TAXJAR_API_KEY` is ever used.
 """
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
+
+from tests.factories import create_customer
 
 
 def _insert_customer(customer_id, email, tax_status="NOT SUBMITTED"):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into customers (id, email, data, tax_status) values (%s, %s, %s, %s)",
-            [customer_id, email, "{}", tax_status],
-        )
+    create_customer(customer_id, email=email, tax_status=tax_status)
 
 
 @pytest.mark.django_db

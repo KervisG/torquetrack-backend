@@ -1,11 +1,13 @@
-"""Stage A models for `orders` and `payments` (design decision #3).
+"""Modelos de checkout: `orders`, `payments` y `document_sequences`.
 
-`Order.customer` is a cross-app FK into `apps.customers.Customer`;
-`Payment.order` is a same-app FK into `Order`. Both are nullable to match
-`on delete set null` in `scripts/schema.sql`. Repricing, Stripe session
-creation, and webhook reconciliation are Phase 5's business rules.
+`Order.customer` y `Payment.order` quedan en NULL si se borra el registro
+al que apuntan, igual que el `on delete set null` del esquema heredado.
+`DocumentSequence` guarda el último número emitido de cada serie (`O<n>`,
+`Q<n>`) para que la numeración no dependa de un `max()+1` con carrera.
 """
 from django.db import models
+from django.db.models.functions import Now
+from django.utils import timezone
 
 
 class Order(models.Model):
@@ -16,17 +18,15 @@ class Order(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        db_column="customer_id",
         related_name="orders",
     )
-    status = models.TextField(default="OPEN")
-    payment_status = models.TextField(default="UNPAID")
+    status = models.TextField(default="OPEN", db_default="OPEN")
+    payment_status = models.TextField(default="UNPAID", db_default="UNPAID")
     data = models.JSONField(default=dict)
-    created_at = models.DateTimeField()
-    updated_at = models.DateTimeField()
+    created_at = models.DateTimeField(default=timezone.now, db_default=Now())
+    updated_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
-        managed = False
         db_table = "orders"
         permissions = [
             ("change_status", "Can change order status"),
@@ -46,19 +46,17 @@ class Payment(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        db_column="order_id",
         related_name="payments",
     )
     provider = models.TextField()
     provider_id = models.TextField(null=True, blank=True)
     status = models.TextField()
-    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0)
-    data = models.JSONField(default=dict)
-    created_at = models.DateTimeField()
-    updated_at = models.DateTimeField()
+    amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, db_default=0)
+    data = models.JSONField(default=dict, db_default={})
+    created_at = models.DateTimeField(default=timezone.now, db_default=Now())
+    updated_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
-        managed = False
         db_table = "payments"
         permissions = [
             ("take_payment", "Can take payments"),
@@ -68,3 +66,21 @@ class Payment(models.Model):
 
     def __str__(self) -> str:
         return self.id
+
+
+class DocumentSequence(models.Model):
+    """Una fila por serie de numeración (`order`, `quote`).
+
+    `next_document_number` la bloquea con `select_for_update()`, así que dos
+    requests concurrentes nunca leen el mismo `last_value`.
+    """
+
+    key = models.TextField(primary_key=True)
+    last_value = models.PositiveBigIntegerField()
+
+    class Meta:
+        db_table = "document_sequences"
+        default_permissions = ()
+
+    def __str__(self) -> str:
+        return f"{self.key}:{self.last_value}"

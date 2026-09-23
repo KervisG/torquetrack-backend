@@ -1,23 +1,16 @@
-"""Stage A binding tests for the `carts` table (design decision #3).
+"""Tests del modelo `Cart` (tabla `carts`).
 
-Carts are upserted by client UUID and deleted on empty (spec: `cart/sync`) —
-these tests only prove the Stage A read/write binding itself; the upsert
-business rule is Phase 5's concern.
+Solo prueban la lectura y escritura del modelo; el upsert por UUID y el
+borrado del carrito vacío se prueban en `test_views.py` y `test_services.py`.
 """
-import json
 
 import pytest
-from django.db import connection
 
 from apps.cart.models import Cart
 
 
 def _insert_cart(cart_id, items):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into carts (id, data) values (%s, %s)",
-            [cart_id, json.dumps({"items": items})],
-        )
+    Cart.objects.create(id=cart_id, data={"items": items})
 
 
 @pytest.mark.django_db

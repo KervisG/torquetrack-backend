@@ -1,7 +1,7 @@
-"""Stage A binding test for `activity_logs` (design decision #3).
+"""Test del modelo `ActivityLog` (tabla `activity_logs`).
 
-Only proves the read/write binding this phase's Stripe webhook write needs;
-the `admin/activity` read endpoint is Phase 7 scope, not tested here.
+Solo prueba la escritura que hace el webhook de Stripe; el endpoint
+`admin/activity` se prueba en `test_admin_views.py`.
 """
 import pytest
 from django.utils import timezone

@@ -5,13 +5,14 @@ The real Stripe Checkout Session API is never called: `stripe.checkout.
 Session.create` is monkeypatched at the SDK boundary (never a raw HTTP
 mock), and no real `STRIPE_SECRET_KEY` is ever used.
 """
-import json
 
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
 
+from apps.cart.models import Cart
+from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
+from tests.factories import create_customer
 
 PRODUCT_ID = "gm-65-injection-pump-dorman-502550"
 PRODUCT_DATA = {
@@ -28,27 +29,15 @@ PRODUCT_DATA = {
 
 
 def _insert_product(product_id=PRODUCT_ID, data=None, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into products (id, data, active) values (%s, %s, %s)",
-            [product_id, json.dumps(data or PRODUCT_DATA), active],
-        )
+    Product.objects.create(id=product_id, data=data or PRODUCT_DATA, active=active)
 
 
 def _insert_customer(customer_id, email, tax_status="NOT SUBMITTED"):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into customers (id, email, data, tax_status) values (%s, %s, %s, %s)",
-            [customer_id, email, "{}", tax_status],
-        )
+    create_customer(customer_id, email=email, tax_status=tax_status)
 
 
 def _insert_cart(cart_id, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into carts (id, data) values (%s, %s)",
-            [cart_id, json.dumps(data)],
-        )
+    Cart.objects.create(id=cart_id, data=data)
 
 
 def _fake_session(session_id="cs_test_123", url="https://checkout.stripe.com/pay/cs_test_123"):
@@ -253,7 +242,7 @@ def test_resolves_existing_customer_by_email_and_merges_submitted_fields(monkeyp
 def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypatch):
     # Un invitado solo escribe un email: si se mezclara con el perfil de una
     # cuenta registrada, cualquiera podría pisar su dirección o sumarle pedidos.
-    from tests.factories import create_customer, create_user
+    from tests.factories import create_user
 
     _insert_product()
     owner = create_user("U_REGISTERED", email="owner@example.com")
@@ -297,9 +286,6 @@ def test_cart_transitions_to_checkout_stage_when_cart_id_present(monkeypatch):
     )
 
     assert response.status_code == 200
-    with connection.cursor() as cursor:
-        cursor.execute("select data from carts where id = %s", ["cart_uuid_checkout_1"])
-        (data,) = cursor.fetchone()
-        data = data if isinstance(data, dict) else json.loads(data)
+    data = Cart.objects.get(pk="cart_uuid_checkout_1").data
     assert data["stage"] == "CHECKOUT"
     assert data["orderId"] == response.json()["orderId"]

@@ -1,45 +1,39 @@
-"""Stage A binding tests for `orders` and `payments` (design decision #3).
-`Payment.order` is a same-app FK into `Order`; `Order.customer` is a
-cross-app FK into `apps.customers.Customer`.
+"""Tests de los modelos `Order` y `Payment` (tablas `orders` y `payments`).
+`Payment.order` es FK a `Order`; `Order.customer` es FK a
+`apps.customers.Customer`.
 """
-import json
 from decimal import Decimal
 
 import pytest
-from django.db import connection
 
 from apps.checkout.models import Order, Payment
+from tests.factories import create_customer
 
 
 def _insert_customer(customer_id):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into customers (id, email, data) values (%s, %s, %s)",
-            [customer_id, f"{customer_id}@example.com", "{}"],
-        )
+    create_customer(customer_id, email=f"{customer_id}@example.com")
 
 
 def _insert_order(order_id, number, customer_id, status, payment_status, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            insert into orders (id, number, customer_id, status,
-                                 payment_status, data)
-            values (%s, %s, %s, %s, %s, %s)
-            """,
-            [order_id, number, customer_id, status, payment_status, json.dumps(data)],
-        )
+    Order.objects.create(
+        id=order_id,
+        number=number,
+        customer_id=customer_id,
+        status=status,
+        payment_status=payment_status,
+        data=data,
+    )
 
 
 def _insert_payment(payment_id, order_id, provider, status, amount, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            insert into payments (id, order_id, provider, status, amount, data)
-            values (%s, %s, %s, %s, %s, %s)
-            """,
-            [payment_id, order_id, provider, status, amount, json.dumps(data)],
-        )
+    Payment.objects.create(
+        id=payment_id,
+        order_id=order_id,
+        provider=provider,
+        status=status,
+        amount=amount,
+        data=data,
+    )
 
 
 @pytest.mark.django_db

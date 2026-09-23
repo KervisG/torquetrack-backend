@@ -1,12 +1,9 @@
-"""Stage A binding tests for `products` and `applications` (design decision
-#3). Fixture jsonb shapes mirror real production rows from `data/products.json`
-and `data/applications.json` (the Next.js fallback fixtures), not invented
-shapes, so this proves compatibility with real data, not just any JSON.
+"""Tests de los modelos `Product` y `Application`. Las formas del JSON copian
+filas reales de `data/products.json` y `data/applications.json` (los
+fixtures de respaldo del Next.js), no formas inventadas.
 """
-import json
 
 import pytest
-from django.db import connection
 
 from apps.catalog.models import Application, Product
 
@@ -39,23 +36,13 @@ REAL_APPLICATION_SHAPE = {
 
 
 def _insert_product(product_id, data, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into products (id, data, active) values (%s, %s, %s)",
-            [product_id, json.dumps(data), active],
-        )
+    Product.objects.create(id=product_id, data=data, active=active)
 
 
 def _insert_application(data):
-    # `applications.id` is `bigserial` (schema.sql), NOT the business
-    # identifier carried inside `data["id"]` — the DB generates the real
-    # primary key, so it must never be supplied explicitly here.
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into applications (data) values (%s) returning id",
-            [json.dumps(data)],
-        )
-        return cursor.fetchone()[0]
+    # `applications.id` es un `BigAutoField`, no el identificador de negocio
+    # que viaja en `data["id"]`: la base genera la clave primaria.
+    return Application.objects.create(data=data).pk
 
 
 @pytest.mark.django_db

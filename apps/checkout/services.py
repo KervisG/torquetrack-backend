@@ -25,9 +25,10 @@ from urllib.parse import quote
 import requests
 import stripe
 from django.conf import settings
-from django.db import connection
+from django.db import transaction
 from django.utils import timezone
 
+from apps.checkout.models import DocumentSequence
 from apps.customers.models import Customer
 
 # Mirrors `lib/tax.ts`'s `fallbackRates` table verbatim (19 states).
@@ -149,15 +150,32 @@ def resolve_or_create_customer(customer: dict) -> str | None:
     return customer_id
 
 
-def next_order_number() -> str:
-    """Mirror the checkout route's order-number allocation query."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "select coalesce(max((substring(number from '[0-9]+'))::int),10000)+1"
-            " as n from orders"
+# Los números de pedido y cotización arrancan en 10001, igual que el legado.
+FIRST_DOCUMENT_NUMBER = 10001
+
+
+def next_document_number(key: str, prefix: str) -> str:
+    """Emite el siguiente número de la serie `key` con formato `<prefix><n>`.
+
+    El legado calculaba `max(substring(number)) + 1`: dos requests
+    concurrentes leían el mismo máximo y chocaban. Aquí la fila de la serie se
+    bloquea con `select_for_update()` dentro de `transaction.atomic`, así que
+    cada llamada espera a la anterior. Si la fila todavía no existe,
+    `get_or_create` la crea y, ante una carrera, reintenta la lectura
+    bloqueante en lugar de duplicarla.
+    """
+    with transaction.atomic():
+        sequence, created = DocumentSequence.objects.select_for_update().get_or_create(
+            key=key, defaults={"last_value": FIRST_DOCUMENT_NUMBER}
         )
-        (n,) = cursor.fetchone()
-    return f"O{n}"
+        if not created:
+            sequence.last_value += 1
+            sequence.save(update_fields=["last_value"])
+    return f"{prefix}{sequence.last_value}"
+
+
+def next_order_number() -> str:
+    return next_document_number("order", "O")
 
 
 def _line_item(name: str, unit_price: float, qty: int) -> dict:

@@ -1,12 +1,11 @@
-"""Stage A model for the `activity_logs` table (design decision #3).
+"""Modelo de la bitácora `activity_logs`.
 
-Only the `ActivityLog` binding needed for Phase 5's Stripe webhook audit
-write (`app/api/webhooks/stripe/route.ts` inserts one row on
-`PAYMENT_PAID`) is added here. The `admin/activity` read endpoint that
-displays this table is explicitly Phase 7 scope per the tasks artifact —
-this model does not implement that endpoint.
+`actor_id` no es FK: guarda el email del staff o un actor de sistema como
+`"stripe"`, y la fila tiene que sobrevivir aunque el usuario se borre.
 """
 from django.db import models
+from django.db.models.functions import Now
+from django.utils import timezone
 
 
 class ActivityLog(models.Model):
@@ -15,11 +14,10 @@ class ActivityLog(models.Model):
     action = models.TextField()
     entity_type = models.TextField(null=True, blank=True)
     entity_id = models.TextField(null=True, blank=True)
-    data = models.JSONField(default=dict)
-    created_at = models.DateTimeField()
+    data = models.JSONField(default=dict, db_default={})
+    created_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
-        managed = False
         db_table = "activity_logs"
         permissions = [
             ("view_dashboard", "Can view dashboard"),

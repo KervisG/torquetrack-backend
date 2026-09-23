@@ -1,11 +1,11 @@
 """`POST /api/fitment/check` (task 4.2), pinned against
 `app/api/fitment/check/route.ts`.
 """
-import json
 
 import pytest
-from django.db import connection
 from rest_framework.test import APIClient
+
+from apps.catalog.models import Product
 
 PRODUCT_DATA = {
     "id": "ford-73-injector-alliant-ap63992",
@@ -19,11 +19,7 @@ PRODUCT_DATA = {
 
 
 def _insert_product(product_id, data, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into products (id, data, active) values (%s, %s, %s)",
-            [product_id, json.dumps(data), active],
-        )
+    Product.objects.create(id=product_id, data=data, active=active)
 
 
 @pytest.mark.django_db

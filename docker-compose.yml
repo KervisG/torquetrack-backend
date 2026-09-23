@@ -20,10 +20,6 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app
-      # Stage A tests apply the real DDL from `scripts/schema.sql` (repo
-      # root, shared with the frozen Next.js app) against the test DB
-      # (see `conftest.py`). Read-only: this container never writes here.
-      - ../scripts:/scripts:ro
     ports:
       - "8010:8000"
     environment:
@@ -36,6 +32,4 @@ services:
 
 volumes:
   torquetrack_pgdata:
-    # Starts empty. Stage A models are managed=False and bind to the existing
-    # Neon schema (design decision #2/#3): restore a Neon dump into this
-    # volume manually before Phase 2 model-binding tests need real data.
+    # Arranca vacío: `python manage.py migrate` crea todas las tablas.

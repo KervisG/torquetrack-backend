@@ -1,32 +1,21 @@
-"""Stage A binding tests for `quotes`, including the `customer_id` FK into
-`apps.customers.Customer` (design decision #3). Magic-link tokens live
-inside `data` jsonb for now (Stage B backfill types them later).
+"""Tests del modelo `Quote` (tabla `quotes`), incluida la FK `customer` a
+`apps.customers.Customer`. Los tokens del enlace público viven en `data`.
 """
-import json
 
 import pytest
-from django.db import connection
 
 from apps.quotes.models import Quote
+from tests.factories import create_customer
 
 
 def _insert_customer(customer_id):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into customers (id, email, data) values (%s, %s, %s)",
-            [customer_id, f"{customer_id}@example.com", "{}"],
-        )
+    create_customer(customer_id, email=f"{customer_id}@example.com")
 
 
 def _insert_quote(quote_id, number, customer_id, status, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            insert into quotes (id, number, customer_id, status, data)
-            values (%s, %s, %s, %s, %s)
-            """,
-            [quote_id, number, customer_id, status, json.dumps(data)],
-        )
+    Quote.objects.create(
+        id=quote_id, number=number, customer_id=customer_id, status=status, data=data
+    )
 
 
 @pytest.mark.django_db
@@ -49,14 +38,9 @@ def test_reads_sent_quote_with_expiry():
     from django.utils import timezone
 
     expires_at = timezone.now()
-    with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            insert into quotes (id, number, status, data, expires_at)
-            values (%s, %s, %s, %s, %s)
-            """,
-            ["quo_2", "Q-1002", "SENT", json.dumps({"lineItems": []}), expires_at],
-        )
+    Quote.objects.create(
+        id="quo_2", number="Q-1002", status="SENT", data={"lineItems": []}, expires_at=expires_at
+    )
 
     quote = Quote.objects.get(pk="quo_2")
 

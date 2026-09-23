@@ -11,12 +11,12 @@ expired-token denial on every public action, so this phase adds that check
 to the GET view too (410 Gone) — a read-only `expires_at` comparison, never
 mutating `status`, so "no auto-reopen" holds trivially.
 """
-import json
 
 import pytest
-from django.db import connection
 from django.utils import timezone
 
+from apps.cart.models import Cart
+from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
 from apps.quotes.models import Quote
 
@@ -31,19 +31,11 @@ PRODUCT_DATA = {
 
 
 def _insert_product(product_id=PRODUCT_ID, data=None, active=True):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into products (id, data, active) values (%s, %s, %s)",
-            [product_id, json.dumps(data or PRODUCT_DATA), active],
-        )
+    Product.objects.create(id=product_id, data=data or PRODUCT_DATA, active=active)
 
 
 def _insert_cart(cart_id, data):
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "insert into carts (id, data) values (%s, %s)",
-            [cart_id, json.dumps(data)],
-        )
+    Cart.objects.create(id=cart_id, data=data)
 
 
 def _make_quote(
@@ -178,10 +170,7 @@ def test_quote_request_links_cart_when_cart_id_present(client):
     )
 
     assert response.status_code == 200
-    with connection.cursor() as cursor:
-        cursor.execute("select data from carts where id = %s", ["cart_quote_1"])
-        (data,) = cursor.fetchone()
-        data = data if isinstance(data, dict) else json.loads(data)
+    data = Cart.objects.get(pk="cart_quote_1").data
     assert data["stage"] == "BUILDING_QUOTE"
     assert data["quoteId"] == response.json()["quoteId"]
 

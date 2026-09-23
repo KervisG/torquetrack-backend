@@ -1,10 +1,12 @@
-"""Stage A model for `quotes` (design decision #3).
+"""Modelo de cotizaciones (`quotes`).
 
-`customer` is a cross-app FK into `apps.customers.Customer`, nullable to
-match `on delete set null`. Magic-link tokens live inside `data` jsonb for
-now (Stage B backfill types them later, per design decision #4).
+`customer` apunta a `customers.Customer` y queda en NULL si se borra el
+perfil. Los tokens del enlace público viven dentro de `data`. `number` lo
+asigna `next_quote_number` y la base garantiza que es único.
 """
 from django.db import models
+from django.db.models.functions import Now
+from django.utils import timezone
 
 
 class Quote(models.Model):
@@ -15,17 +17,15 @@ class Quote(models.Model):
         on_delete=models.SET_NULL,
         null=True,
         blank=True,
-        db_column="customer_id",
         related_name="quotes",
     )
-    status = models.TextField(default="BUILDING")
+    status = models.TextField(default="BUILDING", db_default="BUILDING")
     data = models.JSONField(default=dict)
-    created_at = models.DateTimeField()
+    created_at = models.DateTimeField(default=timezone.now, db_default=Now())
     expires_at = models.DateTimeField(null=True, blank=True)
-    updated_at = models.DateTimeField()
+    updated_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
-        managed = False
         db_table = "quotes"
         permissions = [
             ("send_quote", "Can send quotes"),

@@ -20,7 +20,6 @@ import secrets
 
 import requests
 from django.conf import settings
-from django.db import connection
 from django.template.loader import render_to_string
 from django.utils import timezone
 
@@ -29,6 +28,7 @@ from apps.checkout.services import (
     create_stripe_checkout_session,
     js_number_or,
     money,
+    next_document_number,
     next_order_number,
     random_id,
 )
@@ -43,14 +43,7 @@ def quote_token() -> str:
 
 
 def next_quote_number() -> str:
-    """Mirror the legacy routes' quote-number allocation query."""
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "select coalesce(max((substring(number from '[0-9]+'))::int),10000)+1"
-            " as n from quotes"
-        )
-        (n,) = cursor.fetchone()
-    return f"Q{n}"
+    return next_document_number("quote", "Q")
 
 
 def send_email(*, to, subject, html, attachments=None, reply_to=None) -> dict:

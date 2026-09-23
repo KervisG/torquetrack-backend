@@ -3,7 +3,7 @@ against `app/api/admin/quotes/[id]/{convert,preview,reopen,send}/route.ts`.
 
 RBAC-gated via `SessionUserAuthentication` + `HasTorqueTrackPermission`.
 Los tests recorren el camino real cookie -> sesión -> `request.user` con
-una sesión creada en `SessionStore` y enviada como cookie `tt_session`.
+una sesión creada en `SessionStore` y enviada como cookie de sesión (`SESSION_COOKIE_NAME`).
 """
 
 import pytest

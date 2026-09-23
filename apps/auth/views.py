@@ -14,7 +14,11 @@ from apps.auth.services import (
     register_customer,
     serialize_session_user,
 )
-from apps.auth.sessions import end_user_session, start_user_session
+from apps.auth.sessions import (
+    csrf_token_payload,
+    end_user_session,
+    start_user_session,
+)
 from apps.auth.utils.throttling import (
     LoginAccountRateThrottle,
     LoginRateThrottle,
@@ -26,8 +30,12 @@ def _body(request) -> dict:
     return request.data if isinstance(request.data, dict) else {}
 
 
-def _session_payload(user: User) -> dict:
-    return {"authenticated": True, "user": serialize_session_user(user)}
+def _session_payload(request, user: User) -> dict:
+    return {
+        "authenticated": True,
+        "user": serialize_session_user(user),
+        **csrf_token_payload(request),
+    }
 
 
 class RegisterView(APIView):
@@ -42,7 +50,7 @@ class RegisterView(APIView):
         if "error" in result:
             return Response({"error": result["error"]}, status=result["status"])
         start_user_session(request, result["user"])
-        return Response(_session_payload(result["user"]), status=201)
+        return Response(_session_payload(request, result["user"]), status=201)
 
 
 class LoginView(APIView):
@@ -58,7 +66,7 @@ class LoginView(APIView):
         if user is None:
             return Response({"error": "Incorrect email or password"}, status=401)
         start_user_session(request, user)
-        return Response(_session_payload(user))
+        return Response(_session_payload(request, user))
 
 
 class LogoutView(APIView):
@@ -78,13 +86,15 @@ class LogoutView(APIView):
 
 @method_decorator(ensure_csrf_cookie, name="dispatch")
 class SessionView(APIView):
-    """`GET /api/session/`. También entrega la cookie `csrftoken` al SPA,
-    aunque todavía no haya sesión."""
+    """`GET /api/session/`. También entrega el token CSRF (cookie y body) al
+    SPA, aunque todavía no haya sesión."""
 
     authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
 
     def get(self, request):
         if not isinstance(request.user, User):
-            return Response({"error": "Unauthorized"}, status=401)
-        return Response(_session_payload(request.user))
+            return Response(
+                {"error": "Unauthorized", **csrf_token_payload(request)}, status=401
+            )
+        return Response(_session_payload(request, request.user))

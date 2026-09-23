@@ -7,6 +7,7 @@ contraseña o desactivar corta las sesiones vivas del usuario.
 import re
 
 import pytest
+from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.contrib.sessions.models import Session
 from rest_framework.test import APIClient
@@ -271,7 +272,7 @@ def test_update_deactivating_revokes_the_live_session():
     client = _manager_client("U_UPDATER3")
     create_staff_user("U_TARGET_EMP", permissions=["dashboard.view"])
     _, target_key = session_client("U_TARGET_EMP")
-    actor_key = client.cookies["tt_session"].value
+    actor_key = client.cookies[settings.SESSION_COOKIE_NAME].value
 
     response = client.put(
         "/api/admin/users/U_TARGET_EMP/", {"active": False}, format="json"

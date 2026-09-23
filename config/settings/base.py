@@ -104,14 +104,17 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Una sola sesión para clientes y staff (`apps/auth/sessions.py`), con la
-# cookie `tt_session`, 7 días de vida, httpOnly y SameSite=Lax.
-SESSION_COOKIE_NAME = "tt_session"
+# Una sola sesión para clientes y staff (`apps/auth/sessions.py`), con 7 días
+# de vida, httpOnly y SameSite=Lax. Las cookies usan los nombres por defecto
+# de Django (`sessionid`, `csrftoken`); producción les agrega el prefijo
+# `__Host-` en `prod.py`.
 SESSION_COOKIE_AGE = 7 * 24 * 60 * 60
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 
-# El SPA lee `csrftoken` y lo manda en `X-CSRFToken` en cada request que muta.
+# El SPA recibe el token CSRF en el body de `/api/session/`, login, registro y
+# activación, y lo manda en `X-CSRFToken` en cada request que muta. Así no
+# depende del nombre de la cookie, que cambia entre entornos.
 # El proxy de Vite reescribe el Host, así que el origen del SPA tiene que
 # figurar como confiable o Django rechaza el `Origin`.
 CSRF_TRUSTED_ORIGINS = env.list("CSRF_TRUSTED_ORIGINS", default=["http://localhost:5173"])

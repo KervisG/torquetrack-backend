@@ -1,10 +1,11 @@
 """`/api/register/`, `/api/login/`, `/api/logout/` y `/api/session/`.
 
-Una sola cuenta y una sola cookie (`tt_session`) para clientes y staff. El
+Una sola cuenta y una sola cookie de sesión para clientes y staff. El
 acceso al panel lo decide el Role, no el login. Los requests autenticados
 que mutan exigen el token CSRF.
 """
 import pytest
+from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.contrib.sessions.models import Session
 from django.core.cache import cache
@@ -77,7 +78,7 @@ def test_register_creates_a_customer_account_without_role_and_starts_a_session()
     assert customer.data["company"] == "Fleet LLC"
     assert customer.data["phone"] == "555-0100"
 
-    cookie = response.cookies["tt_session"]
+    cookie = response.cookies[settings.SESSION_COOKIE_NAME]
     assert cookie["httponly"] is True
     assert Session.objects.get(session_key=cookie.value).get_decoded()["user_id"] == user.pk
 
@@ -231,7 +232,9 @@ def test_login_accepts_a_customer_and_sets_the_session_cookie():
     )
 
     assert response.status_code == 200
-    assert response.json() == {
+    body = response.json()
+    assert isinstance(body.pop("csrfToken"), str)
+    assert body == {
         "authenticated": True,
         "user": {
             "id": "U_CUSTOMER",
@@ -243,7 +246,7 @@ def test_login_accepts_a_customer_and_sets_the_session_cookie():
             "permissions": [],
         },
     }
-    cookie = response.cookies["tt_session"]
+    cookie = response.cookies[settings.SESSION_COOKIE_NAME]
     assert cookie.value
     assert cookie["httponly"] is True
     assert cookie["samesite"] == "Lax"
@@ -278,7 +281,7 @@ def test_login_rotates_a_preexisting_session_key():
     )
 
     assert response.status_code == 200
-    assert response.cookies["tt_session"].value != fixated_key
+    assert response.cookies[settings.SESSION_COOKIE_NAME].value != fixated_key
     assert not Session.objects.filter(session_key=fixated_key).exists()
 
 
@@ -391,12 +394,26 @@ def test_login_account_throttle_skips_requests_without_an_identifier(monkeypatch
 
 
 @pytest.mark.django_db
-def test_session_returns_401_without_a_cookie_but_issues_a_csrf_cookie():
+def test_session_returns_401_without_a_cookie_but_issues_a_csrf_token():
     response = APIClient().get("/api/session/")
 
     assert response.status_code == 401
-    assert response.json() == {"error": "Unauthorized"}
-    assert response.cookies["csrftoken"].value
+    body = response.json()
+    assert body["error"] == "Unauthorized"
+    assert isinstance(body["csrfToken"], str) and body["csrfToken"]
+    assert response.cookies[settings.CSRF_COOKIE_NAME].value
+
+
+@pytest.mark.django_db
+def test_session_returns_the_csrf_token_when_authenticated():
+    create_user("U_SESS_CSRF")
+    client, _ = session_client("U_SESS_CSRF", enforce_csrf=True)
+
+    response = client.get("/api/session/")
+
+    assert response.status_code == 200
+    token = response.json()["csrfToken"]
+    assert client.post("/api/logout/", HTTP_X_CSRFTOKEN=token).status_code == 200
 
 
 @pytest.mark.django_db
@@ -438,7 +455,7 @@ def test_logout_deletes_the_session_row_and_clears_the_cookie():
     assert response.status_code == 200
     assert response.json() == {"ok": True}
     assert not Session.objects.filter(session_key=session_key).exists()
-    assert response.cookies["tt_session"].value == ""
+    assert response.cookies[settings.SESSION_COOKIE_NAME].value == ""
 
 
 @pytest.mark.django_db
@@ -466,11 +483,40 @@ def test_authenticated_unsafe_request_without_csrf_token_is_rejected():
 def test_authenticated_unsafe_request_with_csrf_token_is_accepted():
     create_user("U_CSRF_OK")
     client, _ = session_client("U_CSRF_OK", enforce_csrf=True)
-    token = client.get("/api/session/").cookies["csrftoken"].value
+    token = client.get("/api/session/").json()["csrfToken"]
 
     response = client.post("/api/logout/", HTTP_X_CSRFTOKEN=token)
 
     assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_login_returns_a_rotated_csrf_token_that_authorizes_the_next_mutation():
+    create_user("U_CSRF_LOGIN", email="csrf.login@example.com", password=DEFAULT_PASSWORD)
+    client = APIClient(enforce_csrf_checks=True)
+    before = client.get("/api/session/").cookies[settings.CSRF_COOKIE_NAME].value
+
+    response = client.post(
+        "/api/login/",
+        {"email": "csrf.login@example.com", "password": DEFAULT_PASSWORD},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    token = response.json()["csrfToken"]
+    assert response.cookies[settings.CSRF_COOKIE_NAME].value != before
+    assert client.post("/api/logout/", HTTP_X_CSRFTOKEN=token).status_code == 200
+
+
+@pytest.mark.django_db
+def test_register_returns_a_csrf_token_that_authorizes_the_next_mutation():
+    client = APIClient(enforce_csrf_checks=True)
+
+    response = client.post("/api/register/", _register_payload(), format="json")
+
+    assert response.status_code == 201
+    token = response.json()["csrfToken"]
+    assert client.post("/api/logout/", HTTP_X_CSRFTOKEN=token).status_code == 200
 
 
 # --- rutas retiradas ----------------------------------------------------------

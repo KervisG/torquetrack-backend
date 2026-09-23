@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.models import User
 from apps.auth.services import serialize_session_user
-from apps.auth.sessions import start_user_session
+from apps.auth.sessions import csrf_token_payload, start_user_session
 from apps.auth.utils.throttling import ActivateRateThrottle
 from apps.customers.services import (
     activate_customer_account,
@@ -116,6 +116,10 @@ class ActivateAccountView(APIView):
             return _error(result)
         start_user_session(request, result["user"])
         return Response(
-            {"authenticated": True, "user": serialize_session_user(result["user"])},
+            {
+                "authenticated": True,
+                "user": serialize_session_user(result["user"]),
+                **csrf_token_payload(request),
+            },
             status=201,
         )

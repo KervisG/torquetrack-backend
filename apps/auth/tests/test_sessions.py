@@ -1,4 +1,4 @@
-"""Una sola cookie de sesión (`tt_session`) y la revocación por usuario."""
+"""Una sola cookie de sesión (`SESSION_COOKIE_NAME`) y la revocación por usuario."""
 import pytest
 from django.conf import settings
 from django.contrib.sessions.backends.db import SessionStore
@@ -10,7 +10,10 @@ SEVEN_DAYS_SECONDS = 7 * 24 * 60 * 60
 
 
 def test_session_cookie_settings():
-    assert settings.SESSION_COOKIE_NAME == "tt_session"
+    # En desarrollo se usan los nombres por defecto de Django; producción
+    # les agrega el prefijo `__Host-` (`tests/test_settings.py`).
+    assert settings.SESSION_COOKIE_NAME == "sessionid"
+    assert settings.CSRF_COOKIE_NAME == "csrftoken"
     assert settings.SESSION_COOKIE_HTTPONLY is True
     assert settings.SESSION_COOKIE_SAMESITE == "Lax"
     assert settings.SESSION_COOKIE_AGE == SEVEN_DAYS_SECONDS

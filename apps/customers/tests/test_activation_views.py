@@ -4,6 +4,7 @@ su cuenta (User sin Role) con el email del Customer y queda vinculado.
 import hashlib
 
 import pytest
+from django.conf import settings
 from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.utils import timezone
@@ -56,7 +57,8 @@ def test_activate_creates_a_user_links_the_customer_and_starts_a_session():
     assert customer.user == user
     assert customer.activation_token_hash is None
     assert customer.activation_expires_at is None
-    assert response.cookies["tt_session"].value
+    assert response.cookies[settings.SESSION_COOKIE_NAME].value
+    assert isinstance(body["csrfToken"], str) and body["csrfToken"]
 
 
 @pytest.mark.django_db

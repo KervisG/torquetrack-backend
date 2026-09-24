@@ -17,6 +17,7 @@ EXPECTED_APPS = {
     "apps.fitment",
     "apps.cart",
     "apps.checkout",
+    "apps.numbering",
     "apps.quotes",
     "apps.audit",
     "apps.dashboard",
@@ -31,7 +32,7 @@ def test_settings_are_configured():
     assert settings.configured
 
 
-def test_installed_apps_include_drf_and_all_phase1_app_skeletons():
+def test_installed_apps_include_drf_and_every_domain_app():
     assert "rest_framework" in settings.INSTALLED_APPS
     assert EXPECTED_APPS.issubset(set(settings.INSTALLED_APPS))
 

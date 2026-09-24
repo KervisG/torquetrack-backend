@@ -8,7 +8,7 @@ from django.conf import settings
 from django.core.cache import cache
 
 from apps.catalog.models import Product
-from apps.checkout.services import js_number_or, money
+from apps.common.numbers import money, to_number
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.shipping import easypost
 
@@ -60,7 +60,7 @@ def normalize_items(raw_items) -> dict[str, int] | None:
     for raw_item in raw_items:
         if not isinstance(raw_item, dict) or not raw_item.get("id"):
             return None
-        qty = max(1, min(MAX_ITEM_QTY, int(js_number_or(raw_item.get("qty"), 1))))
+        qty = max(1, min(MAX_ITEM_QTY, int(to_number(raw_item.get("qty"), 1))))
         product_id = str(raw_item["id"])
         quantities[product_id] = min(MAX_ITEM_QTY, quantities.get(product_id, 0) + qty)
     return quantities
@@ -69,10 +69,10 @@ def normalize_items(raw_items) -> dict[str, int] | None:
 def _unit_weight_oz(product_id: str, data: dict) -> float:
     """`shippingWeight` está en libras y `weightOz` en onzas. Sin ninguno se
     registra el faltante para completar el catálogo."""
-    pounds = js_number_or(data.get("shippingWeight"), 0)
+    pounds = to_number(data.get("shippingWeight"), 0)
     if pounds > 0:
         return pounds * OUNCES_PER_POUND
-    ounces = js_number_or(data.get("weightOz"), 0)
+    ounces = to_number(data.get("weightOz"), 0)
     if ounces > 0:
         return ounces
     logger.warning("Product %s has no shipping weight; using %s lb", product_id, DEFAULT_WEIGHT_LB)
@@ -80,7 +80,7 @@ def _unit_weight_oz(product_id: str, data: dict) -> float:
 
 
 def _dimension(data: dict, keys: tuple[str, str], default: float) -> float:
-    value = js_number_or(data.get(keys[0]) or data.get(keys[1]), 0)
+    value = to_number(data.get(keys[0]) or data.get(keys[1]), 0)
     return value if value > 0 else default
 
 

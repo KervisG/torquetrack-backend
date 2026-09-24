@@ -1,12 +1,12 @@
-"""Cuentas: credenciales, alta pública, la forma del usuario de sesión y los
-enlaces por correo (restablecer contraseña y verificar el email)."""
+"""Cuentas: credenciales, alta de `User`, la forma del usuario de sesión y los
+enlaces por correo (restablecer contraseña, verificar el email y activar la
+invitación al portal). El perfil `Customer` es de `apps.customers`, que
+depende de esta app y no al revés."""
 from __future__ import annotations
 
-import hashlib
 import logging
 import secrets
 
-from django.conf import settings
 from django.contrib.auth.hashers import check_password, make_password
 from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
@@ -15,26 +15,15 @@ from django.db import IntegrityError, transaction
 from django.utils import timezone
 from django.utils.html import escape
 
-from apps.auth.models import AccountToken, Role, User
+from apps.auth.models import AccountToken, Role, User, compose_display_name
 from apps.auth.permissions import is_staff_user, permission_codenames_for_role
 from apps.auth.utils.background import run_in_background
-from apps.checkout.services import random_id
+from apps.common.ids import random_id
+from apps.common.links import app_url
+from apps.common.tokens import hash_token
 from apps.integrations.email import resend
 
 logger = logging.getLogger(__name__)
-
-
-def compose_display_name(first_name: str, last_name: str) -> str:
-    return " ".join(part for part in (first_name, last_name) if part)
-
-
-def split_full_name(name: str) -> tuple[str, str]:
-    parts = str(name or "").strip().split(None, 1)
-    if not parts:
-        return "", ""
-    if len(parts) == 1:
-        return parts[0], ""
-    return parts[0], parts[1]
 
 
 def parse_email(raw) -> str | None:
@@ -134,88 +123,75 @@ def create_account(
     return {"user": candidate}
 
 
-def register_customer(payload: dict) -> dict:
-    """El registro no toca un Customer invitado con el mismo email: el correo
-    todavía no está verificado y adueñarse de ese perfil le daría a
-    cualquiera el historial de otra persona. Ese historial se vincula recién
-    en `verify_email`, cuando el enlace prueba que la persona controla la
-    casilla; hasta entonces puede entrar y comprar igual.
-    """
-    from apps.customers.models import Customer
-
-    email = parse_email(payload.get("email"))
-    password = payload.get("password")
-    name = str(payload.get("name") or "").strip()
-    if email is None or not isinstance(password, str) or not password or not name:
-        return {"error": "Email, password and name required", "status": 400}
-
-    company = str(payload.get("company") or "").strip()
-    phone = str(payload.get("phone") or "").strip()
-    first_name, last_name = split_full_name(name)
-
-    with transaction.atomic():
-        result = create_account(
-            email=email,
-            password=password,
-            first_name=first_name,
-            last_name=last_name,
-            display_name=name,
-        )
-        if "error" in result:
-            return result
-        user = result["user"]
-        customer_id = random_id("C")
-        now = timezone.now()
-        Customer.objects.create(
-            id=customer_id,
-            user=user,
-            email=email,
-            data={
-                "id": customer_id,
-                "email": email,
-                "name": name,
-                "company": company,
-                "phone": phone,
-            },
-            created_at=now,
-            updated_at=now,
-        )
-    send_verification_email(user)
-    return {"user": user}
-
-
-# --- enlaces por correo: restablecer contraseña y verificar el email ---------
+# --- enlaces por correo: reset de contraseña, verificación y activación -----
 
 PASSWORD_RESET_TTL = timezone.timedelta(hours=1)
 EMAIL_VERIFICATION_TTL = timezone.timedelta(hours=48)
+ACTIVATION_TTL = timezone.timedelta(days=7)
 _TOKEN_TTL = {
     AccountToken.PASSWORD_RESET: PASSWORD_RESET_TTL,
     AccountToken.EMAIL_VERIFICATION: EMAIL_VERIFICATION_TTL,
+    AccountToken.ACTIVATION: ACTIVATION_TTL,
 }
 PASSWORD_RESET_REQUESTED = {
     "ok": True,
     "message": "If an account exists for that email, we sent a link to reset the password.",
 }
 _INVALID_RESET = {"error": "Invalid or expired reset link", "status": 400}
-_INVALID_VERIFICATION = {"error": "Invalid or expired verification link", "status": 400}
 
 
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
-
-
-def issue_account_token(user: User, purpose: str) -> str:
-    """Crea un token de un solo uso para `purpose` y devuelve el valor en
-    claro, que solo debe viajar en el enlace del correo."""
+def _create_token(purpose: str, email: str, user: User | None = None) -> str:
+    """Devuelve el valor en claro, que solo debe viajar en el enlace del correo."""
     token = secrets.token_urlsafe(32)
     AccountToken.objects.create(
         user=user,
         purpose=purpose,
-        token_hash=_hash_token(token),
-        email=user.email,
+        token_hash=hash_token(token),
+        email=email,
         expires_at=timezone.now() + _TOKEN_TTL[purpose],
     )
     return token
+
+
+def issue_account_token(user: User, purpose: str) -> str:
+    return _create_token(purpose, user.email, user)
+
+
+def issue_activation_token(email: str) -> str:
+    """Un perfil tiene una sola invitación vigente: la nueva anula las
+    anteriores, así un enlace viejo reenviado por error ya no activa."""
+    AccountToken.objects.filter(
+        purpose=AccountToken.ACTIVATION, email=email, used_at__isnull=True
+    ).update(used_at=timezone.now())
+    return _create_token(AccountToken.ACTIVATION, email)
+
+
+def _pending_tokens(purpose: str):
+    return AccountToken.objects.filter(
+        purpose=purpose, used_at__isnull=True, expires_at__gt=timezone.now()
+    )
+
+
+def invited_emails(emails) -> set[str]:
+    """Emails con una invitación al portal vigente, en una sola consulta."""
+    return set(
+        _pending_tokens(AccountToken.ACTIVATION)
+        .filter(email__in=[email for email in emails if email])
+        .values_list("email", flat=True)
+    )
+
+
+def lock_activation_token(token) -> AccountToken | None:
+    """Igual que `_lock_account_token` pero sin `user`: quien llama resuelve el
+    perfil por `record.email` y marca `used_at` en la misma transacción."""
+    if not isinstance(token, str) or not token:
+        return None
+    return (
+        _pending_tokens(AccountToken.ACTIVATION)
+        .select_for_update()
+        .filter(token_hash=hash_token(token))
+        .first()
+    )
 
 
 def _lock_account_token(token, purpose: str) -> AccountToken | None:
@@ -225,14 +201,12 @@ def _lock_account_token(token, purpose: str) -> AccountToken | None:
     if not isinstance(token, str) or not token:
         return None
     record = (
-        AccountToken.objects.select_for_update()
+        _pending_tokens(purpose)
+        .select_for_update()
         .select_related("user")
-        .filter(
-            token_hash=_hash_token(token),
-            purpose=purpose,
-            used_at__isnull=True,
-            expires_at__gt=timezone.now(),
-        )
+        # Con el filtro el join es INNER: Postgres no admite FOR UPDATE sobre
+        # el lado nullable de un LEFT JOIN y así se bloquea también el `User`.
+        .filter(token_hash=hash_token(token), user__isnull=False)
         .first()
     )
     if record is None:
@@ -250,11 +224,6 @@ def invalidate_password_reset_tokens(user_id: str) -> None:
     AccountToken.objects.filter(
         user_id=user_id, purpose=AccountToken.PASSWORD_RESET, used_at__isnull=True
     ).update(used_at=timezone.now())
-
-
-def _app_link(path: str, token: str) -> str:
-    base = (settings.APP_URL or "http://localhost:5173").rstrip("/")
-    return f"{base}{path}?token={token}"
 
 
 def _deliver_account_email(user_id: str, email: str, subject: str, html: str) -> None:
@@ -282,7 +251,7 @@ def request_password_reset(payload: dict) -> dict:
     user = User.objects.filter(email=email, active=True).first() if email else None
     if user is not None:
         token = issue_account_token(user, AccountToken.PASSWORD_RESET)
-        link = escape(_app_link("/reset-password", token))
+        link = escape(app_url(f"/reset-password?token={token}"))
         _send_account_email(
             user,
             "Reset your TorqueTrack password",
@@ -323,7 +292,7 @@ def confirm_password_reset(payload: dict) -> dict:
 
 def send_verification_email(user: User) -> None:
     token = issue_account_token(user, AccountToken.EMAIL_VERIFICATION)
-    link = escape(_app_link("/verify-email", token))
+    link = escape(app_url(f"/verify-email?token={token}"))
     _send_account_email(
         user,
         "Verify your TorqueTrack email",
@@ -344,21 +313,18 @@ def resend_verification_email(user: User) -> dict:
     return {"ok": True, "emailVerified": False}
 
 
-def verify_email(payload: dict) -> dict:
-    """Vincula el historial de compras como invitado en la misma transacción
-    que verifica el correo."""
-    from apps.customers.services import link_guest_history
-
-    with transaction.atomic():
-        record = _lock_account_token(payload.get("token"), AccountToken.EMAIL_VERIFICATION)
-        if record is None:
-            return dict(_INVALID_VERIFICATION)
-        now = timezone.now()
-        user = record.user
-        user.email_verified_at = user.email_verified_at or now
-        user.save(update_fields=["email_verified_at"])
-        AccountToken.objects.filter(
-            user=user, purpose=AccountToken.EMAIL_VERIFICATION, used_at__isnull=True
-        ).update(used_at=now)
-        linked = link_guest_history(user)
-    return {"ok": True, **linked}
+def consume_email_verification(token) -> User | None:
+    """Marca el email como verificado y consume los enlaces pendientes, o
+    devuelve `None`. Debe correr dentro de la transacción de quien llama, que
+    en la misma transacción vincula el historial de compras."""
+    record = _lock_account_token(token, AccountToken.EMAIL_VERIFICATION)
+    if record is None:
+        return None
+    now = timezone.now()
+    user = record.user
+    user.email_verified_at = user.email_verified_at or now
+    user.save(update_fields=["email_verified_at"])
+    AccountToken.objects.filter(
+        user=user, purpose=AccountToken.EMAIL_VERIFICATION, used_at__isnull=True
+    ).update(used_at=now)
+    return user

@@ -60,3 +60,51 @@ def test_activity_returns_recent_logs_newest_first_in_camel_case():
     assert first["entityType"] == "QUOTE"
     assert first["entityId"] == "Q1"
     assert first["data"] == {"number": "Q10003"}
+
+
+def _payment_activity():
+    return ActivityLog.objects.create(
+        actor_id="stripe",
+        action="PAYMENT_PAID",
+        entity_type="ORDER",
+        entity_id="O1",
+        data={
+            "sessionId": "cs_test_secret",
+            "paymentIntent": "pi_test_secret",
+            "amountTotal": 7525,
+            "last4": "4242",
+        },
+        created_at=timezone.now(),
+    )
+
+
+@pytest.mark.django_db
+def test_activity_hides_stripe_ids_without_the_transaction_id_permission():
+    _payment_activity()
+    client = _admin_client("usr_activity_redacted", ["activity.view"])
+
+    row = client.get("/api/admin/activity/").json()[0]
+
+    assert row["data"] == {"amountTotal": 7525, "last4": "4242"}
+
+
+@pytest.mark.django_db
+def test_activity_shows_stripe_ids_with_the_transaction_id_permission():
+    _payment_activity()
+    client = _admin_client("usr_activity_full", ["activity.view", "payments.transaction_id"])
+
+    row = client.get("/api/admin/activity/").json()[0]
+
+    assert row["data"]["sessionId"] == "cs_test_secret"
+    assert row["data"]["paymentIntent"] == "pi_test_secret"
+
+
+@pytest.mark.django_db
+def test_activity_shows_stripe_ids_to_a_full_access_role():
+    _payment_activity()
+    create_staff_user("usr_activity_owner", full_access=True)
+    client, _ = session_client("usr_activity_owner")
+
+    row = client.get("/api/admin/activity/").json()[0]
+
+    assert row["data"]["paymentIntent"] == "pi_test_secret"

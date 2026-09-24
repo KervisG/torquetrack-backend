@@ -16,6 +16,20 @@ def normalize_email(raw) -> str:
     return str(raw or "").strip().lower()
 
 
+def split_full_name(name) -> tuple[str, str]:
+    """Primera palabra como nombre y el resto como apellido."""
+    parts = str(name or "").strip().split(None, 1)
+    if not parts:
+        return "", ""
+    if len(parts) == 1:
+        return parts[0], ""
+    return parts[0], parts[1]
+
+
+def compose_display_name(first_name: str, last_name: str) -> str:
+    return " ".join(part for part in (first_name, last_name) if part)
+
+
 class User(models.Model):
     id = models.TextField(primary_key=True, default=new_user_id)
     # Se guarda siempre en minúsculas, así el `unique` también cubre
@@ -67,14 +81,7 @@ class User(models.Model):
         last = (self.last_name or "").strip()
         if first or last:
             return first, last
-        parts = (self.display_name or "").strip().split(None, 1)
-        if not parts:
-            return "", ""
-        if len(parts) == 1:
-            return parts[0], ""
-        return parts[0], parts[1]
+        return split_full_name(self.display_name)
 
     def full_name(self) -> str:
-        first, last = self.given_names()
-        composed = " ".join(part for part in (first, last) if part)
-        return composed or self.email
+        return compose_display_name(*self.given_names()) or self.email

@@ -1,4 +1,6 @@
 
+import logging
+
 import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
@@ -454,19 +456,22 @@ def test_payment_link_without_customer_email_is_not_emailed(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_payment_link_returns_502_on_stripe_failure(monkeypatch):
+def test_payment_link_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
     _insert_user("usr_link5", permissions=["payments.take"])
     _make_order()
     client = _admin_client("usr_link5")
 
     def _boom(**kwargs):
-        raise ProviderError("Could not create payment link")
+        raise ProviderError("Invalid API Key for account acct_internal_123")
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    response = client.post("/api/admin/orders/ord_1/payment-link/")
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.admin_services"):
+        response = client.post("/api/admin/orders/ord_1/payment-link/")
 
     assert response.status_code == 502
+    assert response.json() == {"error": "Stripe request failed; see server logs."}
+    assert "acct_internal_123" in caplog.text
 
 
 # --- take-payment (POST) --------------------------------------------------
@@ -514,16 +519,19 @@ def test_take_payment_creates_payment_and_logs_activity_without_status_change(mo
 
 
 @pytest.mark.django_db
-def test_take_payment_returns_502_on_stripe_failure(monkeypatch):
+def test_take_payment_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
     _insert_user("usr_take4", permissions=["payments.take"])
     _make_order()
     client = _admin_client("usr_take4")
 
     def _boom(**kwargs):
-        raise ProviderError("Could not start secure payment")
+        raise ProviderError("Invalid API Key for account acct_internal_123")
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    response = client.post("/api/admin/orders/ord_1/take-payment/")
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.admin_services"):
+        response = client.post("/api/admin/orders/ord_1/take-payment/")
 
     assert response.status_code == 502
+    assert response.json() == {"error": "Stripe request failed; see server logs."}
+    assert "acct_internal_123" in caplog.text

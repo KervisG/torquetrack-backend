@@ -16,9 +16,6 @@ class Customer(models.Model):
     )
     email = models.TextField(null=True, blank=True)
     data = models.JSONField(default=dict)
-    # Token del enlace de invitación al portal (`portal-invite` → `/activate`).
-    activation_token_hash = models.TextField(null=True, blank=True)
-    activation_expires_at = models.DateTimeField(null=True, blank=True)
     tax_status = models.TextField(default="NOT SUBMITTED", db_default="NOT SUBMITTED")
     created_at = models.DateTimeField(db_default=Now())
     updated_at = models.DateTimeField(db_default=Now())

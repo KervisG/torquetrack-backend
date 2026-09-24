@@ -11,11 +11,9 @@ from apps.auth.models import User
 from apps.auth.services import (
     authenticate_user,
     confirm_password_reset,
-    register_customer,
     request_password_reset,
     resend_verification_email,
     serialize_session_user,
-    verify_email,
 )
 from apps.auth.sessions import (
     csrf_token_payload,
@@ -28,8 +26,6 @@ from apps.auth.utils.throttling import (
     PasswordResetAccountRateThrottle,
     PasswordResetConfirmRateThrottle,
     PasswordResetRateThrottle,
-    RegisterRateThrottle,
-    VerifyEmailRateThrottle,
     VerifyEmailResendRateThrottle,
 )
 
@@ -44,19 +40,6 @@ def _session_payload(request, user: User) -> dict:
         "user": serialize_session_user(user),
         **csrf_token_payload(request),
     }
-
-
-class RegisterView(APIView):
-    authentication_classes = []
-    permission_classes = [AllowAny]
-    throttle_classes = [RegisterRateThrottle]
-
-    def post(self, request):
-        result = register_customer(_body(request))
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result["status"])
-        start_user_session(request, result["user"])
-        return Response(_session_payload(request, result["user"]), status=201)
 
 
 class LoginView(APIView):
@@ -122,18 +105,6 @@ class PasswordResetConfirmView(APIView):
 
     def post(self, request):
         return _result(confirm_password_reset(_body(request)))
-
-
-class VerifyEmailView(APIView):
-    """Público: el token del correo es la prueba, así funciona aunque el enlace
-    se abra en otro navegador sin sesión."""
-
-    authentication_classes = []
-    permission_classes = [AllowAny]
-    throttle_classes = [VerifyEmailRateThrottle]
-
-    def post(self, request):
-        return _result(verify_email(_body(request)))
 
 
 class VerifyEmailResendView(APIView):

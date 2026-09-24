@@ -6,14 +6,11 @@ from apps.auth.views import (
     LogoutView,
     PasswordResetConfirmView,
     PasswordResetView,
-    RegisterView,
     SessionView,
     VerifyEmailResendView,
-    VerifyEmailView,
 )
 
 urlpatterns = [
-    path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("session/", SessionView.as_view(), name="session"),
@@ -23,7 +20,6 @@ urlpatterns = [
         PasswordResetConfirmView.as_view(),
         name="password-reset-confirm",
     ),
-    path("verify-email/", VerifyEmailView.as_view(), name="verify-email"),
     path("verify-email/resend/", VerifyEmailResendView.as_view(), name="verify-email-resend"),
     path("admin/roles/", AdminRolesView.as_view(), name="admin-roles"),
     path("admin/users/", AdminUsersView.as_view(), name="admin-users"),

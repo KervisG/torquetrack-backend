@@ -10,14 +10,14 @@ from django.contrib.auth.models import Group, Permission
 from django.contrib.contenttypes.models import ContentType
 
 from apps.auth.models import Role
-from apps.auth.permission_catalog import DEFAULT_ROLE_LEGACY, STAFF_PERMISSIONS
+from apps.auth.permission_catalog import DEFAULT_EMPLOYEE_PERMISSIONS, STAFF_PERMISSIONS
 
 
 @pytest.mark.django_db
 def test_staff_permissions_hang_off_domain_models():
     expected = {
         (app_label, model, codename)
-        for _legacy, app_label, model, codename in STAFF_PERMISSIONS
+        for _code, app_label, model, codename in STAFF_PERMISSIONS
     }
     found = set(
         Permission.objects.filter(
@@ -29,7 +29,7 @@ def test_staff_permissions_hang_off_domain_models():
 
 
 @pytest.mark.django_db
-def test_legacy_marker_content_type_is_gone():
+def test_torquetrackpermission_marker_content_type_is_gone():
     assert not Permission.objects.filter(
         content_type__app_label="tt_auth",
         content_type__model="torquetrackpermission",
@@ -42,8 +42,8 @@ def test_employee_default_group_has_the_default_role_permissions():
     pairs = set(group.permissions.values_list("content_type__app_label", "codename"))
     expected = {
         (app, code)
-        for legacy, app, _model, code in STAFF_PERMISSIONS
-        if legacy in DEFAULT_ROLE_LEGACY
+        for panel_code, app, _model, code in STAFF_PERMISSIONS
+        if panel_code in DEFAULT_EMPLOYEE_PERMISSIONS
     }
     assert pairs == expected
     assert group.permissions.count() == 15
@@ -55,8 +55,8 @@ def test_employee_role_has_the_default_permissions():
     pairs = set(employee.permissions.values_list("content_type__app_label", "codename"))
     expected = {
         (app, code)
-        for legacy, app, _model, code in STAFF_PERMISSIONS
-        if legacy in DEFAULT_ROLE_LEGACY
+        for panel_code, app, _model, code in STAFF_PERMISSIONS
+        if panel_code in DEFAULT_EMPLOYEE_PERMISSIONS
     }
     assert pairs == expected
     assert Role.objects.get(slug="admin").full_access is True
@@ -74,9 +74,9 @@ def test_backoffice_permissions_move_to_their_new_owners_keeping_role_grants():
     old_activity = Permission.objects.create(
         content_type=old_type, codename="view_activitylog", name="Can view activity log"
     )
-    role = Role.objects.create(name="Sales", slug="sales-legacy")
+    role = Role.objects.create(name="Sales", slug="sales-backoffice")
     role.permissions.set([old_dashboard, old_activity])
-    group = Group.objects.create(name="legacy-group")
+    group = Group.objects.create(name="backoffice-group")
     group.permissions.set([old_dashboard])
 
     migration.move_backoffice_permissions(global_apps, None)

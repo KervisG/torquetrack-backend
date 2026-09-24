@@ -3,7 +3,8 @@ from __future__ import annotations
 
 from django.conf import settings
 
-from apps.checkout.services import linked_customer, money
+from apps.common.numbers import money
+from apps.customers.services import customer_for_user
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.tax import taxjar
 
@@ -80,7 +81,7 @@ def estimate_tax(payload: dict, user) -> dict:
     """La exención sale solo de la sesión: con un `customerId` en el body
     cualquiera podría pedir una estimación exenta ajena y enterarse del estado
     fiscal de ese cliente."""
-    profile = linked_customer(user)
+    profile = customer_for_user(user)
     if profile is not None and profile.tax_status == "VERIFIED":
         return dict(EXEMPT_ESTIMATE)
 

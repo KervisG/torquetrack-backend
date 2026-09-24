@@ -6,12 +6,12 @@ from rest_framework.permissions import BasePermission
 
 from apps.auth.models import Role, User
 from apps.auth.permission_catalog import (
-    DJANGO_TO_LEGACY,
+    PERMISSION_TO_CODE,
     STAFF_PERMISSIONS,
     resolve_staff_permission,
 )
 
-ALL_PERMISSION_CODENAMES = [legacy for legacy, *_rest in STAFF_PERMISSIONS]
+ALL_PERMISSION_CODENAMES = [code for code, *_rest in STAFF_PERMISSIONS]
 
 
 def is_staff_user(user) -> bool:
@@ -33,11 +33,7 @@ def permission_codenames_for_role(role: Role | None) -> list[str]:
     if role.full_access:
         return list(ALL_PERMISSION_CODENAMES)
     pairs = set(role.permissions.values_list("content_type__app_label", "codename"))
-    return [
-        DJANGO_TO_LEGACY[pair]
-        for pair in DJANGO_TO_LEGACY
-        if pair in pairs
-    ]
+    return [code for pair, code in PERMISSION_TO_CODE.items() if pair in pairs]
 
 
 def has_torquetrack_permission(user, permission: str | None) -> bool:

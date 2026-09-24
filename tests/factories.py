@@ -10,7 +10,7 @@ from rest_framework.test import APIClient
 
 from apps.audit.models import ActivityLog
 from apps.auth.models import Role, User
-from apps.auth.permission_catalog import LEGACY_TO_DJANGO
+from apps.auth.permission_catalog import CODE_TO_PERMISSION
 from apps.auth.sessions import CART_SESSION_KEY, SESSION_USER_KEY
 from apps.customers.models import Customer
 
@@ -21,7 +21,7 @@ def create_role(slug, *, permissions=(), full_access=False, name=None) -> Role:
     role = Role.objects.create(name=name or slug, slug=slug, full_access=full_access)
     resolved = []
     for codename in permissions:
-        app_label, django_codename = LEGACY_TO_DJANGO[codename]
+        app_label, django_codename = CODE_TO_PERMISSION[codename]
         resolved.append(
             Permission.objects.get(
                 content_type__app_label=app_label, codename=django_codename

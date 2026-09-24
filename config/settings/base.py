@@ -28,6 +28,7 @@ INSTALLED_APPS = [
     "apps.fitment",
     "apps.cart",
     "apps.checkout",
+    "apps.numbering",
     "apps.quotes",
     "apps.audit",
     "apps.dashboard",

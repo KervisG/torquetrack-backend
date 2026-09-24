@@ -13,6 +13,8 @@ from apps.customers.views import (
     AccountTaxExemptionView,
     AccountView,
     ActivateAccountView,
+    RegisterView,
+    VerifyEmailView,
 )
 
 urlpatterns = [
@@ -24,6 +26,8 @@ urlpatterns = [
         AccountTaxExemptionView.as_view(),
         name="account-tax-exemption",
     ),
+    path("register/", RegisterView.as_view(), name="register"),
+    path("verify-email/", VerifyEmailView.as_view(), name="verify-email"),
     path("activate/", ActivateAccountView.as_view(), name="activate"),
     path(
         "admin/customers/",

@@ -1,6 +1,7 @@
 """`BUILDING` todavía no tiene precio confirmado y `LOST` la cerró ventas: el
 checkout responde 409 sin tocar Stripe ni crear pedidos."""
 
+import logging
 from decimal import Decimal
 
 import pytest
@@ -10,6 +11,7 @@ from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
 from apps.customers.models import Customer
+from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 from tests.factories import guest_cart_client
 
@@ -392,6 +394,24 @@ def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
     assert response.status_code == 200
     assert response.json()["orderNumber"] == existing_order.number
     assert Order.objects.filter(data__quoteNumber=quote.number).count() == 1
+
+
+@pytest.mark.django_db
+def test_public_checkout_hides_the_stripe_error_and_logs_it(client, monkeypatch, caplog):
+    token = "tok_" + "s" * 48
+    _make_quote(quote_id="quo_checkout_err", number="Q10009", token=token)
+
+    def _boom(**kwargs):
+        raise ProviderError("Invalid API Key for account acct_internal_123")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
+
+    with caplog.at_level(logging.WARNING, logger="apps.quotes.services"):
+        response = client.post(f"/api/quote/public/{token}/checkout/")
+
+    assert response.status_code == 502
+    assert response.json() == {"error": "Payment could not be started. Please try again."}
+    assert "acct_internal_123" in caplog.text
 
 
 def _insert_quote_order(quote, order_id, number, payment_status="UNPAID", **overrides):

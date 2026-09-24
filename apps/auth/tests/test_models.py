@@ -43,7 +43,7 @@ def test_role_is_optional_and_protected_from_deletion():
         role.delete()
 
 
-def test_legacy_fields_are_gone():
+def test_user_has_no_username_or_permissions_field():
     field_names = {field.name for field in User._meta.get_fields()}
 
     assert "username" not in field_names
@@ -52,7 +52,7 @@ def test_legacy_fields_are_gone():
 
 
 @pytest.mark.django_db
-def test_users_table_is_created_by_django_without_legacy_columns():
+def test_users_table_has_no_username_or_permissions_column():
     with connection.cursor() as cursor:
         columns = {
             column.name

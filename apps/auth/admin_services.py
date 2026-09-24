@@ -9,14 +9,13 @@ from django.db.models import Case, IntegerField, When
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.auth.models import Role, User
+from apps.auth.models import Role, User, compose_display_name
 from apps.auth.permissions import (
     is_full_access,
     permission_codenames_for_role,
     role_by_slug,
 )
 from apps.auth.services import (
-    compose_display_name,
     create_account,
     invalidate_password_reset_tokens,
     parse_email,

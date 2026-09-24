@@ -11,7 +11,7 @@ from apps.auth.sessions import revoke_user_sessions
 
 def staff_permission_queryset():
     query = Q()
-    for _legacy, app_label, model, codename in STAFF_PERMISSIONS:
+    for _code, app_label, model, codename in STAFF_PERMISSIONS:
         query |= Q(
             content_type__app_label=app_label,
             content_type__model=model,

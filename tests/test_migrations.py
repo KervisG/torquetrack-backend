@@ -22,7 +22,7 @@ DOMAIN_TABLES = {
     "document_sequences",
 }
 
-RETIRED_LEGACY_TABLES = {"sessions", "employee_roles"}
+RETIRED_TABLES = {"sessions", "employee_roles"}
 
 
 def _public_tables():
@@ -59,8 +59,8 @@ def test_cache_table_migration_creates_the_database_cache_table():
 
 
 @pytest.mark.django_db
-def test_migrate_leaves_no_retired_legacy_table():
-    assert RETIRED_LEGACY_TABLES.isdisjoint(_public_tables())
+def test_migrate_leaves_no_retired_table():
+    assert RETIRED_TABLES.isdisjoint(_public_tables())
 
 
 @pytest.mark.django_db

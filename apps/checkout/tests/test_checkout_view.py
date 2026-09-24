@@ -1,4 +1,6 @@
 
+import logging
+
 import pytest
 from rest_framework.test import APIClient
 
@@ -436,6 +438,25 @@ def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypa
     cart = Cart.objects.get(pk="cart_fail_1").data
     assert cart["stage"] == "CART"
     assert "orderId" not in cart
+
+
+@pytest.mark.django_db
+def test_stripe_failure_returns_a_generic_message_and_logs_the_detail(
+    monkeypatch, shipping, caplog
+):
+    _insert_product()
+
+    def _boom(**kwargs):
+        raise ProviderError("Invalid API Key for account acct_internal_123")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
+
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.services"):
+        response = _post(_body(shipping), guest_cart_client("cart_fail_2"))
+
+    assert response.status_code == 502
+    assert response.json() == {"error": "Payment could not be started. Please try again."}
+    assert "acct_internal_123" in caplog.text
 
 
 @pytest.mark.django_db

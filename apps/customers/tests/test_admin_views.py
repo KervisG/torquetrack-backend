@@ -2,6 +2,8 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
+from apps.auth.models import AccountToken
+from apps.common.tokens import hash_token
 from apps.customers.models import Customer
 from tests.factories import (
     activity_count,
@@ -532,12 +534,42 @@ def test_portal_invite_sets_token_and_returns_the_spa_activation_url(settings):
     assert body["activationUrl"].startswith("https://torquetrackdiesel.com/activate?token=")
 
     customer = Customer.objects.get(pk="cus_1")
-    assert customer.activation_token_hash
-    assert customer.activation_expires_at > timezone.now()
+    token = body["activationUrl"].split("token=", 1)[1]
+    record = AccountToken.objects.get(token_hash=hash_token(token))
+    assert record.purpose == AccountToken.ACTIVATION
+    assert record.email == customer.email
+    assert record.user is None
+    assert (
+        timezone.timedelta(days=6, hours=23)
+        < record.expires_at - timezone.now()
+        <= timezone.timedelta(days=7)
+    )
 
     listed = _admin_client_with_view("usr_invite_list")
     rows = listed.get("/api/admin/customers/").json()
     assert rows[0]["portalStatus"] == "INVITED"
+
+
+@pytest.mark.django_db
+def test_a_new_portal_invite_voids_the_previous_link():
+    _insert_user("usr_reinvite", permissions=["customers.edit"])
+    _make_customer()
+    client = _admin_client("usr_reinvite")
+
+    def invite():
+        response = client.post(
+            "/api/admin/customers/portal-invite/", {"customerId": "cus_1"}, format="json"
+        )
+        return response.json()["activationUrl"].split("token=", 1)[1]
+
+    first, second = invite(), invite()
+
+    pending = AccountToken.objects.filter(purpose=AccountToken.ACTIVATION, used_at__isnull=True)
+    assert list(pending.values_list("token_hash", flat=True)) == [hash_token(second)]
+    stale = APIClient().post(
+        "/api/activate/", {"token": first, "password": "Diesel-Torque-2026!"}, format="json"
+    )
+    assert stale.status_code == 400
 
 
 def _admin_client_with_view(user_id):

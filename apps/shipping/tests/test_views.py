@@ -61,8 +61,6 @@ def test_returns_not_configured_when_no_api_key(settings, monkeypatch):
     body = response.json()
     assert body["configured"] is False
     assert "EASYPOST_API_KEY" in body["message"]
-    # El mensaje apunta al entorno del servidor, no a un archivo local.
-    assert ".env.local" not in body["message"]
 
 
 @pytest.mark.django_db

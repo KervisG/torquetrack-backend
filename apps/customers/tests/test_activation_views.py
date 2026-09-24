@@ -1,5 +1,5 @@
-import hashlib
-
+"""`POST /api/activate/`: la invitación al portal es un `AccountToken` con
+propósito `activation`, ligado al email del perfil invitado."""
 import pytest
 from django.conf import settings
 from django.contrib.auth.hashers import check_password
@@ -7,8 +7,9 @@ from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.auth.models import User
+from apps.auth.models import AccountToken, User
 from apps.auth.utils.throttling import ActivateRateThrottle
+from apps.common.tokens import hash_token
 from apps.customers.models import Customer
 from tests.factories import create_customer, create_user
 
@@ -24,13 +25,18 @@ def _clear_throttle_history(db):
 
 
 def _invited_customer(customer_id="C_GUEST", email="guest@example.com", expires_in_days=7):
-    return create_customer(
-        customer_id,
+    customer = create_customer(customer_id, email=email, data={"name": "Guest Buyer"})
+    AccountToken.objects.create(
+        purpose=AccountToken.ACTIVATION,
+        token_hash=hash_token(TOKEN),
         email=email,
-        data={"name": "Guest Buyer"},
-        activation_token_hash=hashlib.sha256(TOKEN.encode()).hexdigest(),
-        activation_expires_at=timezone.now() + timezone.timedelta(days=expires_in_days),
+        expires_at=timezone.now() + timezone.timedelta(days=expires_in_days),
     )
+    return customer
+
+
+def _activation_token():
+    return AccountToken.objects.get(token_hash=hash_token(TOKEN))
 
 
 @pytest.mark.django_db
@@ -52,8 +58,9 @@ def test_activate_creates_a_user_links_the_customer_and_starts_a_session():
     assert check_password(STRONG_PASSWORD, user.password_hash)
     customer = Customer.objects.get(pk="C_GUEST")
     assert customer.user == user
-    assert customer.activation_token_hash is None
-    assert customer.activation_expires_at is None
+    token = _activation_token()
+    assert token.used_at is not None
+    assert token.user == user
     assert response.cookies[settings.SESSION_COOKIE_NAME].value
     assert isinstance(body["csrfToken"], str) and body["csrfToken"]
 
@@ -119,7 +126,22 @@ def test_activate_rejects_a_weak_password():
 
     assert response.status_code == 400
     assert not User.objects.exists()
-    assert Customer.objects.get(pk="C_GUEST").activation_token_hash
+    # Una contraseña rechazada no consume la invitación.
+    assert _activation_token().used_at is None
+
+
+@pytest.mark.django_db
+def test_activate_rejects_the_link_after_the_customer_email_changes():
+    customer = _invited_customer()
+    customer.email = "someone-else@example.com"
+    customer.save(update_fields=["email"])
+
+    response = APIClient().post(
+        "/api/activate/", {"token": TOKEN, "password": STRONG_PASSWORD}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert not User.objects.exists()
 
 
 @pytest.mark.django_db

@@ -1,18 +1,32 @@
-"""Clientes: panel de staff, autoservicio de la cuenta y activación del portal."""
+"""Clientes: el perfil de la sesión, el alta pública, la verificación del
+email con el historial de invitado, el panel de staff, el autoservicio de la
+cuenta y la activación del portal.
+
+Pedidos y cotizaciones dependen de esta app y no al revés: aquí se llega a
+ellos solo por las relaciones inversas de `Customer` (`orders`, `quotes`).
+"""
 from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import re
-import secrets
 
-from django.conf import settings
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.checkout.services import random_id
+from apps.auth.models import User, split_full_name
+from apps.auth.services import (
+    consume_email_verification,
+    create_account,
+    invited_emails,
+    issue_activation_token,
+    lock_activation_token,
+    parse_email,
+    send_verification_email,
+)
+from apps.common.ids import random_id
+from apps.common.links import app_url
 from apps.customers.models import Customer
 
 ALLOWED_TAX_STATUSES = [
@@ -24,8 +38,10 @@ ALLOWED_TAX_STATUSES = [
 ]
 
 
-def _serialize_customer_masked(customer: Customer) -> dict:
-    """Las columnas van después de `data` para que una clave vieja de `data`
+def _serialize_customer_masked(customer: Customer, invited: set[str]) -> dict:
+    """`invited` son los emails con invitación vigente (`invited_emails`).
+
+    Las columnas van después de `data` para que una clave vieja de `data`
     (`id`, `email`, `taxStatus`...) nunca tape el valor real."""
     data = customer.data or {}
     raw_tax_id = str(data.get("taxId") or "")
@@ -36,15 +52,16 @@ def _serialize_customer_masked(customer: Customer) -> dict:
         **safe_data,
         "id": customer.pk,
         "email": customer.email,
-        "portalStatus": portal_status(customer),
+        "portalStatus": portal_status(customer, invited),
         "taxStatus": customer.tax_status,
         "taxIdMasked": tax_id_masked,
     }
 
 
 def list_admin_customers() -> list[dict]:
-    customers = Customer.objects.order_by("created_at")
-    return [_serialize_customer_masked(customer) for customer in customers]
+    customers = list(Customer.objects.order_by("created_at"))
+    invited = invited_emails(customer.email for customer in customers)
+    return [_serialize_customer_masked(customer, invited) for customer in customers]
 
 
 def upsert_admin_customer(payload: dict) -> dict:
@@ -85,7 +102,7 @@ def upsert_admin_customer(payload: dict) -> dict:
         )
 
     return {
-        "customer": _serialize_customer_masked(customer),
+        "customer": _serialize_customer_masked(customer, invited_emails([customer.email])),
         "reusedExistingCustomer": reused,
     }
 
@@ -160,20 +177,14 @@ def update_customer_tax_status(customer_id: str, payload: dict, reviewer_email: 
     }
 
 
-def portal_status(customer: Customer) -> str:
-    """Se deriva del vínculo con `User` para no tener una columna que
-    mantener sincronizada."""
+def portal_status(customer: Customer, invited: set[str]) -> str:
+    """Se deriva del vínculo con `User` y de los tokens de activación para no
+    tener una columna que mantener sincronizada."""
     if customer.user_id is not None:
         return "ACTIVE"
-    if customer.activation_token_hash and customer.activation_expires_at and (
-        customer.activation_expires_at > timezone.now()
-    ):
+    if customer.email and customer.email in invited:
         return "INVITED"
     return "NOT ACTIVATED"
-
-
-def _hash_token(token: str) -> str:
-    return hashlib.sha256(token.encode()).hexdigest()
 
 
 def create_portal_invite(payload: dict) -> dict:
@@ -189,38 +200,29 @@ def create_portal_invite(payload: dict) -> dict:
     if not customer.email:
         return {"error": "Customer email required", "status": 400}
 
-    token = secrets.token_hex(32)
-    customer.activation_token_hash = _hash_token(token)
-    customer.activation_expires_at = timezone.now() + timezone.timedelta(days=7)
-    customer.updated_at = timezone.now()
-    customer.save(
-        update_fields=["activation_token_hash", "activation_expires_at", "updated_at"]
-    )
-
-    base = (settings.APP_URL or "http://localhost:5173").rstrip("/")
-    return {"ok": True, "activationUrl": f"{base}/activate?token={token}"}
+    token = issue_activation_token(customer.email)
+    return {"ok": True, "activationUrl": app_url(f"/activate?token={token}")}
 
 
 def activate_customer_account(payload: dict) -> dict:
-    from apps.auth.services import create_account, split_full_name
-
-    token = payload.get("token")
+    """El token está ligado al email exacto del perfil invitado, que es único
+    entre invitados: si el perfil cambió de email o ya tiene cuenta, el enlace
+    deja de valer."""
     password = payload.get("password")
     invalid = {"error": "Invalid or expired activation link", "status": 400}
-    if not isinstance(token, str) or not token or not isinstance(password, str):
+    if not isinstance(password, str):
         return invalid
 
     with transaction.atomic():
+        record = lock_activation_token(payload.get("token"))
         customer = (
             Customer.objects.select_for_update()
-            .filter(
-                activation_token_hash=_hash_token(token),
-                activation_expires_at__gt=timezone.now(),
-                user__isnull=True,
-            )
+            .filter(email=record.email, user__isnull=True)
             .first()
+            if record is not None
+            else None
         )
-        if customer is None or not customer.email:
+        if customer is None:
             return invalid
 
         name = str((customer.data or {}).get("name") or "").strip()
@@ -237,23 +239,19 @@ def activate_customer_account(payload: dict) -> dict:
 
         # La invitación llegó a este correo y quien la abrió eligió la
         # contraseña: eso ya prueba que controla la casilla.
+        now = timezone.now()
         user = result["user"]
-        user.email_verified_at = timezone.now()
+        user.email_verified_at = now
         user.save(update_fields=["email_verified_at"])
 
         customer.user = user
-        customer.activation_token_hash = None
-        customer.activation_expires_at = None
-        customer.updated_at = timezone.now()
-        customer.save(
-            update_fields=[
-                "user",
-                "activation_token_hash",
-                "activation_expires_at",
-                "updated_at",
-            ]
-        )
-    return {"user": result["user"]}
+        customer.updated_at = now
+        customer.save(update_fields=["user", "updated_at"])
+
+        record.user = user
+        record.used_at = now
+        record.save(update_fields=["user", "used_at"])
+    return {"user": user}
 
 
 # --- autoservicio del cliente ----------------------------------------------
@@ -282,7 +280,73 @@ _INVALID_CERTIFICATE = {"error": "Certificate must be a PDF, PNG or JPEG file", 
 
 
 def customer_for_user(user) -> Customer | None:
+    """Perfil comercial de la cuenta con sesión, o `None` para un invitado.
+
+    Se exige un `User` real: `AnonymousUser.pk` es `None` y filtrar por
+    `user_id=None` devolvería un perfil invitado cualquiera.
+    """
+    if not isinstance(user, User):
+        return None
     return Customer.objects.filter(user=user).first()
+
+
+def register_customer(payload: dict) -> dict:
+    """El registro no toca un Customer invitado con el mismo email: el correo
+    todavía no está verificado y adueñarse de ese perfil le daría a
+    cualquiera el historial de otra persona. Ese historial se vincula recién
+    en `verify_customer_email`, cuando el enlace prueba que la persona
+    controla la casilla; hasta entonces puede entrar y comprar igual.
+    """
+    email = parse_email(payload.get("email"))
+    password = payload.get("password")
+    name = str(payload.get("name") or "").strip()
+    if email is None or not isinstance(password, str) or not password or not name:
+        return {"error": "Email, password and name required", "status": 400}
+
+    company = str(payload.get("company") or "").strip()
+    phone = str(payload.get("phone") or "").strip()
+    first_name, last_name = split_full_name(name)
+
+    with transaction.atomic():
+        result = create_account(
+            email=email,
+            password=password,
+            first_name=first_name,
+            last_name=last_name,
+            display_name=name,
+        )
+        if "error" in result:
+            return result
+        user = result["user"]
+        customer_id = random_id("C")
+        now = timezone.now()
+        Customer.objects.create(
+            id=customer_id,
+            user=user,
+            email=email,
+            data={
+                "id": customer_id,
+                "email": email,
+                "name": name,
+                "company": company,
+                "phone": phone,
+            },
+            created_at=now,
+            updated_at=now,
+        )
+    send_verification_email(user)
+    return {"user": user}
+
+
+def verify_customer_email(payload: dict) -> dict:
+    """Vincula el historial de compras como invitado en la misma transacción
+    que verifica el correo."""
+    with transaction.atomic():
+        user = consume_email_verification(payload.get("token"))
+        if user is None:
+            return {"error": "Invalid or expired verification link", "status": 400}
+        linked = link_guest_history(user)
+    return {"ok": True, **linked}
 
 
 def resolve_guest_customer(snapshot: dict) -> str | None:
@@ -330,9 +394,6 @@ def link_guest_history(user) -> dict:
     cliente ya editó no se pisa con datos del checkout. Una cuenta sin perfil
     (por ejemplo, staff) adopta el primer invitado.
     """
-    from apps.checkout.models import Order
-    from apps.quotes.models import Quote
-
     guests = list(
         Customer.objects.select_for_update()
         .filter(user__isnull=True, email__iexact=user.email)
@@ -348,14 +409,14 @@ def link_guest_history(user) -> dict:
         own.user = user
         own.updated_at = timezone.now()
         own.save(update_fields=["user", "updated_at"])
-        linked_orders += Order.objects.filter(customer=own).count()
-        linked_quotes += Quote.objects.filter(customer=own).count()
+        linked_orders += own.orders.count()
+        linked_quotes += own.quotes.count()
 
-    guest_ids = [guest.pk for guest in guests]
-    if guest_ids:
-        linked_orders += Order.objects.filter(customer_id__in=guest_ids).update(customer=own)
-        linked_quotes += Quote.objects.filter(customer_id__in=guest_ids).update(customer=own)
-        Customer.objects.filter(pk__in=guest_ids).delete()
+    for guest in guests:
+        linked_orders += guest.orders.update(customer=own)
+        linked_quotes += guest.quotes.update(customer=own)
+    if guests:
+        Customer.objects.filter(pk__in=[guest.pk for guest in guests]).delete()
     return {"linkedOrders": linked_orders, "linkedQuotes": linked_quotes}
 
 
@@ -398,9 +459,7 @@ def update_account(customer: Customer, payload: dict) -> dict:
 
 
 def list_account_orders(customer: Customer) -> list[dict]:
-    from apps.checkout.models import Order
-
-    orders = Order.objects.filter(customer=customer).order_by("-created_at")
+    orders = customer.orders.order_by("-created_at")
     result = []
     for order in orders:
         data = order.data or {}
@@ -421,9 +480,7 @@ def list_account_orders(customer: Customer) -> list[dict]:
 
 
 def list_account_quotes(customer: Customer) -> list[dict]:
-    from apps.quotes.models import Quote
-
-    quotes = Quote.objects.filter(customer=customer).order_by("-created_at")
+    quotes = customer.quotes.order_by("-created_at")
     result = []
     for quote in quotes:
         data = quote.data or {}

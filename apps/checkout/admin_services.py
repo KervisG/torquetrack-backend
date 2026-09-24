@@ -1,6 +1,8 @@
 """Reglas de negocio de los pedidos en el panel de administración."""
 from __future__ import annotations
 
+import logging
+
 from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
@@ -10,6 +12,11 @@ from apps.checkout.models import Order, Payment
 from apps.checkout.services import cancel_pending_payments, start_stripe_payment
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
+
+logger = logging.getLogger(__name__)
+
+# El staff sabe que falló Stripe, pero el texto del proveedor queda en el log.
+STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."
 
 ORDER_STATUSES = ["OPEN", "PENDING_PAYMENT", "PROCESSING", "COMPLETED", "CANCELLED", "REJECTED"]
 # Estados en los que el pedido ya no se va a cobrar ni despachar.
@@ -204,7 +211,8 @@ def create_admin_payment_link(order_id: str) -> dict:
             order, data={"adminGenerated": True, "source": "ADMIN_PAYMENT_LINK"}
         )
     except ProviderError as exc:
-        return {"error": str(exc) or "Could not create payment link", "status": 502}
+        logger.warning("Stripe payment link for order %s failed: %s", order_id, exc)
+        return {"error": STRIPE_REQUEST_FAILED, "status": 502}
 
     total = float(payment.amount)
     order.status = "PENDING_PAYMENT"
@@ -243,7 +251,8 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
             order, data={"employee": actor_email, "source": "EMPLOYEE_TAKE_PAYMENT"}
         )
     except ProviderError as exc:
-        return {"error": str(exc) or "Could not start secure payment", "status": 502}
+        logger.warning("Stripe take-payment for order %s failed: %s", order_id, exc)
+        return {"error": STRIPE_REQUEST_FAILED, "status": 502}
 
     record_activity(
         actor=actor_email,

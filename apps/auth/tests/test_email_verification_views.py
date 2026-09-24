@@ -6,7 +6,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.auth.models import AccountToken, User
-from apps.auth.services import issue_account_token
+from apps.auth.services import issue_account_token, issue_activation_token
 from apps.auth.utils.background import run_in_background as real_run_in_background
 from apps.auth.utils.throttling import VerifyEmailRateThrottle, VerifyEmailResendRateThrottle
 from apps.checkout.models import Order
@@ -329,16 +329,8 @@ def test_resend_is_rate_limited_per_user(monkeypatch, resend):
 
 @pytest.mark.django_db
 def test_portal_activation_counts_as_a_verified_email():
-    import hashlib
-
-    token = "activation-token-" + "a" * 40
-    create_customer(
-        "C_INVITED",
-        email="invited@example.com",
-        data={"name": "Invited Buyer"},
-        activation_token_hash=hashlib.sha256(token.encode()).hexdigest(),
-        activation_expires_at=timezone.now() + timezone.timedelta(days=7),
-    )
+    create_customer("C_INVITED", email="invited@example.com", data={"name": "Invited Buyer"})
+    token = issue_activation_token("invited@example.com")
 
     response = APIClient().post(
         "/api/activate/", {"token": token, "password": STRONG_PASSWORD}, format="json"

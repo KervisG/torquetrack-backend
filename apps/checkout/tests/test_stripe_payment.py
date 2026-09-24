@@ -9,7 +9,7 @@ from rest_framework.test import APIClient
 from apps.catalog.models import Product
 from apps.checkout import services as checkout_services
 from apps.checkout.models import Order, Payment
-from apps.checkout.services import money, start_stripe_payment
+from apps.checkout.services import start_stripe_payment
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 from tests.factories import create_staff_user, session_client
@@ -27,19 +27,6 @@ def _stripe(settings):
     settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
     settings.TAXJAR_API_KEY = ""
     settings.RESEND_API_KEY = ""
-
-
-@pytest.mark.parametrize(
-    "raw, expected",
-    [(1.005, 1.01), (2.675, 2.68), ("10.125", 10.13), (0.004, 0.0), (None, 0.0), ("abc", 0.0)],
-)
-def test_money_rounds_half_up_to_cents(raw, expected):
-    assert money(raw) == expected
-
-
-def test_money_ignores_non_finite_values():
-    assert money(float("inf")) == 0.0
-    assert money("NaN") == 0.0
 
 
 @pytest.mark.django_db

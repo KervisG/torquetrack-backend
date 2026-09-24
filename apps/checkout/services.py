@@ -1,85 +1,26 @@
-"""Checkout: numeración, pedidos del storefront, pagos de Stripe y conciliación del webhook."""
+"""Checkout: pedidos del storefront, pagos de Stripe y conciliación del webhook."""
 from __future__ import annotations
 
 import logging
-import math
-import secrets
-from decimal import ROUND_HALF_UP, Decimal
 from urllib.parse import quote
 
-from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.checkout.models import DocumentSequence, Order, Payment
-from apps.customers.models import Customer
+from apps.checkout.models import Order, Payment
+from apps.common.ids import random_id
+from apps.common.links import app_url
+from apps.common.numbers import money, money_decimal, to_number
+from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.payments import stripe as stripe_payments
+from apps.numbering.services import next_document_number
 
 logger = logging.getLogger(__name__)
 
-CENT = Decimal("0.01")
-
-
-def js_number_or(raw, fallback=0.0):
-    """`None`, `False`, `""` y `0` usan `fallback`, igual que un texto que no es número."""
-    if raw in (None, False, "", 0, 0.0):
-        return fallback
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return fallback
-
-
-def _cents(value) -> Decimal:
-    """Única regla de redondeo de dinero: centavos con `ROUND_HALF_UP`.
-
-    Se parte de `repr(float)` para redondear el número tal como se escribió
-    (1.005 -> 1.01) y no su representación binaria (1.00499...)."""
-    number = js_number_or(value, 0.0)
-    if not math.isfinite(number):
-        return Decimal("0.00")
-    return Decimal(repr(float(number))).quantize(CENT, rounding=ROUND_HALF_UP)
-
-
-def money(value) -> float:
-    """Monto en dólares redondeado a centavos, como `float` para el JSON."""
-    return float(_cents(value))
-
-
-def random_id(prefix: str) -> str:
-    return prefix + secrets.token_hex(6).upper()
-
-
-def linked_customer(user) -> Customer | None:
-    """Perfil comercial de la cuenta con sesión, o `None` para un invitado.
-
-    Se exige un `User` real: `AnonymousUser.pk` es `None` y filtrar por
-    `user_id=None` devolvería un perfil invitado cualquiera.
-    """
-    from apps.auth.models import User
-
-    if not isinstance(user, User):
-        return None
-    return Customer.objects.filter(user=user).first()
-
-
-FIRST_DOCUMENT_NUMBER = 10001
-
-
-def next_document_number(key: str, prefix: str) -> str:
-    """El bloqueo de la fila hace esperar a cada llamada concurrente, así que
-    nunca se emite dos veces el mismo número. Si dos crean la fila a la vez,
-    `get_or_create` reintenta la lectura bloqueante."""
-    with transaction.atomic():
-        sequence, created = DocumentSequence.objects.select_for_update().get_or_create(
-            key=key, defaults={"last_value": FIRST_DOCUMENT_NUMBER}
-        )
-        if not created:
-            sequence.last_value += 1
-            sequence.save(update_fields=["last_value"])
-    return f"{prefix}{sequence.last_value}"
+# El detalle de Stripe va al log: puede nombrar la cuenta o la configuración.
+PAYMENT_START_FAILED = "Payment could not be started. Please try again."
 
 
 def next_order_number() -> str:
@@ -90,18 +31,16 @@ def next_order_number() -> str:
 
 
 def _line(name: str, unit_price: float, qty: int) -> dict:
-    return {"name": name, "unit_amount": int(_cents(unit_price) * 100), "quantity": qty}
+    return {"name": name, "unit_amount": int(money_decimal(unit_price) * 100), "quantity": qty}
 
 
 def _create_checkout_session(order: dict) -> dict:
     """Devuelve `{"id", "url"}`; lanza `ProviderError` o `ProviderNotConfigured`."""
     items = order.get("items") or []
     totals = order.get("totals") or {}
-    app_url = settings.APP_URL or "http://localhost:5173"
-
     line_items = []
     for item in items:
-        qty = max(1, int(js_number_or(item.get("qty") or item.get("quantity"), 1)))
+        qty = max(1, int(to_number(item.get("qty") or item.get("quantity"), 1)))
         price = money(item.get("price") if item.get("price") is not None else item.get("unitPrice"))
         core = money(item.get("coreCharge"))
         title = item.get("title") or item.get("partNumber") or "Diesel Part"
@@ -120,11 +59,10 @@ def _create_checkout_session(order: dict) -> dict:
     return stripe_payments.create_checkout_session(
         client_reference_id=order_id,
         line_items=line_items,
-        success_url=(
-            f"{app_url}/checkout-success.html?session_id={{CHECKOUT_SESSION_ID}}"
-            f"&order_id={quote(order_id)}"
+        success_url=app_url(
+            f"/checkout-success.html?session_id={{CHECKOUT_SESSION_ID}}&order_id={quote(order_id)}"
         ),
-        cancel_url=f"{app_url}/checkout.html?canceled=1",
+        cancel_url=app_url("/checkout.html?canceled=1"),
         metadata={"order_id": order_id, "order_number": order["number"]},
         customer_email=(order.get("customer") or {}).get("email") or None,
     )
@@ -146,7 +84,7 @@ def start_stripe_payment(order: Order, *, data: dict | None = None) -> tuple[Pay
             provider="stripe",
             provider_id=session["id"],
             status="PENDING",
-            amount=_cents((order_data.get("totals") or {}).get("total")),
+            amount=money_decimal((order_data.get("totals") or {}).get("total")),
             data={"sessionId": session["id"], **(data or {})},
         )
         # Un pedido tiene una sola sesión cobrable: la anterior (otro link,
@@ -251,7 +189,7 @@ def _cart_lines(raw_items: list[dict]) -> tuple[list[tuple[dict, dict]], float, 
         product_data = products_by_id.get(str(raw_item.get("id")))
         if not product_data:
             continue
-        qty = max(1, min(99, int(js_number_or(raw_item.get("qty"), 1))))
+        qty = max(1, min(99, int(to_number(raw_item.get("qty"), 1))))
         price = money(product_data.get("price"))
         core = money(product_data.get("coreCharge"))
         subtotal += price * qty
@@ -315,7 +253,6 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     `cart_id` es el carrito de la sesión; el `cartId` del body se ignora para
     que nadie pueda marcar como vendido el carrito de otro.
     """
-    from apps.customers.services import resolve_guest_customer
     from apps.fitment.services import check_product_fitment
     from apps.shipping.services import verify_shipping_selection
     from apps.tax.services import calculate_sales_tax
@@ -345,7 +282,7 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
 
     # Con perfil vinculado el pedido es de la cuenta y su email manda; el
     # perfil nunca se reescribe con el body.
-    profile = linked_customer(user)
+    profile = customer_for_user(user)
     customer = dict(raw_customer)
     if profile is not None:
         customer["email"] = profile.email or user.email
@@ -407,8 +344,9 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     try:
         _, session = start_stripe_payment(order, data={"source": "STOREFRONT_CHECKOUT"})
     except ProviderError as exc:
+        logger.warning("Stripe checkout for order %s failed: %s", order.pk, exc)
         cancel_unpaid_order(order, "PAYMENT_SETUP_FAILED")
-        return {"error": str(exc) or "Could not create secure checkout"}, 502
+        return {"error": PAYMENT_START_FAILED}, 502
 
     if cart_id:
         _link_cart_to_order(cart_id, order, customer)

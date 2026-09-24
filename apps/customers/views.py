@@ -6,15 +6,21 @@ from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.models import User
 from apps.auth.services import serialize_session_user
 from apps.auth.sessions import csrf_token_payload, start_user_session
-from apps.auth.utils.throttling import ActivateRateThrottle
+from apps.auth.utils.throttling import (
+    ActivateRateThrottle,
+    RegisterRateThrottle,
+    VerifyEmailRateThrottle,
+)
 from apps.customers.services import (
     activate_customer_account,
     customer_for_user,
     list_account_orders,
     list_account_quotes,
+    register_customer,
     serialize_account,
     submit_tax_exemption,
     update_account,
+    verify_customer_email,
 )
 
 
@@ -24,6 +30,46 @@ def _body(request) -> dict:
 
 def _error(result: dict) -> Response:
     return Response({"error": result["error"]}, status=result.get("status", 400))
+
+
+def _signed_in(request, user: User) -> Response:
+    """Abre la sesión y responde con la misma forma que `/api/session/`."""
+    start_user_session(request, user)
+    return Response(
+        {
+            "authenticated": True,
+            "user": serialize_session_user(user),
+            **csrf_token_payload(request),
+        },
+        status=201,
+    )
+
+
+class RegisterView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [RegisterRateThrottle]
+
+    def post(self, request):
+        result = register_customer(_body(request))
+        if "error" in result:
+            return _error(result)
+        return _signed_in(request, result["user"])
+
+
+class VerifyEmailView(APIView):
+    """Público: el token del correo es la prueba, así funciona aunque el enlace
+    se abra en otro navegador sin sesión."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [VerifyEmailRateThrottle]
+
+    def post(self, request):
+        result = verify_customer_email(_body(request))
+        if "error" in result:
+            return _error(result)
+        return Response(result)
 
 
 class _AccountView(APIView):
@@ -98,12 +144,4 @@ class ActivateAccountView(APIView):
         result = activate_customer_account(_body(request))
         if "error" in result:
             return _error(result)
-        start_user_session(request, result["user"])
-        return Response(
-            {
-                "authenticated": True,
-                "user": serialize_session_user(result["user"]),
-                **csrf_token_payload(request),
-            },
-            status=201,
-        )
+        return _signed_in(request, result["user"])

@@ -6,7 +6,9 @@ from django.utils import timezone
 
 from apps.audit.services import record_activity
 from apps.checkout.models import Order
-from apps.checkout.services import money, next_order_number, random_id
+from apps.checkout.services import next_order_number
+from apps.common.ids import random_id
+from apps.common.numbers import money, to_number
 from apps.integrations.email import resend
 from apps.quotes.models import Quote
 from apps.quotes.services import (
@@ -149,17 +151,6 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
 # --- listado, alta y baja ---
 
 
-def _num(value, default: float = 0.0) -> float:
-    """`default` solo ante `None` o un valor no numérico: el respaldo para el
-    cero lo aplica cada llamador."""
-    if value is None:
-        return default
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
-
-
 def _quote_totals(payload: dict) -> dict:
     items = payload.get("items") or []
 
@@ -167,16 +158,16 @@ def _quote_totals(payload: dict) -> dict:
         value = item.get("quantity")
         if value is None:
             value = item.get("qty")
-        return _num(value, 1.0) or 1.0
+        return to_number(value, 1.0) or 1.0
 
     def unit_price(item):
         value = item.get("unitPrice")
         if value is None:
             value = item.get("price")
-        return _num(value, 0.0)
+        return to_number(value, 0.0)
 
     subtotal = money(sum(unit_price(item) * qty(item) for item in items))
-    core = money(sum((_num(item.get("coreCharge"), 0.0)) * qty(item) for item in items))
+    core = money(sum(to_number(item.get("coreCharge"), 0.0) * qty(item) for item in items))
     shipping = money(payload.get("shipping"))
     tax = money(payload.get("tax"))
     return {

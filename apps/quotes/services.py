@@ -1,6 +1,7 @@
 """Cotizaciones del storefront: solicitud, enlace público y checkout."""
 from __future__ import annotations
 
+import logging
 import secrets
 
 from django.conf import settings
@@ -11,19 +12,21 @@ from django.utils import timezone
 
 from apps.checkout.models import Order
 from apps.checkout.services import (
+    PAYMENT_START_FAILED,
     cancel_unpaid_order,
-    js_number_or,
-    linked_customer,
-    money,
-    next_document_number,
     next_order_number,
-    random_id,
     start_stripe_payment,
 )
-from apps.customers.services import resolve_guest_customer
+from apps.common.ids import random_id
+from apps.common.links import app_url
+from apps.common.numbers import money, to_number
+from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
+from apps.numbering.services import next_document_number
 from apps.quotes.models import Quote
+
+logger = logging.getLogger(__name__)
 
 
 def quote_token() -> str:
@@ -34,18 +37,14 @@ def next_quote_number() -> str:
     return next_document_number("quote", "Q")
 
 
-def _app_base_url() -> str:
-    return (settings.APP_URL or "http://localhost:5173").rstrip("/")
-
-
 def public_quote_url(token: str) -> str:
     """El cliente recibe la página del SPA, nunca el endpoint HTML de la API."""
-    return f"{_app_base_url()}/quote/{token}"
+    return app_url(f"/quote/{token}")
 
 
 def public_quote_pdf_url(token: str) -> str:
     """El PDF lo sirve la API, así que su enlace no pasa por el SPA."""
-    return f"{_app_base_url()}/api/quote/public/{token}/pdf/"
+    return app_url(f"/api/quote/public/{token}/pdf/")
 
 
 def serialize_quote(quote: Quote) -> dict:
@@ -101,7 +100,7 @@ def expire_stale_quotes() -> int:
 
 def _quote_line(item: dict) -> dict:
     """El total de la línea se calcula aquí: ni el correo ni el SPA recalculan dinero."""
-    qty = js_number_or(item.get("quantity") or item.get("qty"), 1)
+    qty = to_number(item.get("quantity") or item.get("qty"), 1)
     has_unit_price = item.get("unitPrice") is not None
     raw_price = item.get("unitPrice") if has_unit_price else item.get("price")
     unit_price = money(raw_price)
@@ -179,7 +178,7 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
     customer_in = payload.get("customer")
     if not isinstance(customer_in, dict):
         customer_in = {}
-    profile = linked_customer(user)
+    profile = customer_for_user(user)
     profile_data = (profile.data or {}) if profile is not None else {}
     name = str(customer_in.get("name") or profile_data.get("name") or "").strip()
     email = str(customer_in.get("email") or "").strip()
@@ -203,7 +202,7 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
         product_data = products_by_id.get(str(raw_item.get("productId") or raw_item.get("id")))
         if not product_data:
             continue
-        quantity = max(1, int(js_number_or(raw_item.get("quantity") or raw_item.get("qty"), 1)))
+        quantity = max(1, int(to_number(raw_item.get("quantity") or raw_item.get("qty"), 1)))
         unit_price = money(product_data.get("price"))
         core_charge = money(product_data.get("coreCharge"))
         subtotal += unit_price * quantity
@@ -437,6 +436,7 @@ def checkout_from_quote(quote: Quote) -> dict:
     except ProviderError as exc:
         # El pedido queda sin pagar y coincide con la cotización: el próximo
         # intento lo reusa.
-        return {"error": str(exc) or "Could not create secure checkout", "status": 502}
+        logger.warning("Stripe checkout for quote %s failed: %s", quote.number, exc)
+        return {"error": PAYMENT_START_FAILED, "status": 502}
 
     return {"ok": True, "url": session["url"], "orderNumber": order.number}

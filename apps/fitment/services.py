@@ -4,6 +4,8 @@ base; el resto no hace I/O. Los mensajes de
 el decodificador, sin normalizar."""
 import re
 
+from apps.common.numbers import to_number
+
 _NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
 
 
@@ -11,20 +13,10 @@ def _text(value) -> str:
     return str(value if value is not None else "").strip().lower()
 
 
-def _num(value):
+def _first_number(value):
     """Primer número del texto (`"6.7L Power Stroke"` -> 6.7), o `None`."""
     match = _NUMBER_RE.search(str(value if value is not None else ""))
     return float(match.group(0)) if match else None
-
-
-def _js_number_or(raw, fallback=0):
-    """`None`, `False`, `""` y `0` usan `fallback`, igual que un texto que no es número."""
-    if raw in (None, False, "", 0, 0.0):
-        return fallback
-    try:
-        return float(raw)
-    except (TypeError, ValueError):
-        return fallback
 
 
 def _fmt(number) -> str:
@@ -52,9 +44,9 @@ def check_product_fitment(product: dict | None, vehicle: dict | None) -> dict:
     reasons: list[str] = []
     warnings: list[str] = []
 
-    year = _js_number_or(vehicle.get("year"), 0)
-    year_from = _js_number_or(product.get("yearFrom"), 0)
-    year_to = _js_number_or(product.get("yearTo"), year_from)
+    year = to_number(vehicle.get("year"), 0)
+    year_from = to_number(product.get("yearFrom"), 0)
+    year_to = to_number(product.get("yearTo"), year_from)
     if year and year_from and year_to and (year < year_from or year > year_to):
         reasons.append(f"year {_fmt(year)} is outside {_fmt(year_from)}-{_fmt(year_to)}")
 
@@ -65,8 +57,8 @@ def check_product_fitment(product: dict | None, vehicle: dict | None) -> dict:
 
     product_engine = product.get("engineFamily") or product.get("engine")
     vehicle_engine = vehicle.get("engine")
-    product_engine_num = _num(product_engine)
-    vehicle_engine_num = _num(vehicle_engine)
+    product_engine_num = _first_number(product_engine)
+    vehicle_engine_num = _first_number(vehicle_engine)
     engine_mismatch = (
         product_engine_num
         and vehicle_engine_num

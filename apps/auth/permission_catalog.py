@@ -1,7 +1,7 @@
-"""`legacy` es el código con punto (`dashboard.view`) que usan el panel y el
-jsonb; `app_label` + `codename` es el `Permission` de Django."""
+"""`code` es el permiso con punto (`dashboard.view`) que usan el panel y la
+API; `app_label` + `codename` es el `Permission` de Django que lo respalda."""
 
-# (legacy, app_label, model, codename)
+# (code, app_label, model, codename)
 STAFF_PERMISSIONS = [
     ("dashboard.view", "tt_auth", "user", "view_dashboard"),
     ("products.view", "catalog", "product", "view_product"),
@@ -31,7 +31,8 @@ STAFF_PERMISSIONS = [
     ("users.manage", "tt_auth", "user", "manage_users"),
 ]
 
-DEFAULT_ROLE_LEGACY = [
+# Lo que recibe el Role `employee` que crean las migraciones.
+DEFAULT_EMPLOYEE_PERMISSIONS = [
     "dashboard.view",
     "products.view",
     "quotes.view",
@@ -49,23 +50,22 @@ DEFAULT_ROLE_LEGACY = [
     "customers.edit",
 ]
 
-LEGACY_TO_DJANGO = {
-    legacy: (app_label, codename) for legacy, app_label, _model, codename in STAFF_PERMISSIONS
+CODE_TO_PERMISSION = {
+    code: (app_label, codename) for code, app_label, _model, codename in STAFF_PERMISSIONS
 }
 
-DJANGO_TO_LEGACY = {
-    (app_label, codename): legacy
-    for legacy, app_label, _model, codename in STAFF_PERMISSIONS
+PERMISSION_TO_CODE = {
+    (app_label, codename): code for code, app_label, _model, codename in STAFF_PERMISSIONS
 }
 
 
 def resolve_staff_permission(permission: str) -> tuple[str, str] | None:
-    mapped = LEGACY_TO_DJANGO.get(permission)
+    mapped = CODE_TO_PERMISSION.get(permission)
     if mapped is not None:
         return mapped
     if "." not in permission:
         return None
     app_label, codename = permission.split(".", 1)
-    if (app_label, codename) in DJANGO_TO_LEGACY:
+    if (app_label, codename) in PERMISSION_TO_CODE:
         return app_label, codename
     return None

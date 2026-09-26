@@ -258,6 +258,53 @@ def test_pricing_edit_changes_prices_and_costs_and_costs_view_shows_them():
     assert response.json()["product"]["purchaseCost"] == 70.0
 
 
+@pytest.mark.django_db
+def test_list_requires_products_view_and_hides_costs():
+    _insert_user("usr_list_denied", permissions=["products.edit"])
+    denied = _admin_client("usr_list_denied").get("/api/admin/products/")
+    assert denied.status_code == 403
+
+    _insert_user("usr_list", permissions=["products.view"])
+    Product.objects.create(
+        id="prod_listed",
+        data={"title": "Turbo", "purchaseCost": 40, "internalNotes": "secret"},
+        active=False,
+        updated_at=timezone.now(),
+    )
+    response = _admin_client("usr_list").get("/api/admin/products/")
+
+    assert response.status_code == 200
+    row = response.json()[0]
+    assert row["id"] == "prod_listed"
+    assert row["active"] is False
+    assert row["title"] == "Turbo"
+    assert "purchaseCost" not in row
+    assert "internalNotes" not in row
+
+
+@pytest.mark.django_db
+def test_put_without_costs_view_keeps_hidden_internal_fields():
+    _insert_user("usr_keep", permissions=["products.edit", "pricing.edit"])
+    Product.objects.create(
+        id="prod_keep",
+        data={"title": "Pump", "price": 10, "internalNotes": "secret", "supplier": "Bosch"},
+        active=True,
+        updated_at=timezone.now(),
+    )
+
+    response = _admin_client("usr_keep").put(
+        "/api/admin/products/prod_keep/",
+        {"title": "Pump rebuilt"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    stored = Product.objects.get(pk="prod_keep").data
+    assert stored["title"] == "Pump rebuilt"
+    assert stored["internalNotes"] == "secret"
+    assert stored["supplier"] == "Bosch"
+
+
 def test_cost_fields_are_hidden_from_the_storefront():
     from apps.catalog.admin_services import COST_FIELDS
     from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS

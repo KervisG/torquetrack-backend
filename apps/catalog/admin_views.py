@@ -3,7 +3,26 @@ from rest_framework.views import APIView
 
 from apps.auth.authentication import SessionUserAuthentication
 from apps.auth.permissions import HasTorqueTrackPermission, has_torquetrack_permission
-from apps.catalog.admin_services import deactivate_admin_product, upsert_admin_product
+from apps.catalog.admin_services import (
+    deactivate_admin_product,
+    list_admin_products,
+    upsert_admin_product,
+)
+
+
+class AdminProductListView(APIView):
+    """Listar pide `products.view`; crear y editar siguen en el detalle."""
+
+    authentication_classes = [SessionUserAuthentication]
+    permission_classes = [HasTorqueTrackPermission]
+    required_permission = "products.view"
+
+    def get(self, request):
+        return Response(
+            list_admin_products(
+                can_view_costs=has_torquetrack_permission(request.user, "costs.view"),
+            )
+        )
 
 
 class AdminProductDetailView(APIView):

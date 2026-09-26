@@ -3,17 +3,25 @@ from __future__ import annotations
 from django.utils import timezone
 
 from apps.catalog.models import Product
+from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS
 
 PRICE_FIELDS = ("price", "compareAt", "coreCharge")
 # Deben seguir incluidos en `RESTRICTED_PRODUCT_FIELDS` de `serializers.py`.
 COST_FIELDS = ("purchaseCost", "supplierCost")
 PROTECTED_FIELDS = PRICE_FIELDS + COST_FIELDS
+# El formulario los oculta sin `costs.view`. Si el PUT no los trae, se
+# conservan: el cliente no puede reenviar lo que la API le tapó.
+HIDDEN_WITHOUT_COSTS = RESTRICTED_PRODUCT_FIELDS + (
+    "supplier",
+    "supplierUrl",
+    "supplierPartNumber",
+)
 
 
 def serialize_admin_product(data: dict, *, can_view_costs: bool) -> dict:
     if can_view_costs:
         return dict(data)
-    return {key: value for key, value in data.items() if key not in COST_FIELDS}
+    return {key: value for key, value in data.items() if key not in HIDDEN_WITHOUT_COSTS}
 
 
 def upsert_admin_product(
@@ -35,6 +43,10 @@ def upsert_admin_product(
 
     product = Product.objects.filter(pk=product_id).first()
     stored = (product.data or {}) if product is not None else {}
+    if not can_view_costs:
+        for field in HIDDEN_WITHOUT_COSTS:
+            if field not in product_data and field in stored:
+                product_data[field] = stored[field]
     for field in PROTECTED_FIELDS:
         if field not in product_data and field in stored:
             product_data[field] = stored[field]
@@ -55,6 +67,17 @@ def upsert_admin_product(
         "ok": True,
         "product": serialize_admin_product(product_data, can_view_costs=can_view_costs),
     }, 200
+
+
+def list_admin_products(*, can_view_costs: bool) -> list[dict]:
+    """Incluye inactivos: el panel es el único lugar donde se reactivan."""
+    rows = []
+    for product in Product.objects.order_by("id"):
+        data = serialize_admin_product(product.data or {}, can_view_costs=can_view_costs)
+        data["id"] = product.pk
+        data["active"] = product.active
+        rows.append(data)
+    return rows
 
 
 def deactivate_admin_product(product_id: str) -> tuple[dict, int]:

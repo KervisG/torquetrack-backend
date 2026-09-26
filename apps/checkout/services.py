@@ -271,6 +271,15 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     if not pairs:
         return {"error": "No valid products in cart"}, 400
 
+    # Un precio ausente o no positivo en el catálogo es un error de carga: se
+    # rechaza antes de crear el pedido para no cobrar la pieza gratis.
+    unpriced = [item for item, _ in pairs if item["price"] <= 0]
+    if unpriced:
+        detail = ", ".join(item["partNumber"] or item["title"] for item in unpriced)
+        return {
+            "error": f"These items have no valid price and cannot be purchased online: {detail}"
+        }, 409
+
     incompatible = [(item, check_product_fitment(data, vehicle)) for item, data in pairs]
     incompatible = [(item, check) for item, check in incompatible if not check["compatible"]]
     if incompatible:

@@ -134,6 +134,26 @@ def test_returns_400_when_no_valid_products_in_cart():
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("price", [0, -5, None])
+def test_returns_409_when_a_catalog_price_is_not_positive(price, monkeypatch, shipping):
+    # Un producto sin precio en el catálogo se cobraría gratis en Stripe.
+    _insert_product(data={**PRODUCT_DATA, "price": price})
+
+    def _boom(**kwargs):
+        raise AssertionError("Stripe must not be called for an unpriced item")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
+
+    response = _post(_body(shipping))
+
+    assert response.status_code == 409
+    assert response.json() == {
+        "error": "These items have no valid price and cannot be purchased online: 502-550"
+    }
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
 def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch, settings):
     _insert_product()
     items = [{"id": PRODUCT_ID, "qty": 2, "price": 0.01}]

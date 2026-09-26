@@ -13,6 +13,8 @@ from apps.quotes.admin_services import (
     upsert_admin_quote,
 )
 from apps.quotes.models import Quote
+from apps.tax.services import estimate_tax
+from apps.vin.services import decode_vehicle
 
 
 class _AdminQuoteActionView(APIView):
@@ -76,6 +78,31 @@ class QuoteSendView(_AdminQuoteActionView):
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))
         return Response(result)
+
+
+class AdminQuoteVinView(APIView):
+    """El editor de cotizaciones decodifica el VIN sin salir de `/api/admin/`."""
+
+    authentication_classes = [SessionUserAuthentication]
+    permission_classes = [HasTorqueTrackPermission]
+    required_permission = "quotes.create"
+
+    def post(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        data, status = decode_vehicle(body.get("vin"))
+        return Response(data, status=status)
+
+
+class AdminQuoteTaxView(APIView):
+    """El impuesto lo calcula el mismo servicio que el checkout."""
+
+    authentication_classes = [SessionUserAuthentication]
+    permission_classes = [HasTorqueTrackPermission]
+    required_permission = "quotes.create"
+
+    def post(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        return Response(estimate_tax(body, request.user))
 
 
 class AdminQuoteListCreateView(APIView):

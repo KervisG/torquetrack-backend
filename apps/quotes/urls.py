@@ -2,6 +2,8 @@ from django.urls import path
 
 from apps.quotes.admin_views import (
     AdminQuoteListCreateView,
+    AdminQuoteTaxView,
+    AdminQuoteVinView,
     QuoteConvertView,
     QuoteDeleteView,
     QuotePreviewView,
@@ -31,6 +33,8 @@ urlpatterns = [
         name="quote-public-checkout",
     ),
     path("admin/quotes/", AdminQuoteListCreateView.as_view(), name="admin-quotes-list-create"),
+    path("admin/quotes/vin/", AdminQuoteVinView.as_view(), name="admin-quote-vin"),
+    path("admin/quotes/tax/", AdminQuoteTaxView.as_view(), name="admin-quote-tax"),
     path(
         "admin/quotes/<str:quote_id>/",
         QuoteDeleteView.as_view(),

@@ -2,6 +2,8 @@
 import logging
 
 import pytest
+from django.db import connection
+from django.test.utils import CaptureQueriesContext
 from django.utils import timezone
 from rest_framework.test import APIClient
 
@@ -535,3 +537,77 @@ def test_take_payment_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
     assert response.status_code == 502
     assert response.json() == {"error": "Stripe request failed; see server logs."}
     assert "acct_internal_123" in caplog.text
+
+
+# --- Estados cerrados y bloqueo de fila -------------------------------------
+
+
+def _forbid_stripe(monkeypatch):
+    def _boom(**kwargs):
+        raise AssertionError("Stripe must not be called for a closed order")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", ["CANCELLED", "REJECTED"])
+def test_payment_link_returns_409_for_a_closed_order(monkeypatch, status):
+    _insert_user("usr_link_closed", permissions=["payments.take"])
+    _make_order(status=status, data={"totals": {"total": 50.0}})
+    _forbid_stripe(monkeypatch)
+
+    response = _admin_client("usr_link_closed").post("/api/admin/orders/ord_1/payment-link/")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Closed orders cannot be paid"}
+    assert Order.objects.get(pk="ord_1").status == status
+    assert not Payment.objects.filter(order_id="ord_1").exists()
+
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", ["CANCELLED", "REJECTED"])
+def test_take_payment_returns_409_for_a_closed_order(monkeypatch, status):
+    # Un pedido cancelado o rechazado no se cobra, ni por link ni desde el panel.
+    _insert_user("usr_take_closed", permissions=["payments.take"])
+    _make_order(status=status, data={"totals": {"total": 50.0}})
+    _forbid_stripe(monkeypatch)
+
+    response = _admin_client("usr_take_closed").post("/api/admin/orders/ord_1/take-payment/")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Closed orders cannot be paid"}
+    assert not Payment.objects.filter(order_id="ord_1").exists()
+
+def _order_locked(queries) -> bool:
+    return any(
+        'FROM "orders"' in query["sql"] and "FOR UPDATE" in query["sql"] for query in queries
+    )
+
+
+@pytest.mark.django_db
+def test_patch_reads_the_order_with_a_row_lock():
+    # La comprobación y la escritura tienen que ver la misma fila que ve el
+    # webhook, que también la bloquea antes de marcarla pagada.
+    _insert_user("usr_patch_lock", permissions=["orders.status"])
+    _make_order()
+    client = _admin_client("usr_patch_lock")
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.patch("/api/admin/orders/ord_1/", {"status": "PROCESSING"}, format="json")
+
+    assert response.status_code == 200
+    assert _order_locked(queries.captured_queries)
+
+
+@pytest.mark.django_db
+def test_delete_reads_the_order_with_a_row_lock():
+    _insert_user("usr_delete_lock", permissions=["orders.cancel"])
+    _make_order()
+    client = _admin_client("usr_delete_lock")
+
+    with CaptureQueriesContext(connection) as queries:
+        response = client.delete("/api/admin/orders/ord_1/")
+
+    assert response.status_code == 200
+    assert _order_locked(queries.captured_queries)

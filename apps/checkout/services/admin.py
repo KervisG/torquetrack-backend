@@ -116,10 +116,6 @@ def _workflow_patch(workflow: dict, actor_email: str) -> dict:
 def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
     """`status` y `workflow` se validan juntos y se aplican en la misma
     transacción: o cambian los dos o ninguno."""
-    order = Order.objects.filter(pk=order_id).first()
-    if order is None:
-        return {"error": "Order not found", "status": 404}
-
     status = str(payload["status"]).upper() if payload.get("status") else None
     if status is not None and status not in ORDER_STATUSES:
         return {"error": "Invalid order status", "status": 400}
@@ -136,6 +132,11 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
         return {"error": "No supported changes supplied", "status": 400}
 
     with transaction.atomic():
+        # Misma fila bloqueada que usa el webhook: un pago que llega a la vez
+        # no se pisa con este cambio.
+        order = Order.objects.select_for_update().filter(pk=order_id).first()
+        if order is None:
+            return {"error": "Order not found", "status": 404}
         fields = ["updated_at"]
         if status is not None:
             order.status = status
@@ -171,19 +172,22 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
 
 
 def delete_admin_order(order_id: str, actor_email: str) -> dict:
-    order = Order.objects.filter(pk=order_id).first()
-    if order is None:
-        return {"error": "Order not found", "status": 404}
-
-    if order.payment_status != "UNPAID":
-        return {
-            "error": "Paid/processed orders cannot be deleted. Cancel or refund them to "
-            "preserve payment history.",
-            "status": 409,
-        }
-
-    number = order.number
     with transaction.atomic():
+        # `payment_status` se lee de la fila bloqueada: el webhook la bloquea
+        # igual antes de marcarla pagada, así que nunca se borra un pedido
+        # que se está cobrando en ese momento.
+        order = Order.objects.select_for_update().filter(pk=order_id).first()
+        if order is None:
+            return {"error": "Order not found", "status": 404}
+
+        if order.payment_status != "UNPAID":
+            return {
+                "error": "Paid/processed orders cannot be deleted. Cancel or refund them to "
+                "preserve payment history.",
+                "status": 409,
+            }
+
+        number = order.number
         # Se cancelan antes de borrar para expirar sus sesiones: una sesión
         # viva sin `Payment` cobraría un pedido que ya no existe.
         cancel_pending_payments(order, "ORDER_DELETED")
@@ -205,6 +209,8 @@ def create_admin_payment_link(order_id: str) -> dict:
         return {"error": "Order not found", "status": 404}
     if order.payment_status == "PAID":
         return {"error": "Order is already paid", "status": 409}
+    if order.status in CLOSED_ORDER_STATUSES:
+        return {"error": "Closed orders cannot be paid", "status": 409}
 
     try:
         payment, session = start_stripe_payment(
@@ -245,6 +251,8 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
         return {"error": "Order not found", "status": 404}
     if order.payment_status == "PAID":
         return {"error": "Order is already paid", "status": 409}
+    if order.status in CLOSED_ORDER_STATUSES:
+        return {"error": "Closed orders cannot be paid", "status": 409}
 
     try:
         _, session = start_stripe_payment(

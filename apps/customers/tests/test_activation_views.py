@@ -2,13 +2,12 @@
 propósito `activation`, ligado al email del perfil invitado."""
 import pytest
 from django.conf import settings
-from django.contrib.auth.hashers import check_password
 from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.auth.models import AccountToken, User
-from apps.auth.utils.throttling import ActivateRateThrottle
+from apps.authentication.models import AccountToken, User
+from apps.authentication.utils.throttling import ActivateRateThrottle
 from apps.common.tokens import hash_token
 from apps.customers.models import Customer
 from tests.factories import create_customer, create_user
@@ -55,7 +54,7 @@ def test_activate_creates_a_user_links_the_customer_and_starts_a_session():
 
     user = User.objects.get(email="guest@example.com")
     assert user.role is None
-    assert check_password(STRONG_PASSWORD, user.password_hash)
+    assert user.check_password(STRONG_PASSWORD)
     customer = Customer.objects.get(pk="C_GUEST")
     assert customer.user == user
     token = _activation_token()

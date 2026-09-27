@@ -406,7 +406,7 @@ def test_public_checkout_hides_the_stripe_error_and_logs_it(client, monkeypatch,
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    with caplog.at_level(logging.WARNING, logger="apps.quotes.services"):
+    with caplog.at_level(logging.WARNING, logger="apps.quotes.services.storefront"):
         response = client.post(f"/api/quote/public/{token}/checkout/")
 
     assert response.status_code == 502

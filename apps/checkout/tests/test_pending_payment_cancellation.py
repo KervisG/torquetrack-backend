@@ -111,7 +111,7 @@ def test_a_stripe_error_while_expiring_is_logged_and_swallowed(
     monkeypatch.setattr(EXPIRE_SESSION, _fail)
     payment = _pending("PAY_1", _order(), "cs_open")
 
-    with caplog.at_level(logging.WARNING, logger="apps.checkout.services"):
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.services.payments"):
         with django_capture_on_commit_callbacks(execute=True):
             cancel_pending_payment(payment, "TEST_REASON")
 
@@ -130,7 +130,7 @@ def test_a_session_already_completed_is_logged_for_follow_up(
     )
     payment = _pending("PAY_1", _order(), "cs_paid")
 
-    with caplog.at_level(logging.WARNING, logger="apps.checkout.services"):
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.services.payments"):
         with django_capture_on_commit_callbacks(execute=True):
             cancel_pending_payment(payment, "TEST_REASON")
 

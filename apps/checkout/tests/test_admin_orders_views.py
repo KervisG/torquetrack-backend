@@ -466,7 +466,7 @@ def test_payment_link_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    with caplog.at_level(logging.WARNING, logger="apps.checkout.admin_services"):
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.services.admin"):
         response = client.post("/api/admin/orders/ord_1/payment-link/")
 
     assert response.status_code == 502
@@ -529,7 +529,7 @@ def test_take_payment_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    with caplog.at_level(logging.WARNING, logger="apps.checkout.admin_services"):
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.services.admin"):
         response = client.post("/api/admin/orders/ord_1/take-payment/")
 
     assert response.status_code == 502

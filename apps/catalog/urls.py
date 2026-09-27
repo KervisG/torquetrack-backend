@@ -1,8 +1,12 @@
 from django.urls import path
 from rest_framework.routers import SimpleRouter
 
-from apps.catalog.admin_views import AdminProductDetailView, AdminProductListView
-from apps.catalog.views import ApplicationPublicViewSet, ProductPublicViewSet
+from apps.catalog.views import (
+    AdminProductDetailView,
+    AdminProductListView,
+    ApplicationPublicViewSet,
+    ProductPublicViewSet,
+)
 
 router = SimpleRouter(trailing_slash=True)
 router.register("products", ProductPublicViewSet, basename="product")

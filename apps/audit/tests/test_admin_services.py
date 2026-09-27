@@ -3,8 +3,8 @@ quien mira puede verlos; no consulta permisos por su cuenta."""
 import pytest
 from django.utils import timezone
 
-from apps.audit.admin_services import list_activity_page
 from apps.audit.models import ActivityLog
+from apps.audit.services.listing import list_activity_page
 
 
 def _log(data):

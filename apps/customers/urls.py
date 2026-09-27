@@ -1,18 +1,16 @@
 from django.urls import path
 
-from apps.customers.admin_views import (
-    AdminCustomerDeleteView,
-    AdminCustomerListCreateView,
-    AdminCustomerPortalInviteView,
-    AdminCustomerTaxExemptionView,
-    AdminCustomerTaxStatusView,
-)
 from apps.customers.views import (
     AccountOrdersView,
     AccountQuotesView,
     AccountTaxExemptionView,
     AccountView,
     ActivateAccountView,
+    AdminCustomerDeleteView,
+    AdminCustomerListCreateView,
+    AdminCustomerPortalInviteView,
+    AdminCustomerTaxExemptionView,
+    AdminCustomerTaxStatusView,
     RegisterView,
     VerifyEmailView,
 )

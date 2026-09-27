@@ -26,7 +26,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("customers", "0002_customer_permissions"),
-        ("tt_auth", "0007_managed_user"),
+        ("authentication", "0001_initial"),
     ]
 
     operations = [
@@ -82,7 +82,7 @@ class Migration(migrations.Migration):
                 null=True,
                 on_delete=django.db.models.deletion.SET_NULL,
                 related_name="customer",
-                to="tt_auth.user",
+                to="authentication.user",
             ),
         ),
         migrations.AddConstraint(

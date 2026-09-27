@@ -9,6 +9,9 @@ SKIPPED_DIRS = {".venv", "__pycache__", "node_modules"}
 
 PROVIDER_PACKAGES = {"requests", "stripe", "easypost", "resend", "taxjar"}
 TAX_CALCULATION_NAMES = {"calculate_sales_tax", "FALLBACK_TAX_RATES"}
+# `services/__init__.py` reexporta el cálculo desde su módulo, así que también
+# cuentan los submódulos del paquete.
+TAX_SERVICES = "apps.tax.services"
 
 
 def _python_modules():
@@ -66,7 +69,8 @@ def test_tax_calculation_only_comes_from_apps_tax():
         _offender(path, module, name)
         for path in _python_modules()
         for module, name in _imports(path)
-        if name in TAX_CALCULATION_NAMES and module != "apps.tax.services"
+        if name in TAX_CALCULATION_NAMES
+        and not (module == TAX_SERVICES or module.startswith(f"{TAX_SERVICES}."))
     ]
 
     assert offenders == []
@@ -95,9 +99,11 @@ def test_the_boundary_check_sees_the_real_callers():
             if (module, name) in set(_imports(path))
         }
 
-    assert "apps/auth/services.py" in callers("apps.integrations.email", "resend")
-    assert "apps/checkout/services.py" in callers("apps.tax.services", "calculate_sales_tax")
-    assert "apps/vin/services.py" in callers("apps.integrations.vehicles", "nhtsa")
+    assert "apps/authentication/services/tokens.py" in callers("apps.integrations.email", "resend")
+    assert "apps/checkout/services/storefront.py" in callers(
+        "apps.tax.services", "calculate_sales_tax"
+    )
+    assert "apps/vin/services/decoding.py" in callers("apps.integrations.vehicles", "nhtsa")
     adapters = {
         path.relative_to(BACKEND_DIR).as_posix()
         for path in INTEGRATIONS_DIR.rglob("*.py")

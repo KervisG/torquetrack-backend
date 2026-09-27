@@ -1,0 +1,145 @@
+from django.contrib.auth import login
+from rest_framework.permissions import AllowAny
+from rest_framework.response import Response
+from rest_framework.views import APIView
+
+from apps.authentication.models import User
+from apps.authentication.services import csrf_token_payload, serialize_session_user
+from apps.authentication.utils.throttling import (
+    ActivateRateThrottle,
+    RegisterRateThrottle,
+    VerifyEmailRateThrottle,
+)
+from apps.customers.services import (
+    activate_customer_account,
+    customer_for_user,
+    list_account_orders,
+    list_account_quotes,
+    register_customer,
+    serialize_account,
+    submit_tax_exemption,
+    update_account,
+    verify_customer_email,
+)
+
+
+def _body(request) -> dict:
+    return request.data if isinstance(request.data, dict) else {}
+
+
+def _error(result: dict) -> Response:
+    return Response({"error": result["error"]}, status=result.get("status", 400))
+
+
+def _signed_in(request, user: User) -> Response:
+    """Abre la sesión y responde con la misma forma que `/api/session/`."""
+    login(request, user)
+    return Response(
+        {
+            "authenticated": True,
+            "user": serialize_session_user(user),
+            **csrf_token_payload(request),
+        },
+        status=201,
+    )
+
+
+class RegisterView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [RegisterRateThrottle]
+
+    def post(self, request):
+        result = register_customer(_body(request))
+        if "error" in result:
+            return _error(result)
+        return _signed_in(request, result["user"])
+
+
+class VerifyEmailView(APIView):
+    """Público: el token del correo es la prueba, así funciona aunque el enlace
+    se abra en otro navegador sin sesión."""
+
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [VerifyEmailRateThrottle]
+
+    def post(self, request):
+        result = verify_customer_email(_body(request))
+        if "error" in result:
+            return _error(result)
+        return Response(result)
+
+
+class _AccountView(APIView):
+    permission_classes = [AllowAny]
+
+    def initial(self, request, *args, **kwargs):
+        super().initial(request, *args, **kwargs)
+        self.customer = None
+        if request.user.is_authenticated:
+            self.customer = customer_for_user(request.user)
+
+    def _denied(self, request):
+        """Devuelve `None` si hay perfil, o el `Response` de error."""
+        if not request.user.is_authenticated:
+            return Response({"error": "Unauthorized"}, status=401)
+        if self.customer is None:
+            return Response({"error": "Customer profile not found"}, status=404)
+        return None
+
+
+class AccountView(_AccountView):
+    def get(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        return Response({"customer": serialize_account(self.customer)})
+
+    def patch(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        result = update_account(self.customer, _body(request))
+        if "error" in result:
+            return _error(result)
+        return Response(result)
+
+
+class AccountOrdersView(_AccountView):
+    def get(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        return Response(list_account_orders(self.customer))
+
+
+class AccountQuotesView(_AccountView):
+    def get(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        return Response(list_account_quotes(self.customer))
+
+
+class AccountTaxExemptionView(_AccountView):
+    def post(self, request):
+        denied = self._denied(request)
+        if denied is not None:
+            return denied
+        result = submit_tax_exemption(self.customer, _body(request))
+        if "error" in result:
+            return _error(result)
+        return Response(result)
+
+
+class ActivateAccountView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+    throttle_classes = [ActivateRateThrottle]
+
+    def post(self, request):
+        result = activate_customer_account(_body(request))
+        if "error" in result:
+            return _error(result)
+        return _signed_in(request, result["user"])

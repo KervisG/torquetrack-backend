@@ -6,8 +6,8 @@ from rest_framework.test import APIClient
 
 from apps.cart.models import Cart
 from apps.catalog.models import Product
-from apps.checkout.admin_services import ORDER_STATUSES
 from apps.checkout.models import Order, Payment
+from apps.checkout.services.admin import ORDER_STATUSES
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from tests.factories import create_customer, guest_cart_client
@@ -471,7 +471,7 @@ def test_stripe_failure_returns_a_generic_message_and_logs_the_detail(
 
     monkeypatch.setattr(CREATE_SESSION, _boom)
 
-    with caplog.at_level(logging.WARNING, logger="apps.checkout.services"):
+    with caplog.at_level(logging.WARNING, logger="apps.checkout.services.storefront"):
         response = _post(_body(shipping), guest_cart_client("cart_fail_2"))
 
     assert response.status_code == 502

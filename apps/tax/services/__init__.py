@@ -1,0 +1,10 @@
+"""`calculate_sales_tax` es la única implementación del impuesto de venta: las
+demás apps la importan de este paquete."""
+from apps.tax.services.sales_tax import (
+    EXEMPT_ESTIMATE,
+    FALLBACK_TAX_RATES,
+    calculate_sales_tax,
+    estimate_tax,
+)
+
+__all__ = ["EXEMPT_ESTIMATE", "FALLBACK_TAX_RATES", "calculate_sales_tax", "estimate_tax"]

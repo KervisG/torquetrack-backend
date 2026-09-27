@@ -5,7 +5,7 @@ import json
 from io import StringIO
 
 import pytest
-from django.core.management import call_command
+from django.core.management import CommandError, call_command
 
 from apps.catalog.management.commands.import_catalog import DATA_DIR
 from apps.catalog.models import Application, Product
@@ -70,3 +70,23 @@ def test_import_keeps_products_missing_from_seed():
     _run()
 
     assert Product.objects.get(pk="panel-only-part").active is True
+
+
+def test_every_seed_product_has_a_positive_price():
+    unpriced = [p["id"] for p in _load("products.json") if not (p.get("price") or 0) > 0]
+
+    assert unpriced == []
+
+
+@pytest.mark.django_db
+def test_import_aborts_without_writing_when_a_product_has_no_price(tmp_path):
+    products = tmp_path / "products.json"
+    products.write_text(
+        json.dumps([{"id": "priced", "price": 10}, {"id": "unpriced", "price": 0}]),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(CommandError, match="unpriced"):
+        call_command("import_catalog", products=products, stdout=StringIO())
+
+    assert not Product.objects.exists()

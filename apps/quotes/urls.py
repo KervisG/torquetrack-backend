@@ -1,21 +1,19 @@
 from django.urls import path
 
-from apps.quotes.admin_views import (
+from apps.quotes.views import (
     AdminQuoteListCreateView,
     AdminQuoteTaxView,
     AdminQuoteVinView,
+    PublicQuoteCheckoutView,
+    PublicQuoteDetailsView,
+    PublicQuotePdfView,
+    PublicQuoteView,
     QuoteConvertView,
     QuoteDeleteView,
     QuotePreviewView,
     QuoteReopenView,
-    QuoteSendView,
-)
-from apps.quotes.pdf_views import PublicQuotePdfView
-from apps.quotes.views import (
-    PublicQuoteCheckoutView,
-    PublicQuoteDetailsView,
-    PublicQuoteView,
     QuoteRequestView,
+    QuoteSendView,
 )
 
 urlpatterns = [

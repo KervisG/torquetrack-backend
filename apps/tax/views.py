@@ -4,12 +4,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.auth.authentication import SessionUserAuthentication
 from apps.tax.services import estimate_tax
 
 
 class TaxEstimateView(APIView):
-    authentication_classes = [SessionUserAuthentication]
     permission_classes = [AllowAny]
 
     def post(self, request):

@@ -10,8 +10,8 @@ import pytest
 from django.core.cache import cache
 from rest_framework.test import APIClient
 
-from apps.auth.sessions import CART_SESSION_KEY
 from apps.cart.models import Cart
+from apps.cart.services import CART_SESSION_KEY
 from tests.factories import create_user, guest_cart_client, session_client
 
 ITEMS = [{"id": "gm-65-injection-pump-dorman-502550", "qty": 1}]

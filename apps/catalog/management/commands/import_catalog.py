@@ -5,11 +5,12 @@ están en la semilla (por ejemplo, los creados desde el panel) no se tocan."""
 import json
 from pathlib import Path
 
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
 from apps.catalog.models import Application, Product
+from apps.catalog.services import product_price_error
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
@@ -30,6 +31,10 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         products = _read_json(options["products"])
         applications = _read_json(options["applications"])
+
+        unpriced = [str(product["id"]) for product in products if product_price_error(product)]
+        if unpriced:
+            raise CommandError(f"Products without a valid price: {', '.join(unpriced)}")
 
         # Todo o nada: una semilla a medias deja fitment apuntando a productos
         # que no existen.

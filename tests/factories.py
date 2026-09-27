@@ -3,15 +3,15 @@ traducen al `Permission` del modelo de dominio."""
 from importlib import import_module
 
 from django.conf import settings
-from django.contrib.auth.hashers import make_password
 from django.contrib.auth.models import Permission
 from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.audit.models import ActivityLog
-from apps.auth.models import Role, User
-from apps.auth.permission_catalog import CODE_TO_PERMISSION
-from apps.auth.sessions import CART_SESSION_KEY, SESSION_USER_KEY
+from apps.authentication.models import User
+from apps.authorization.models import Role
+from apps.authorization.permissions import CODE_TO_PERMISSION
+from apps.cart.services import CART_SESSION_KEY
 from apps.customers.models import Customer
 
 DEFAULT_PASSWORD = "diesel-pass-123"
@@ -41,17 +41,19 @@ def create_user(
     first_name="",
     last_name="",
 ) -> User:
-    # Sin `password` se guarda un hash inutilizable: PBKDF2 es lento y la
-    # mayoría de los tests no pasa por el login.
-    return User.objects.create(
+    user = User(
         id=user_id,
         email=email or f"{user_id}@example.com",
-        password_hash=make_password(password),
         role=role,
         active=active,
         first_name=first_name,
         last_name=last_name,
     )
+    # Sin `password` queda un hash inutilizable: PBKDF2 es lento y la
+    # mayoría de los tests no pasa por el login.
+    user.set_password(password)
+    user.save(force_insert=True)
+    return user
 
 
 def create_staff_user(
@@ -85,14 +87,14 @@ def create_customer(customer_id, *, email=None, user=None, data=None, **fields) 
 
 
 def session_client(user_id, *, enforce_csrf=False):
-    """Devuelve `(client, session_key)` con la cookie de sesión ya puesta."""
-    engine = import_module(settings.SESSION_ENGINE)
-    store = engine.SessionStore()
-    store[SESSION_USER_KEY] = user_id
-    store.save()
+    """Devuelve `(client, session_key)` con la cookie de sesión ya puesta.
+
+    Usa `force_login`, que pasa por `django.contrib.auth.login()`: la sesión
+    guarda el backend y el hash de la contraseña igual que un login real.
+    """
     client = APIClient(enforce_csrf_checks=enforce_csrf)
-    client.cookies[settings.SESSION_COOKIE_NAME] = store.session_key
-    return client, store.session_key
+    client.force_login(User.objects.get(pk=user_id))
+    return client, client.session.session_key
 
 
 def guest_cart_client(cart_id):

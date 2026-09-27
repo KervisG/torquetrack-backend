@@ -10,7 +10,7 @@ primer test falla.
 import pytest
 from django.db import connection
 
-from apps.auth.models import AccountToken
+from apps.authentication.models import AccountToken
 from apps.checkout.models import Order, Payment
 from apps.customers.models import Customer
 from apps.quotes.models import Quote
@@ -23,6 +23,8 @@ EXPECTED_ON_DELETE = {
     ("payments", "order_id"): "n",
     ("customers", "user_id"): "n",
     ("account_tokens", "user_id"): "c",
+    # `admin.LogEntry` del `AUTH_USER_MODEL` (`authentication/0003_db_on_delete`).
+    ("django_admin_log", "user_id"): "c",
     # `PROTECT` en el ORM: la base también rechaza borrar un Role en uso.
     ("users", "role_id"): "a",
 }

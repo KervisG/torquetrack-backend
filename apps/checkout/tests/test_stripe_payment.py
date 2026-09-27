@@ -1,5 +1,6 @@
 """El último test recorre los cuatro flujos de cobro con un espía sobre
-`start_stripe_payment` en el módulo de cada caller."""
+`start_stripe_payment` en el módulo de cada caller (`services/storefront.py` y
+`services/admin.py` de checkout y `services/storefront.py` de quotes)."""
 from decimal import Decimal
 
 import pytest
@@ -7,9 +8,8 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.catalog.models import Product
-from apps.checkout import services as checkout_services
 from apps.checkout.models import Order, Payment
-from apps.checkout.services import start_stripe_payment
+from apps.checkout.services.payments import start_stripe_payment
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 from tests.factories import create_staff_user, session_client
@@ -75,18 +75,19 @@ def test_start_stripe_payment_records_nothing_when_stripe_fails(monkeypatch):
 
 @pytest.mark.django_db
 def test_every_payment_flow_goes_through_start_stripe_payment(monkeypatch, settings):
-    from apps.checkout import admin_services
-    from apps.quotes import services as quote_services
+    from apps.checkout.services import admin as checkout_admin
+    from apps.checkout.services import storefront as checkout_storefront
+    from apps.quotes.services import storefront as quote_storefront
 
     monkeypatch.setattr(CREATE_SESSION, _fake_session)
     sources = []
-    real = checkout_services.start_stripe_payment
+    real = start_stripe_payment
 
     def _spy(order, *, data=None):
         sources.append((data or {}).get("source"))
         return real(order, data=data)
 
-    for module in (checkout_services, admin_services, quote_services):
+    for module in (checkout_storefront, checkout_admin, quote_storefront):
         monkeypatch.setattr(module, "start_stripe_payment", _spy)
 
     product = {"id": "p1", "title": "Pump", "price": 100.0, "make": "Ford"}

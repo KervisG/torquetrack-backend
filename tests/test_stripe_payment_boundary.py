@@ -1,4 +1,4 @@
-"""Solo `apps/checkout/services.py` abre, registra o expira pagos de Stripe:
+"""Solo `apps/checkout/services/payments.py` abre, registra o expira pagos de Stripe:
 así el monto, su redondeo y el `provider_id` que concilia el webhook salen de
 un único lugar."""
 import ast
@@ -7,7 +7,7 @@ from pathlib import Path
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 APPS_DIR = BACKEND_DIR / "apps"
 INTEGRATIONS_DIR = APPS_DIR / "integrations"
-OWNER = APPS_DIR / "checkout" / "services.py"
+OWNER = APPS_DIR / "checkout" / "services" / "payments.py"
 
 
 def _domain_modules():

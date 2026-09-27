@@ -188,7 +188,7 @@ def test_missing_weight_and_size_use_the_default_box_and_are_logged(
     _insert_product(data={"shippingWeight": 0, "lengthIn": 0})
     captured = _fake_easypost(monkeypatch)
 
-    with caplog.at_level(logging.WARNING, logger="apps.shipping.services"):
+    with caplog.at_level(logging.WARNING, logger="apps.shipping.services.rates"):
         _post_rates({"to": {"zip": "30301"}, "items": _items((PRODUCT_ID, 2))})
 
     assert captured["parcel"] == {"weight": 2 * 16, "length": 12, "width": 10, "height": 6 * 2}
@@ -216,7 +216,7 @@ def test_easypost_error_returns_a_generic_502_and_logs_the_detail(settings, monk
 
     monkeypatch.setattr(GET_RATES, _fail)
 
-    with caplog.at_level("WARNING", logger="apps.shipping.services"):
+    with caplog.at_level("WARNING", logger="apps.shipping.services.rates"):
         response = _post_rates({"to": {"zip": "30301"}, "items": _items((PRODUCT_ID, 1))})
 
     assert response.status_code == 502

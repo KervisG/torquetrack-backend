@@ -22,7 +22,10 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     "rest_framework",
-    "apps.auth",
+    "drf_spectacular",
+    # `authorization` va antes: `authentication.User.role` apunta a su `Role`.
+    "apps.authorization",
+    "apps.authentication",
     "apps.customers",
     "apps.catalog",
     "apps.fitment",
@@ -85,6 +88,11 @@ CACHES = {
     "default": env.cache_url_config(env("CACHE_URL", default="") or "dbcache://django_cache"),
 }
 
+# Auth estándar de Django: el `User` propio es el modelo de cuentas (también
+# de `/admin/`). El login es el `ModelBackend` por defecto y los permisos
+# salen de `User.has_perm`, que lee solo el Role.
+AUTH_USER_MODEL = "authentication.User"
+
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
 ]
@@ -118,6 +126,7 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
+    "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
     "DEFAULT_THROTTLE_RATES": {
         "login": env("LOGIN_THROTTLE_RATE", default="10/min"),
@@ -130,6 +139,18 @@ REST_FRAMEWORK = {
         "verify_email": env("VERIFY_EMAIL_THROTTLE_RATE", default="20/hour"),
         "verify_email_resend": env("VERIFY_EMAIL_RESEND_THROTTLE_RATE", default="5/hour"),
     },
+}
+
+# `/api/schema/`, `/api/docs/` y `/api/redoc/`. Describen también las rutas
+# del panel, así que solo las ve el staff con sesión.
+SPECTACULAR_SETTINGS = {
+    "TITLE": "TorqueTrack Diesel API",
+    "DESCRIPTION": "Storefront and admin API for TorqueTrack Diesel.",
+    "VERSION": "1.0.0",
+    "SCHEMA_PATH_PREFIX": r"/api/(admin/)?",
+    "SERVE_INCLUDE_SCHEMA": False,
+    "SERVE_AUTHENTICATION": ["rest_framework.authentication.SessionAuthentication"],
+    "SERVE_PERMISSIONS": ["apps.authorization.permissions.HasRolePermission"],
 }
 
 # Key de `request.META` con la IP real del cliente. Solo es confiable si el

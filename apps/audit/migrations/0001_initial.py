@@ -2,8 +2,8 @@
 #
 # El proyecto no está en producción y la bitácora no tiene datos que
 # conservar: se descarta la tabla que dejó `backoffice` (si existe) y se crea
-# desde el modelo. Los permisos del ContentType viejo los mueve
-# `tt_auth.0011_move_backoffice_permissions`.
+# desde el modelo. El permiso `view_activitylog` lo crea Django al migrar y
+# lo siembra en los Roles `authorization.0002_seed_roles`.
 import django.db.models.functions.datetime
 import django.utils.timezone
 from django.db import migrations, models

@@ -251,9 +251,9 @@ def test_tax_exemption_rejects_unsupported_certificate_types(certificate):
 
 @pytest.mark.django_db
 def test_tax_exemption_rejects_an_oversized_certificate(monkeypatch):
-    from apps.customers import services
+    from apps.customers.services import storefront
 
-    monkeypatch.setattr(services, "MAX_CERTIFICATE_BYTES", 32)
+    monkeypatch.setattr(storefront, "MAX_CERTIFICATE_BYTES", 32)
     client = _account()
 
     response = client.post(

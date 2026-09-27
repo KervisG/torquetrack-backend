@@ -1,0 +1,40 @@
+"""Perfil comercial; las credenciales viven solo en `apps.authentication.User` y un
+cliente invitado no tiene cuenta."""
+from django.db import models
+from django.db.models import Q
+from django.db.models.functions import Now
+
+
+class Customer(models.Model):
+    id = models.TextField(primary_key=True)
+    user = models.OneToOneField(
+        "authentication.User",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="customer",
+    )
+    email = models.TextField(null=True, blank=True)
+    data = models.JSONField(default=dict)
+    tax_status = models.TextField(default="NOT SUBMITTED", db_default="NOT SUBMITTED")
+    created_at = models.DateTimeField(db_default=Now())
+    updated_at = models.DateTimeField(db_default=Now())
+
+    class Meta:
+        db_table = "customers"
+        permissions = [
+            ("review_tax_exemption", "Can review tax exemptions"),
+        ]
+        constraints = [
+            # El checkout invitado resuelve el perfil por email, así que entre
+            # invitados el email sigue siendo único. Un perfil registrado puede
+            # repetirlo: el registro nunca se adueña de un invitado existente.
+            models.UniqueConstraint(
+                fields=["email"],
+                condition=Q(user__isnull=True),
+                name="customers_guest_email_unique",
+            ),
+        ]
+
+    def __str__(self) -> str:
+        return self.email or self.id

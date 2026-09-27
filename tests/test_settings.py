@@ -11,7 +11,8 @@ from rest_framework.test import APIClient
 from tests.factories import DEFAULT_PASSWORD, create_user
 
 EXPECTED_APPS = {
-    "apps.auth",
+    "apps.authorization",
+    "apps.authentication",
     "apps.customers",
     "apps.catalog",
     "apps.fitment",

@@ -1,13 +1,13 @@
 from django.urls import path
 
-from apps.checkout.admin_views import (
+from apps.checkout.views import (
     AdminOrderDetailView,
     AdminOrderPaymentLinkView,
     AdminOrdersListView,
     AdminOrderTakePaymentView,
+    CheckoutView,
+    StripeWebhookView,
 )
-from apps.checkout.views import CheckoutView
-from apps.checkout.webhook_views import StripeWebhookView
 
 urlpatterns = [
     path("checkout/", CheckoutView.as_view(), name="checkout"),

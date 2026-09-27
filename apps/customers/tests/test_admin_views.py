@@ -2,7 +2,7 @@ import pytest
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.auth.models import AccountToken
+from apps.authentication.models import AccountToken
 from apps.common.tokens import hash_token
 from apps.customers.models import Customer
 from tests.factories import (

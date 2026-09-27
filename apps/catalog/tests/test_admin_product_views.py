@@ -103,12 +103,12 @@ def test_put_creates_product_forcing_id_from_url():
 
 @pytest.mark.django_db
 def test_put_reads_nested_product_key_when_present():
-    _insert_user("usr_put2", permissions=["products.edit"])
+    _insert_user("usr_put2", permissions=["products.edit", "pricing.edit"])
     client = _admin_client("usr_put2")
 
     response = client.put(
         "/api/admin/products/prod_nested/",
-        {"product": {"title": "Nested Part"}},
+        {"product": {"title": "Nested Part", "price": 25}},
         format="json",
     )
 
@@ -122,7 +122,7 @@ def test_put_keeps_a_deactivated_product_inactive():
     _insert_user("usr_put3", permissions=["products.edit"])
     Product.objects.create(
         id="prod_existing",
-        data={"id": "prod_existing", "title": "Old"},
+        data={"id": "prod_existing", "title": "Old", "price": 50},
         active=False,
         updated_at=timezone.now(),
     )
@@ -141,7 +141,7 @@ def test_put_keeps_a_deactivated_product_inactive():
 @pytest.mark.django_db
 def test_put_with_explicit_active_reactivates_the_product():
     _insert_user("usr_put4", permissions=["products.edit"])
-    Product.objects.create(id="prod_off", data={"id": "prod_off"}, active=False)
+    Product.objects.create(id="prod_off", data={"id": "prod_off", "price": 50}, active=False)
     client = _admin_client("usr_put4")
 
     response = client.put(
@@ -164,6 +164,40 @@ def test_put_rejects_a_non_boolean_active():
     assert response.status_code == 400
     assert not Product.objects.exists()
 
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("price", [None, 0, -5, "", "abc"])
+def test_put_rejects_a_product_without_a_positive_price(price):
+    # Todo producto se vende con precio: sin él, el checkout lo cobraría gratis.
+    _insert_user("usr_put6", permissions=["products.edit", "pricing.edit"])
+    body = {"title": "Unpriced Part"}
+    if price is not None:
+        body["price"] = price
+
+    response = _admin_client("usr_put6").put(
+        "/api/admin/products/prod_unpriced/", body, format="json"
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "price must be greater than 0"}
+    assert not Product.objects.exists()
+
+
+@pytest.mark.django_db
+def test_put_on_a_stored_product_without_price_requires_setting_one():
+    _insert_user("usr_put7", permissions=["products.edit", "pricing.edit"])
+    Product.objects.create(id="prod_legacy", data={"id": "prod_legacy", "price": 0})
+    client = _admin_client("usr_put7")
+
+    rejected = client.put("/api/admin/products/prod_legacy/", {"title": "Pump"}, format="json")
+    accepted = client.put(
+        "/api/admin/products/prod_legacy/", {"title": "Pump", "price": 80}, format="json"
+    )
+
+    assert rejected.status_code == 400
+    assert accepted.status_code == 200
+    assert Product.objects.get(pk="prod_legacy").data["price"] == 80
 
 # --- precios y costos ------------------------------------------------------
 
@@ -306,7 +340,7 @@ def test_put_without_costs_view_keeps_hidden_internal_fields():
 
 
 def test_cost_fields_are_hidden_from_the_storefront():
-    from apps.catalog.admin_services import COST_FIELDS
-    from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS
+    from apps.catalog.serializers.storefront import RESTRICTED_PRODUCT_FIELDS
+    from apps.catalog.services.admin import COST_FIELDS
 
     assert set(COST_FIELDS) <= set(RESTRICTED_PRODUCT_FIELDS)

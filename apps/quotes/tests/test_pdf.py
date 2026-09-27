@@ -76,8 +76,8 @@ def test_pdf_endpoint_denies_expired_token(client):
 @pytest.mark.django_db
 @requires_weasyprint
 def test_pdf_source_data_matches_quote_line_items_and_totals():
-    from apps.quotes.pdf import render_quote_pdf_bytes
-    from apps.quotes.services import serialize_quote
+    from apps.quotes.services.pdf import render_quote_pdf_bytes
+    from apps.quotes.services.rendering import serialize_quote
 
     quote = _make_quote()
     quote_dict = serialize_quote(quote)

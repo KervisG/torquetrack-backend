@@ -266,7 +266,7 @@ def test_send_links_the_spa_quote_page_and_the_api_pdf(settings, monkeypatch):
     _make_quote(data={"publicToken": "tok-links"})
 
     resend = install_resend(monkeypatch, FakeResend({"sent": True, "id": "email_links"}))
-    monkeypatch.setattr("apps.quotes.pdf.render_quote_pdf_base64", lambda quote: "UERG")
+    monkeypatch.setattr("apps.quotes.services.admin.render_quote_pdf_base64", lambda quote: "UERG")
 
     client = _admin_client("usr_send_links")
     response = client.post("/api/admin/quotes/quo_admin_1/send/")
@@ -290,7 +290,7 @@ def test_send_reports_unconfigured_email_before_rendering_the_pdf(settings, monk
     def _no_pdf(quote):
         raise AssertionError("the PDF must not be rendered when email is not configured")
 
-    monkeypatch.setattr("apps.quotes.pdf.render_quote_pdf_base64", _no_pdf)
+    monkeypatch.setattr("apps.quotes.services.admin.render_quote_pdf_base64", _no_pdf)
 
     client = _admin_client("usr_send_unconfigured")
     response = client.post("/api/admin/quotes/quo_admin_1/send/")

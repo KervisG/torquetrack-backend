@@ -12,15 +12,14 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 APPS_DIR = BACKEND_DIR / "apps"
 SKIPPED_DIRS = {"tests", "migrations", "__pycache__"}
 
-# Autenticación, permission class, sesión y throttles de `apps.auth`: todas
-# las views los usan para cablearse, como usarían DRF. No cuentan como
-# dependencia de dominio; `test_auth_request_infrastructure_is_self_contained`
-# garantiza que ignorarlos no esconde un ciclo.
-AUTH_REQUEST_INFRASTRUCTURE = {
-    "apps.auth.authentication",
-    "apps.auth.permissions",
-    "apps.auth.sessions",
-    "apps.auth.utils.throttling",
+# La permission class de `apps.authorization` y los throttles de
+# `apps.authentication`: todas las views los usan para cablearse, como usarían
+# DRF. No cuentan como dependencia de dominio;
+# `test_request_infrastructure_is_self_contained` garantiza que ignorarlos no
+# esconde un ciclo.
+REQUEST_INFRASTRUCTURE = {
+    "apps.authorization.permissions": "authorization",
+    "apps.authentication.utils.throttling": "authentication",
 }
 
 # Paquetes hoja: cualquier app puede importarlos porque ellos no importan a nadie.
@@ -31,12 +30,20 @@ CUSTOMER_RESOLUTION_NAMES = {
     "resolve_guest_customer",
     "link_guest_history",
 }
+# Paquete dueño de la resolución: `services/__init__.py` la reexporta desde su
+# módulo, así que también cuentan sus submódulos.
+CUSTOMER_SERVICES = "apps.customers.services"
 
 
 def _source_files(root=APPS_DIR):
     for path in root.rglob("*.py"):
         if SKIPPED_DIRS.isdisjoint(path.relative_to(APPS_DIR).parts):
             yield path
+
+
+def _is_request_infrastructure(module):
+    """El módulo es uno de `REQUEST_INFRASTRUCTURE` o un submódulo de su paquete."""
+    return any(module == name or module.startswith(f"{name}.") for name in REQUEST_INFRASTRUCTURE)
 
 
 def _module_name(path):
@@ -69,7 +76,7 @@ def _import_graph():
         source_app = path.relative_to(APPS_DIR).parts[0]
         for module, _name in _imports(path):
             target_app = _app_of(module)
-            if target_app in (None, source_app) or module in AUTH_REQUEST_INFRASTRUCTURE:
+            if target_app in (None, source_app) or _is_request_infrastructure(module):
                 continue
             graph[source_app].add(target_app)
     return graph
@@ -109,13 +116,14 @@ def test_the_cycle_detector_finds_a_cycle():
     assert _find_cycle({"a": {"b"}, "b": set()}) is None
 
 
-def test_auth_request_infrastructure_is_self_contained():
+def test_request_infrastructure_is_self_contained():
     offenders = [
         f"{_module_name(path)}: {module}"
-        for path in _source_files(APPS_DIR / "auth")
-        if _module_name(path) in AUTH_REQUEST_INFRASTRUCTURE
+        for owner in set(REQUEST_INFRASTRUCTURE.values())
+        for path in _source_files(APPS_DIR / owner)
+        if _is_request_infrastructure(_module_name(path))
         for module, _name in _imports(path)
-        if _app_of(module) not in (None, "auth", "common")
+        if _app_of(module) not in (None, owner, "common")
     ]
 
     assert offenders == []
@@ -146,7 +154,8 @@ def test_customer_resolution_is_only_imported_from_customers():
         for path in BACKEND_DIR.rglob("*.py")
         if ".venv" not in path.parts
         for module, name in _imports(path)
-        if name in CUSTOMER_RESOLUTION_NAMES and module != "apps.customers.services"
+        if name in CUSTOMER_RESOLUTION_NAMES
+        and not (module == CUSTOMER_SERVICES or module.startswith(f"{CUSTOMER_SERVICES}."))
     ]
 
     assert offenders == []
@@ -159,7 +168,32 @@ def test_the_graph_sees_the_real_dependencies():
 
     assert {"customers", "numbering", "common", "tax"} <= graph["checkout"]
     assert {"checkout", "customers"} <= graph["quotes"]
-    assert "auth" in graph["customers"]
+    assert "authentication" in graph["customers"]
+    assert "authorization" in graph["authentication"]
+    assert "audit" in graph["authorization"]
+
+
+def test_authorization_never_imports_authentication():
+    # `authorization` (roles, permisos y gestión de usuarios del panel) está
+    # debajo: `authentication.User.role` apunta a su `Role` y el login lee su
+    # catálogo. Llega al `User` con `get_user_model()` y la relación inversa
+    # `role.users`. Se revisa cada import, también los de la infraestructura
+    # de request que el grafo ignora.
+    offenders = [
+        f"{path.relative_to(BACKEND_DIR).as_posix()}: {module}"
+        for path in _source_files(APPS_DIR / "authorization")
+        for module, _name in _imports(path)
+        if _app_of(module) == "authentication"
+    ]
+
+    assert offenders == []
+
+
+def test_authentication_depends_on_authorization_only_one_way():
+    graph = _import_graph()
+
+    assert "authorization" in graph["authentication"]
+    assert "authentication" not in graph["authorization"]
 
 
 def test_migrations_only_import_generated_model_callables():

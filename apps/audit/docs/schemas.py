@@ -1,12 +1,13 @@
 """Serializers que solo describen `GET /api/admin/activity/`.
 
 El error vive aquí y no en `apps.authorization`: authorization ya llama a
-`record_activity`, y importar sus docs cerraría un ciclo entre apps.
+`record_activity`, y importar sus docs cerraría un ciclo entre apps. Lleva
+nombre propio para no chocar con el componente `ErrorResponse` de authorization.
 """
 from rest_framework import serializers
 
 
-class ErrorResponseSerializer(serializers.Serializer):
+class ActivityErrorSerializer(serializers.Serializer):
     error = serializers.CharField(help_text="Literal English error message.")
 
 

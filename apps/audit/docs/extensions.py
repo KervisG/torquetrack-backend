@@ -2,7 +2,7 @@
 from drf_spectacular.extensions import OpenApiViewExtension
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 
-from apps.audit.docs.schemas import ActivityPageSerializer, ErrorResponseSerializer
+from apps.audit.docs.schemas import ActivityErrorSerializer, ActivityPageSerializer
 
 
 class AdminActivityViewExtension(OpenApiViewExtension):
@@ -30,9 +30,9 @@ class AdminActivityViewExtension(OpenApiViewExtension):
                 ],
                 responses={
                     200: OpenApiResponse(ActivityPageSerializer),
-                    400: OpenApiResponse(ErrorResponseSerializer),
-                    401: OpenApiResponse(ErrorResponseSerializer),
-                    403: OpenApiResponse(ErrorResponseSerializer),
+                    400: OpenApiResponse(ActivityErrorSerializer),
+                    401: OpenApiResponse(ActivityErrorSerializer),
+                    403: OpenApiResponse(ActivityErrorSerializer),
                 },
             )
             def get(self, request):

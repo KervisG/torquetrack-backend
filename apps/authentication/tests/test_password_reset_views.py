@@ -332,3 +332,28 @@ def test_confirm_is_rate_limited_by_ip(monkeypatch):
     )
 
     assert blocked.status_code == 429
+
+
+@pytest.mark.django_db
+def test_requesting_a_new_link_voids_the_previous_one(resend):
+    # Solo sirve el último enlace: uno viejo que quedó en otra bandeja o en un
+    # reenvío ya no cambia la contraseña.
+    create_user("U_PAT", email="pat@example.com")
+    client = APIClient()
+    client.post("/api/password-reset/", {"email": "pat@example.com"}, format="json")
+    client.post("/api/password-reset/", {"email": "pat@example.com"}, format="json")
+    first, second = _token_from(resend[0]), _token_from(resend[1])
+
+    assert _confirm(first).status_code == 400
+    assert _confirm(second).status_code == 200
+
+
+@pytest.mark.django_db
+def test_requesting_a_reset_link_keeps_the_email_verification_link(resend):
+    user = create_user("U_PAT", email="pat@example.com")
+    verification = issue_account_token(user, AccountToken.EMAIL_VERIFICATION)
+
+    APIClient().post("/api/password-reset/", {"email": "pat@example.com"}, format="json")
+
+    response = APIClient().post("/api/verify-email/", {"token": verification}, format="json")
+    assert response.status_code == 200

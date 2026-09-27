@@ -379,3 +379,15 @@ def test_resend_sends_the_verification_email_outside_the_request(slow_resend):
     slow_resend.release.set()
     assert slow_resend.delivered.wait(5)
     assert slow_resend.sent[0]["to"] == ["pat@example.com"]
+
+
+@pytest.mark.django_db
+def test_resend_voids_the_previous_verification_link(resend):
+    _account_with_profile()
+    client, _ = session_client("U_PAT")
+    client.post("/api/verify-email/resend/", {}, format="json")
+    client.post("/api/verify-email/resend/", {}, format="json")
+    first, second = _token_from(resend[0]), _token_from(resend[1])
+
+    assert _verify(first).status_code == 400
+    assert _verify(second).status_code == 200

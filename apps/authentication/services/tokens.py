@@ -39,6 +39,11 @@ def _create_token(purpose: str, email: str, user: User | None = None) -> str:
 
 
 def issue_account_token(user: User, purpose: str) -> str:
+    """Solo vale el último enlace de cada tipo: pedir uno nuevo anula los
+    pendientes del mismo propósito, igual que la invitación al portal."""
+    AccountToken.objects.filter(user=user, purpose=purpose, used_at__isnull=True).update(
+        used_at=timezone.now()
+    )
     return _create_token(purpose, user.email, user)
 
 

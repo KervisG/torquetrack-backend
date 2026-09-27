@@ -9,7 +9,7 @@ from django.utils import timezone
 from apps.audit.services import record_activity
 from apps.checkout.models import Order, Payment
 from apps.checkout.services.payments import cancel_pending_payment, get_stripe_payment_method
-from apps.common.numbers import money
+from apps.common.numbers import money, money_decimal
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +51,10 @@ def reconcile_paid_session(session_obj: dict) -> None:
     el pedido ya estaba pagado por otra sesión, el cobro igual existe en
     Stripe: el pago queda PAID y la bitácora lo marca para reembolso.
     """
+    if session_obj.get("payment_status") != "paid":
+        # Un medio asíncrono completa la sesión antes de cobrar; el cobro se
+        # confirma con `async_payment_succeeded`, que vuelve a pasar por aquí.
+        return
     payment = _session_payment(session_obj)
     if payment is None or payment.status == "PAID":
         return
@@ -63,6 +67,32 @@ def reconcile_paid_session(session_obj: dict) -> None:
     with transaction.atomic():
         order, payment = _locked_order_and_payment(payment)
         if order is None or payment.status == "PAID":
+            return
+
+        expected_cents = int(money_decimal(payment.amount) * 100)
+        if session_obj.get("amount_total") != expected_cents:
+            # Cobrar otro monto no salda el pedido: queda pendiente para que
+            # el staff lo revise. Se responde 200 igual porque un reintento
+            # de Stripe no lo resuelve.
+            logger.warning(
+                "Stripe session %s charged %s cents; payment %s expects %s",
+                session_id,
+                session_obj.get("amount_total"),
+                payment.pk,
+                expected_cents,
+            )
+            record_activity(
+                actor="stripe",
+                action="PAYMENT_AMOUNT_MISMATCH",
+                entity_type="ORDER",
+                entity_id=order.pk,
+                data={
+                    "sessionId": session_id,
+                    "paymentId": payment.pk,
+                    "amountTotal": session_obj.get("amount_total"),
+                    "expectedAmount": expected_cents,
+                },
+            )
             return
 
         customer_details = session_obj.get("customer_details") or {}

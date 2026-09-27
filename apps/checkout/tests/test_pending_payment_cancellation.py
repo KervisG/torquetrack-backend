@@ -182,7 +182,12 @@ def test_webhook_payment_expires_the_other_open_sessions(
 
     with django_capture_on_commit_callbacks(execute=True):
         reconcile_paid_session(
-            {"id": "cs_link", "metadata": {"order_id": "OID_1"}, "payment_status": "paid"}
+            {
+                "id": "cs_link",
+                "metadata": {"order_id": "OID_1"},
+                "payment_status": "paid",
+                "amount_total": 10000,
+            }
         )
 
     assert expired == ["cs_checkout"]

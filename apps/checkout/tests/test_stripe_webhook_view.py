@@ -422,3 +422,64 @@ def test_concurrent_success_events_reconcile_once(monkeypatch):
     assert statuses == [200, 200]
     assert activity_count(entity_id="ord_race_1", action="PAYMENT_PAID") == 1
     assert Payment.objects.get(pk="pay_race").status == "PAID"
+
+
+@pytest.mark.django_db
+def test_completed_session_not_yet_paid_leaves_the_order_pending(monkeypatch):
+    # Con un medio asíncrono (ACH) `completed` llega con `payment_status`
+    # "unpaid": el cobro se confirma después con `async_payment_succeeded`.
+    _no_card_details(monkeypatch)
+    _insert_order("ord_async_1", "O10020", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_async_1", "ord_async_1", "PENDING", {"sessionId": "cs_async_1"})
+
+    event = _checkout_completed_event("ord_async_1", session_id="cs_async_1")
+    event["data"]["object"]["payment_status"] = "unpaid"
+    response = _post_event(event)
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk="ord_async_1")
+    assert order.payment_status == "UNPAID"
+    assert order.status == "PENDING_PAYMENT"
+    assert Payment.objects.get(pk="pay_async_1").status == "PENDING"
+    assert activity_count(entity_id="ord_async_1", action="PAYMENT_PAID") == 0
+
+
+@pytest.mark.django_db
+def test_async_payment_succeeded_marks_the_order_paid_once(monkeypatch):
+    _no_card_details(monkeypatch)
+    _insert_order("ord_async_2", "O10021", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_async_2", "ord_async_2", "PENDING", {"sessionId": "cs_async_2"})
+
+    completed = _checkout_completed_event("ord_async_2", session_id="cs_async_2")
+    completed["data"]["object"]["payment_status"] = "unpaid"
+    succeeded = _checkout_completed_event("ord_async_2", session_id="cs_async_2", event_id="evt_s")
+    succeeded["type"] = "checkout.session.async_payment_succeeded"
+
+    assert _post_event(completed).status_code == 200
+    assert _post_event(succeeded).status_code == 200
+    assert _post_event(succeeded).status_code == 200
+
+    order = Order.objects.get(pk="ord_async_2")
+    assert order.payment_status == "PAID"
+    assert order.status == "OPEN"
+    assert Payment.objects.get(pk="pay_async_2").status == "PAID"
+    assert activity_count(entity_id="ord_async_2", action="PAYMENT_PAID") == 1
+
+
+@pytest.mark.django_db
+def test_amount_mismatch_is_logged_and_the_order_is_not_marked_paid(monkeypatch):
+    _no_card_details(monkeypatch)
+    _insert_order("ord_amount_1", "O10022", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_amount_1", "ord_amount_1", "PENDING", {"sessionId": "cs_amount_1"})
+
+    event = _checkout_completed_event("ord_amount_1", session_id="cs_amount_1")
+    event["data"]["object"]["amount_total"] = 100
+    response = _post_event(event)
+
+    # 200 para que Stripe no reintente: el desajuste lo revisa el staff.
+    assert response.status_code == 200
+    order = Order.objects.get(pk="ord_amount_1")
+    assert order.payment_status == "UNPAID"
+    assert Payment.objects.get(pk="pay_amount_1").status == "PENDING"
+    assert activity_count(entity_id="ord_amount_1", action="PAYMENT_PAID") == 0
+    assert activity_count(entity_id="ord_amount_1", action="PAYMENT_AMOUNT_MISMATCH") == 1

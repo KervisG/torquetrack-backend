@@ -6,10 +6,19 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
+from apps.catalog.services.pricing import (
+    STOREFRONT_QUANTITY_ERROR,
+    InvalidQuantity,
+    PricedLine,
+    UnpricedProducts,
+    build_totals,
+    price_lines,
+    serialize_totals,
+)
 from apps.checkout.models import Order
 from apps.checkout.services.payments import cancel_unpaid_order, start_stripe_payment
 from apps.common.ids import random_id
-from apps.common.numbers import money, to_number
+from apps.common.numbers import money
 from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.exceptions import ProviderError
 from apps.numbering.services import next_document_number
@@ -24,47 +33,23 @@ def next_order_number() -> str:
     return next_document_number("order", "O")
 
 
-def _cart_lines(raw_items: list[dict]) -> tuple[list[tuple[dict, dict]], float, float]:
-    """Líneas repreciadas desde la base: `[(item, product_data)]`, subtotal y
-    core. Los productos inexistentes o inactivos se descartan."""
-    from apps.catalog.models import Product
-
-    ids = [str(raw_item.get("id")) for raw_item in raw_items]
-    products_by_id = {
-        product.id: (product.data or {})
-        for product in Product.objects.filter(id__in=ids, active=True)
-    }
-
-    pairs = []
-    subtotal = 0.0
-    core_total = 0.0
-    for raw_item in raw_items:
-        product_data = products_by_id.get(str(raw_item.get("id")))
-        if not product_data:
-            continue
-        qty = max(1, min(99, int(to_number(raw_item.get("qty"), 1))))
-        price = money(product_data.get("price"))
-        core = money(product_data.get("coreCharge"))
-        subtotal += price * qty
-        core_total += core * qty
-        title = (
+def _order_item(line: PricedLine) -> dict:
+    product_data = line.product
+    return {
+        "id": product_data.get("id"),
+        "title": (
             product_data.get("title") or product_data.get("partNumber") or product_data.get("id")
-        )
-        item = {
-            "id": product_data.get("id"),
-            "title": title,
-            "partNumber": (
-                product_data.get("partNumber")
-                or product_data.get("oemPart")
-                or product_data.get("aftermarketPart")
-                or ""
-            ),
-            "qty": qty,
-            "price": price,
-            "coreCharge": core,
-        }
-        pairs.append((item, product_data))
-    return pairs, subtotal, core_total
+        ),
+        "partNumber": (
+            product_data.get("partNumber")
+            or product_data.get("oemPart")
+            or product_data.get("aftermarketPart")
+            or ""
+        ),
+        "qty": line.quantity,
+        "price": money(line.unit_price),
+        "coreCharge": money(line.core_charge),
+    }
 
 
 def _object_or_empty(value) -> dict | None:
@@ -120,18 +105,23 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     if raw_customer is None or vehicle is None:
         return {"error": "Customer and vehicle must be objects"}, 400
 
-    pairs, subtotal, core_total = _cart_lines(raw_items)
-    if not pairs:
-        return {"error": "No valid products in cart"}, 400
-
-    # Un precio ausente o no positivo en el catálogo es un error de carga: se
-    # rechaza antes de crear el pedido para no cobrar la pieza gratis.
-    unpriced = [item for item, _ in pairs if item["price"] <= 0]
-    if unpriced:
-        detail = ", ".join(item["partNumber"] or item["title"] for item in unpriced)
+    # El precio sale siempre del catálogo; un precio ausente o no positivo
+    # es un error de carga y se rechaza antes de crear el pedido para no
+    # cobrar la pieza gratis.
+    try:
+        priced = price_lines(raw_items)
+    except InvalidQuantity:
+        return {"error": STOREFRONT_QUANTITY_ERROR}, 400
+    except UnpricedProducts as exc:
+        detail = ", ".join(
+            item["partNumber"] or item["title"] for item in map(_order_item, exc.lines)
+        )
         return {
             "error": f"These items have no valid price and cannot be purchased online: {detail}"
         }, 409
+    if not priced.lines:
+        return {"error": "No valid products in cart"}, 400
+    pairs = [(_order_item(line), line.product) for line in priced.lines]
 
     incompatible = [(item, check_product_fitment(data, vehicle)) for item, data in pairs]
     incompatible = [(item, check) for item, check in incompatible if not check["compatible"]]
@@ -165,15 +155,15 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
         tax_result = {"tax": 0, "rate": 0, "source": "Tax exempt"}
     else:
         tax_result = calculate_sales_tax(
-            subtotal=subtotal,
-            core_charge=core_total,
+            subtotal=priced.subtotal,
+            core_charge=priced.core,
             shipping=shipping,
             state=customer.get("state"),
             zip_code=customer.get("zip"),
             city=customer.get("city"),
             address1=customer.get("address1"),
         )
-    tax = money(tax_result["tax"])
+    totals = build_totals(priced.subtotal, priced.core, shipping, tax_result["tax"])
 
     with transaction.atomic():
         if profile is not None:
@@ -193,13 +183,7 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
                 "shipping": shipping_rate,
                 "cartId": cart_id,
                 "taxSource": tax_result["source"],
-                "totals": {
-                    "subtotal": money(subtotal),
-                    "core": money(core_total),
-                    "shipping": shipping,
-                    "tax": tax,
-                    "total": money(subtotal + core_total + shipping + tax),
-                },
+                "totals": serialize_totals(totals),
             },
         )
 
@@ -219,7 +203,7 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
             "url": session["url"],
             "orderId": order.pk,
             "orderNumber": order.number,
-            "tax": tax,
+            "tax": money(totals["tax"]),
         },
         200,
     )

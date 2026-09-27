@@ -6,10 +6,17 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
+from apps.catalog.services.pricing import (
+    InvalidPrice,
+    InvalidQuantity,
+    build_totals,
+    price_lines,
+    serialize_totals,
+)
 from apps.checkout.models import Order
 from apps.checkout.services import next_order_number
 from apps.common.ids import random_id
-from apps.common.numbers import money, to_number
+from apps.common.numbers import money
 from apps.integrations.email import resend
 from apps.quotes.models import Quote
 from apps.quotes.services.lifecycle import (
@@ -37,6 +44,7 @@ _SYSTEM_QUOTE_KEYS = ("publicToken", "orderNumber", "lastEmailedAt", "lastEmaile
 CONVERTIBLE_QUOTE_STATUSES = ("ACTIVE", "CONTACTED")
 NOT_CONVERTIBLE = "This quote cannot be converted in its current status."
 INVALID_QUANTITY = "Item quantity must be a whole number of at least 1"
+INVALID_PRICE = "Item prices must be amounts of 0 or more"
 
 
 def ensure_public_token(quote: Quote) -> str:
@@ -168,51 +176,22 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
 # --- listado, alta y baja ---
 
 
-def _line_quantity(item: dict) -> int | None:
-    """Cantidad entera >= 1 de una línea, `1` si no viene, o `None` si es
-    inválida: una fracción o un negativo reprecia la cotización a un total
-    que no se puede despachar."""
-    value = item.get("quantity")
-    if value is None:
-        value = item.get("qty")
-    if value is None:
-        return 1
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int):
-        quantity = value
-    elif isinstance(value, float) and value.is_integer():
-        quantity = int(value)
-    elif isinstance(value, str) and value.strip().isdigit():
-        quantity = int(value.strip())
-    else:
-        return None
-    return quantity if quantity >= 1 else None
-
-
-def _quote_totals(payload: dict) -> dict:
-    """Solo recibe líneas ya validadas por `upsert_admin_quote`."""
-    items = payload.get("items") or []
-
-    def unit_price(item):
-        value = item.get("unitPrice")
-        if value is None:
-            value = item.get("price")
-        return to_number(value, 0.0)
-
-    subtotal = money(sum(unit_price(item) * _line_quantity(item) for item in items))
-    core = money(
-        sum(to_number(item.get("coreCharge"), 0.0) * _line_quantity(item) for item in items)
-    )
-    shipping = money(payload.get("shipping"))
-    tax = money(payload.get("tax"))
-    return {
-        "subtotal": subtotal,
-        "core": core,
-        "shipping": shipping,
-        "tax": tax,
-        "total": money(subtotal + core + shipping + tax),
-    }
+def _price_quote(payload: dict) -> tuple[list[dict], dict]:
+    """Líneas normalizadas y totales; lanza `InvalidQuantity`/`InvalidPrice`.
+    El staff fija el precio de cada línea (puede ser 0) y la cantidad no tiene
+    el tope del storefront; el resto de la regla es la de `price_lines`."""
+    priced = price_lines(payload.get("items") or [], allow_custom_price=True, max_quantity=None)
+    items = [
+        {
+            **line.item,
+            "quantity": line.quantity,
+            "unitPrice": money(line.unit_price),
+            "coreCharge": money(line.core_charge),
+        }
+        for line in priced.lines
+    ]
+    totals = build_totals(priced.subtotal, priced.core, payload.get("shipping"), payload.get("tax"))
+    return items, serialize_totals(totals)
 
 
 def list_admin_quotes() -> list[dict]:
@@ -223,14 +202,17 @@ def list_admin_quotes() -> list[dict]:
 
 def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
     """Al actualizar se conservan `number`, `created_at` y `expires_at`."""
-    items = payload.get("items") or []
-    if any(not isinstance(item, dict) or _line_quantity(item) is None for item in items):
+    try:
+        items, totals = _price_quote(payload)
+    except InvalidQuantity:
         return {"error": INVALID_QUANTITY, "status": 400}
+    except InvalidPrice:
+        return {"error": INVALID_PRICE, "status": 400}
     status = str(payload.get("status") or "ACTIVE").upper()
     if status not in QUOTE_STATUSES:
         return {"error": "Invalid quote status", "status": 400}
-    totals = _quote_totals(payload)
     customer_id = payload.get("customerId") or None
+    payload = {**payload, "items": items}
     quote_data = {**payload, "totals": totals, "createdBy": actor_email}
     now = timezone.now()
 

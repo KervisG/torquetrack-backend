@@ -37,8 +37,9 @@ def calculate_tax(
                 "to_zip": to_zip,
                 "to_city": to_city,
                 "to_street": to_street,
-                "amount": amount,
-                "shipping": shipping,
+                # El dominio calcula en `Decimal`, que `requests` no serializa.
+                "amount": float(amount),
+                "shipping": float(shipping),
             },
             timeout=10,
         )

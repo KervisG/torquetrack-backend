@@ -90,3 +90,17 @@ def test_pdf_source_data_matches_quote_line_items_and_totals():
     pdf_bytes = render_quote_pdf_bytes(quote_dict)
     assert pdf_bytes.startswith(b"%PDF-")
     assert len(pdf_bytes) > 500
+
+
+def test_rendered_lines_use_whole_quantities_and_the_totals_rounding():
+    # La línea se muestra con la regla de `price_lines`: precio redondeado a
+    # centavos antes de multiplicar y cantidad entera (antes salía "3.0").
+    from apps.quotes.services.rendering import render_quote_html
+
+    html = render_quote_html(
+        {"items": [{"title": "Glow Plug", "quantity": 3, "unitPrice": 19.995, "coreCharge": 1.005}]}
+    )
+
+    assert "<span>3</span>" in html
+    assert "<span>3.0</span>" not in html
+    assert "$63.03" in html

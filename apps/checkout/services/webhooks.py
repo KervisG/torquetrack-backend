@@ -16,7 +16,7 @@ from apps.checkout.services.payments import (
     lock_order_and_payment,
 )
 from apps.checkout.services.refunds import sync_stripe_refund
-from apps.common.numbers import money, money_decimal
+from apps.common.numbers import money, to_cents
 
 logger = logging.getLogger(__name__)
 
@@ -71,7 +71,7 @@ def reconcile_paid_session(session_obj: dict) -> None:
         if order is None or payment.status in CHARGED_PAYMENT_STATUSES:
             return
 
-        expected_cents = int(money_decimal(payment.amount) * 100)
+        expected_cents = to_cents(payment.amount)
         if session_obj.get("amount_total") != expected_cents:
             # Cobrar otro monto no salda el pedido: queda pendiente para que
             # el staff lo revise. Se responde 200 igual porque un reintento

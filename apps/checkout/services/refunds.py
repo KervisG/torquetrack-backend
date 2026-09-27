@@ -25,7 +25,7 @@ from apps.checkout.services.payments import (
     lock_order_and_payment,
 )
 from apps.common.ids import random_id
-from apps.common.numbers import CENT
+from apps.common.numbers import CENT, money, to_cents
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.payments import stripe as stripe_payments
 
@@ -54,7 +54,7 @@ def serialize_refund(refund: Refund, can_view_transaction_ids: bool) -> dict:
     row = {
         "id": refund.pk,
         "paymentId": refund.payment_id,
-        "amount": float(refund.amount),
+        "amount": money(refund.amount),
         "status": refund.status,
         "reason": refund.reason,
         "createdBy": refund.created_by,
@@ -174,7 +174,7 @@ def _activity(refund: Refund, order: Order, **extra) -> dict:
         "number": order.number,
         "refundId": refund.pk,
         "paymentId": refund.payment_id,
-        "amount": float(refund.amount),
+        "amount": money(refund.amount),
         "status": refund.status,
         "stripeRefundId": refund.stripe_refund_id,
         **extra,
@@ -246,7 +246,7 @@ def refund_order(
     try:
         result = stripe_payments.create_refund(
             payment_intent=_payment_intent(payment),
-            amount_cents=int(refund.amount * 100),
+            amount_cents=to_cents(refund.amount),
             idempotency_key=refund.pk,
             metadata={"refund_id": refund.pk, "order_id": order.pk, "order_number": order.number},
         )

@@ -9,10 +9,11 @@ from urllib.parse import quote
 from django.db import transaction
 from django.utils import timezone
 
+from apps.catalog.services.pricing import price_lines
 from apps.checkout.models import Order, Payment
 from apps.common.ids import random_id
 from apps.common.links import app_url
-from apps.common.numbers import money, money_decimal, to_number
+from apps.common.numbers import money_decimal, to_cents
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.payments import stripe as stripe_payments
 
@@ -30,27 +31,27 @@ CLOSED_ORDER_STATUSES = {"CANCELLED", "REJECTED"}
 STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."
 
 
-def _line(name: str, unit_price: float, qty: int) -> dict:
-    return {"name": name, "unit_amount": int(money_decimal(unit_price) * 100), "quantity": qty}
+def _line(name: str, unit_price, qty: int) -> dict:
+    return {"name": name, "unit_amount": to_cents(unit_price), "quantity": qty}
 
 
 def _create_checkout_session(order: dict) -> dict:
     """Devuelve `{"id", "url"}`; lanza `ProviderError` o `ProviderNotConfigured`."""
-    items = order.get("items") or []
     totals = order.get("totals") or {}
+    # Las líneas guardadas ya pasaron por `price_lines` (checkout, solicitud o
+    # panel); se leen con la misma regla para que la suma de Stripe sea
+    # exactamente el `total` que guarda el `Payment`.
+    priced = price_lines(order.get("items") or [], allow_custom_price=True, max_quantity=None)
     line_items = []
-    for item in items:
-        qty = max(1, int(to_number(item.get("qty") or item.get("quantity"), 1)))
-        price = money(item.get("price") if item.get("price") is not None else item.get("unitPrice"))
-        core = money(item.get("coreCharge"))
-        title = item.get("title") or item.get("partNumber") or "Diesel Part"
-        line_items.append(_line(title, price, qty))
-        if core > 0:
-            line_items.append(_line(f"Core charge — {title}", core, qty))
+    for line in priced.lines:
+        title = line.item.get("title") or line.item.get("partNumber") or "Diesel Part"
+        line_items.append(_line(title, line.unit_price, line.quantity))
+        if line.core_charge > 0:
+            line_items.append(_line(f"Core charge — {title}", line.core_charge, line.quantity))
 
     for name, value in (
-        ("Shipping", money(totals.get("shipping"))),
-        ("Sales Tax", money(totals.get("tax"))),
+        ("Shipping", money_decimal(totals.get("shipping"))),
+        ("Sales Tax", money_decimal(totals.get("tax"))),
     ):
         if value > 0:
             line_items.append(_line(name, value, 1))

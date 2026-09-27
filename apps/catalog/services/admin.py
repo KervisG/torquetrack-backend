@@ -4,7 +4,7 @@ from django.utils import timezone
 
 from apps.catalog.models import Product
 from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS
-from apps.common.numbers import money
+from apps.common.numbers import money_decimal
 
 PRICE_FIELDS = ("price", "compareAt", "coreCharge")
 # Deben seguir incluidos en `RESTRICTED_PRODUCT_FIELDS` de `serializers/storefront.py`.
@@ -22,7 +22,7 @@ HIDDEN_WITHOUT_COSTS = RESTRICTED_PRODUCT_FIELDS + (
 def product_price_error(product_data: dict) -> str | None:
     """Todo producto se vende con precio: ausente, cero o negativo es inválido.
     Lo aplican el panel y `import_catalog`, las dos vías de carga."""
-    if money(product_data.get("price")) <= 0:
+    if money_decimal(product_data.get("price")) <= 0:
         return "price must be greater than 0"
     return None
 

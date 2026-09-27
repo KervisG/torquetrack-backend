@@ -9,6 +9,14 @@ from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 
+from apps.catalog.services.pricing import (
+    STOREFRONT_QUANTITY_ERROR,
+    InvalidQuantity,
+    UnpricedProducts,
+    build_totals,
+    price_lines,
+    serialize_totals,
+)
 from apps.checkout.models import Order
 from apps.checkout.services import (
     CHARGED_PAYMENT_STATUSES,
@@ -18,7 +26,7 @@ from apps.checkout.services import (
     start_stripe_payment,
 )
 from apps.common.ids import random_id
-from apps.common.numbers import money, to_number
+from apps.common.numbers import money
 from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
@@ -77,31 +85,32 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
     if not isinstance(raw_items, list) or not raw_items:
         return {"error": "Cart is empty", "status": 400}
 
-    ids = [str(x.get("productId") or x.get("id")) for x in raw_items]
-    products_by_id = {p.id: (p.data or {}) for p in _active_products(ids)}
-
-    items = []
-    subtotal = 0.0
-    core_total = 0.0
-    for raw_item in raw_items:
-        product_data = products_by_id.get(str(raw_item.get("productId") or raw_item.get("id")))
-        if not product_data:
-            continue
-        quantity = max(1, int(to_number(raw_item.get("quantity") or raw_item.get("qty"), 1)))
-        unit_price = money(product_data.get("price"))
-        core_charge = money(product_data.get("coreCharge"))
-        subtotal += unit_price * quantity
-        core_total += core_charge * quantity
-        items.append(
-            {
-                "productId": product_data.get("id"),
-                "title": product_data.get("title"),
-                "partNumber": product_data.get("partNumber") or product_data.get("oemPart") or "",
-                "quantity": quantity,
-                "unitPrice": unit_price,
-                "coreCharge": core_charge,
-            }
+    # El precio es siempre el del catálogo, con la misma regla de cantidad
+    # que el checkout: el cliente no fija precios en una solicitud.
+    try:
+        priced = price_lines(raw_items)
+    except InvalidQuantity:
+        return {"error": STOREFRONT_QUANTITY_ERROR, "status": 400}
+    except UnpricedProducts as exc:
+        detail = ", ".join(
+            line.product.get("partNumber") or line.product.get("title") or str(line.product_id)
+            for line in exc.lines
         )
+        return {
+            "error": f"These items have no valid price and cannot be quoted online: {detail}",
+            "status": 409,
+        }
+    items = [
+        {
+            "productId": line.product.get("id"),
+            "title": line.product.get("title"),
+            "partNumber": line.product.get("partNumber") or line.product.get("oemPart") or "",
+            "quantity": line.quantity,
+            "unitPrice": money(line.unit_price),
+            "coreCharge": money(line.core_charge),
+        }
+        for line in priced.lines
+    ]
 
     if not items:
         return {"error": "No valid products", "status": 400}
@@ -114,13 +123,8 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
 
     quote_id = random_id("QID")
     number = next_quote_number()
-    totals = {
-        "subtotal": money(subtotal),
-        "core": money(core_total),
-        "shipping": 0,
-        "tax": 0,
-        "total": money(subtotal + core_total),
-    }
+    # Envío e impuesto los fija el staff al preparar la cotización.
+    totals = serialize_totals(build_totals(priced.subtotal, priced.core))
     memo = "Storefront quote request"
     if cart_id:
         memo += f" • Cart {cart_id}"
@@ -198,12 +202,6 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
         "quoteNumber": number,
         "email": {"staff": staff_result["sent"], "customer": customer_result["sent"]},
     }
-
-
-def _active_products(ids):
-    from apps.catalog.models import Product
-
-    return Product.objects.filter(id__in=ids, active=True)
 
 
 def _link_cart_to_quote(cart_id, quote_id, quote_number, customer):

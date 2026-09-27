@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from django.template.loader import render_to_string
 
+from apps.catalog.services.pricing import PricingError, price_lines
 from apps.common.links import app_url
-from apps.common.numbers import money, to_number
+from apps.common.numbers import money
 from apps.quotes.models import Quote
 from apps.quotes.services.lifecycle import effective_quote_status
 
@@ -46,18 +47,20 @@ def serialize_quote(quote: Quote) -> dict:
 
 
 def _quote_line(item: dict) -> dict:
-    """El total de la línea se calcula aquí: ni el correo ni el SPA recalculan dinero."""
-    qty = to_number(item.get("quantity") or item.get("qty"), 1)
-    has_unit_price = item.get("unitPrice") is not None
-    raw_price = item.get("unitPrice") if has_unit_price else item.get("price")
-    unit_price = money(raw_price)
-    core_charge = money(item.get("coreCharge"))
+    """El total de la línea se calcula aquí, con la regla de `price_lines`: ni
+    el correo ni el SPA recalculan dinero."""
+    try:
+        (line,) = price_lines([item], allow_custom_price=True, max_quantity=None).lines
+    except PricingError:
+        # Una línea guardada antes de validar se muestra sin total en vez de
+        # romper la página pública.
+        return {**item, "lineTotal": None}
     return {
         **item,
-        "quantity": qty,
-        "unitPrice": unit_price,
-        "coreCharge": core_charge,
-        "lineTotal": money((unit_price + core_charge) * qty),
+        "quantity": line.quantity,
+        "unitPrice": money(line.unit_price),
+        "coreCharge": money(line.core_charge),
+        "lineTotal": money(line.line_total + line.core_total),
     }
 
 

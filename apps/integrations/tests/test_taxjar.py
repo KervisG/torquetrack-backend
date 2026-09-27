@@ -78,3 +78,18 @@ def test_network_error_raises_provider_error(settings, monkeypatch):
 
     with pytest.raises(ProviderError):
         taxjar.calculate_tax(**ARGS)
+
+
+def test_decimal_amounts_are_sent_as_json_numbers(settings, monkeypatch):
+    # El dominio calcula en `Decimal`; `requests` no sabe serializarlo.
+    from decimal import Decimal
+
+    settings.TAXJAR_API_KEY = "tj_test_fake"
+    post = RecordingPost(FakeResponse({"tax": {"amount_to_collect": 1, "rate": 0.06}}))
+    monkeypatch.setattr("apps.integrations.tax.taxjar.requests.post", post)
+
+    taxjar.calculate_tax(**{**ARGS, "amount": Decimal("120.50"), "shipping": Decimal("5.00")})
+
+    sent = post.calls[0]["json"]
+    assert sent["amount"] == 120.5 and isinstance(sent["amount"], float)
+    assert sent["shipping"] == 5.0 and isinstance(sent["shipping"], float)

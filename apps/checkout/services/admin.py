@@ -18,6 +18,7 @@ from apps.checkout.services.payments import (
     start_stripe_payment,
 )
 from apps.checkout.services.refunds import order_refund_summary, serialize_refund
+from apps.common.numbers import money, money_decimal
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
 
@@ -68,8 +69,8 @@ def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
         "refunds": [
             serialize_refund(refund, can_view_transaction_ids) for refund in refunds["refunds"]
         ],
-        "amountRefunded": float(refunds["amountRefunded"]),
-        "refundableAmount": float(refunds["refundableAmount"]),
+        "amountRefunded": money(refunds["amountRefunded"]),
+        "refundableAmount": money(refunds["refundableAmount"]),
     }
 
 
@@ -80,7 +81,7 @@ def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict
         "id": payment.pk,
         "provider": payment.provider,
         "status": payment.status,
-        "amount": float(payment.amount),
+        "amount": money(payment.amount),
         "source": data.get("source") or admin_link,
         "createdAt": payment.created_at,
     }
@@ -236,7 +237,7 @@ def create_admin_payment_link(order_id: str) -> dict:
         logger.warning("Stripe payment link for order %s failed: %s", order_id, exc)
         return {"error": STRIPE_REQUEST_FAILED, "status": 502}
 
-    total = float(payment.amount)
+    total = money_decimal(payment.amount)
     order.status = "PENDING_PAYMENT"
     order.updated_at = timezone.now()
     order.save(update_fields=["status", "updated_at"])
@@ -254,7 +255,7 @@ def create_admin_payment_link(order_id: str) -> dict:
                 "<p>Total: ${}</p>",
                 order.number,
                 session["url"],
-                f"{total:.2f}",
+                f"{total}",
             ),
         )
         emailed = sent["sent"]

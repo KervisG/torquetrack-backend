@@ -209,3 +209,29 @@ def test_unknown_state_falls_back_to_zero_rate():
 
     assert response.status_code == 200
     assert response.json()["rate"] == 0
+
+
+@pytest.mark.django_db
+def test_fallback_tax_rounds_half_up_in_decimal():
+    # 9.25 × 0.06 = 0.555 → 0.56; en `float` da 0.55499... y se cobraba 0.55.
+    response = APIClient().post(
+        "/api/tax/estimate/", {"subtotal": 9.25, "state": "FL", "zip": "33701"}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tax"] == 0.56
+    assert response.json()["rate"] == 0.06
+
+
+@pytest.mark.django_db
+def test_calculate_sales_tax_returns_decimal_amounts():
+    from decimal import Decimal
+
+    from apps.tax.services import calculate_sales_tax
+
+    result = calculate_sales_tax(
+        subtotal=Decimal("47.75"), core_charge=0, shipping=0, state="FL", zip_code=""
+    )
+
+    assert result["tax"] == Decimal("2.87")
+    assert result["rate"] == Decimal("0.06")

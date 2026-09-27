@@ -8,6 +8,7 @@ from django.conf import settings
 from django.core.cache import cache
 
 from apps.catalog.models import Product
+from apps.catalog.services.pricing import MAX_STOREFRONT_QUANTITY
 from apps.common.numbers import money, to_number
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.shipping import easypost
@@ -48,7 +49,9 @@ def _norm_rate(rate: dict | None, shipment_id: str) -> dict | None:
 # no trae el dato.
 DEFAULT_BOX = {"length": 12, "width": 10, "height": 6}
 DEFAULT_WEIGHT_LB = 1
-MAX_ITEM_QTY = 99
+# El mismo tope que el checkout; aquí se recorta en vez de rechazar porque
+# solo estima el paquete, y el checkout rechaza la cantidad fuera de rango.
+MAX_ITEM_QTY = MAX_STOREFRONT_QUANTITY
 
 
 def normalize_items(raw_items) -> dict[str, int] | None:

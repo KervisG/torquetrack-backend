@@ -9,6 +9,12 @@ RESTRICTED_PRODUCT_FIELDS = (
     "supplierSku",
     "supplierEmail",
     "supplierPhone",
+    # Proveedor y costo los carga el panel de productos; la tienda no los
+    # muestra y revelarlos expone márgenes y a quién se le compra.
+    "supplier",
+    "supplierPartNumber",
+    "supplierUrl",
+    "cost",
 )
 
 

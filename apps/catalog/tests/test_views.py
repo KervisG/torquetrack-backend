@@ -23,6 +23,10 @@ REAL_PRODUCT_SHAPE = {
     "supplierSku": "DORM-502550",
     "supplierEmail": "sales@dorman-supplier.example",
     "supplierPhone": "555-0100",
+    "supplier": "Dorman / Authorized Distributor",
+    "supplierPartNumber": "DORM-502550-A",
+    "supplierUrl": "https://supplier.example/502-550",
+    "cost": 88.0,
 }
 
 REAL_APPLICATION_SHAPE = {
@@ -44,6 +48,10 @@ RESTRICTED_FIELDS = [
     "supplierSku",
     "supplierEmail",
     "supplierPhone",
+    "supplier",
+    "supplierPartNumber",
+    "supplierUrl",
+    "cost",
 ]
 
 

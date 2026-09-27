@@ -6,11 +6,13 @@ import logging
 from django.db import transaction
 from django.db.models import Prefetch
 from django.utils import timezone
+from django.utils.html import format_html
 
 from apps.audit.services import record_activity
 from apps.checkout.models import Order, Payment, Refund
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
+    CLOSED_ORDER_STATUSES,
     STRIPE_REQUEST_FAILED,
     cancel_pending_payments,
     start_stripe_payment,
@@ -22,8 +24,6 @@ from apps.integrations.exceptions import ProviderError
 logger = logging.getLogger(__name__)
 
 ORDER_STATUSES = ["OPEN", "PENDING_PAYMENT", "PROCESSING", "COMPLETED", "CANCELLED", "REJECTED"]
-# Estados en los que el pedido ya no se va a cobrar ni despachar.
-CLOSED_ORDER_STATUSES = {"CANCELLED", "REJECTED"}
 CORE_STATUSES = [
     "AWAITING CORE", "IN TRANSIT", "RECEIVED", "INSPECTING", "ACCEPTED", "REJECTED", "REFUNDED",
 ]
@@ -247,11 +247,14 @@ def create_admin_payment_link(order_id: str) -> dict:
         sent = resend.send_email(
             to=email,
             subject=f"TorqueTrack payment link for Order {order.number}",
-            html=(
-                f"<h2>Order {order.number}</h2>"
+            html=format_html(
+                "<h2>Order {}</h2>"
                 "<p>Your TorqueTrack order is ready for secure payment.</p>"
-                f'<p><a href="{session["url"]}">Pay securely online</a></p>'
-                f"<p>Total: ${total:.2f}</p>"
+                '<p><a href="{}">Pay securely online</a></p>'
+                "<p>Total: ${}</p>",
+                order.number,
+                session["url"],
+                f"{total:.2f}",
             ),
         )
         emailed = sent["sent"]

@@ -343,3 +343,32 @@ def test_double_conversion_leaves_a_single_order():
     assert second["existing"] is True
     assert second["order"]["number"] == first["order"]["number"]
     assert activity_count(action="QUOTE_CONVERTED", entity_id="quo_admin_1") == 1
+
+
+@pytest.mark.django_db
+def test_send_escapes_customer_data_in_the_email(settings, monkeypatch):
+    # El correo sale de la plantilla de Django: el autoescape es la defensa.
+    settings.RESEND_API_KEY = "re_test_fake"
+    settings.FROM_EMAIL = "sales@torquetrackdiesel.com"
+    _insert_user("usr_send_escape", permissions=["quotes.send"])
+    _make_quote(
+        data={
+            "customer": {
+                "name": "<script>alert(1)</script>",
+                "company": "<b>Acme</b>",
+                "email": "pat@example.com",
+            },
+            "notes": "<b>rush</b>",
+        }
+    )
+    resend = install_resend(monkeypatch)
+    monkeypatch.setattr("apps.quotes.services.admin.render_quote_pdf_base64", lambda quote: "UERG")
+
+    response = _admin_client("usr_send_escape").post("/api/admin/quotes/quo_admin_1/send/")
+
+    assert response.status_code == 200
+    html = resend.sent[0]["html"]
+    assert "<script>alert(1)" not in html
+    assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "<b>Acme</b>" not in html
+    assert "&lt;b&gt;Acme&lt;/b&gt;" in html

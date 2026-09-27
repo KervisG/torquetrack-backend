@@ -14,6 +14,7 @@ from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 from tests.factories import guest_cart_client
+from tests.fakes import install_resend
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
 
@@ -592,3 +593,37 @@ def test_public_checkout_returns_404_for_unknown_token(client):
     response = client.post("/api/quote/public/does-not-exist/checkout/")
 
     assert response.status_code == 404
+
+
+@pytest.mark.django_db
+def test_quote_request_emails_escape_customer_and_product_data(client, settings, monkeypatch):
+    # El nombre, el teléfono y los datos de la pieza llegan al HTML del correo:
+    # sin escapar, un cliente podría inyectar marcado en la bandeja de ventas.
+    settings.RESEND_API_KEY = "re_test_fake"
+    settings.SALES_EMAIL = "sales@example.com"
+    _insert_product(
+        data={**PRODUCT_DATA, "title": "<b>Turbo</b>", "partNumber": "<i>HX35</i>"}
+    )
+    resend = install_resend(monkeypatch)
+
+    response = client.post(
+        "/api/quote/request/",
+        {
+            "customer": {
+                "name": "<script>alert(1)</script>",
+                "email": "jane@example.com",
+                "phone": "<b>555</b>",
+            },
+            "items": [{"productId": PRODUCT_ID, "quantity": 1}],
+        },
+        content_type="application/json",
+    )
+
+    assert response.status_code == 200
+    staff_html, customer_html = resend.sent[0]["html"], resend.sent[1]["html"]
+    for html in (staff_html, customer_html):
+        assert "<script>" not in html
+        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+    assert "&lt;b&gt;555&lt;/b&gt;" in staff_html
+    assert "&lt;b&gt;Turbo&lt;/b&gt;" in staff_html
+    assert "&lt;i&gt;HX35&lt;/i&gt;" in staff_html

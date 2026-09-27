@@ -6,6 +6,8 @@ import logging
 from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
+from django.utils.html import format_html, format_html_join
+from django.utils.safestring import mark_safe
 
 from apps.checkout.models import Order
 from apps.checkout.services import (
@@ -151,17 +153,27 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
     sales_email = settings.SALES_EMAIL
     staff_result = {"sent": False}
     if sales_email:
-        items_html = "<br>".join(
-            f"{i['quantity']} × {i['title']} ({i['partNumber']})" for i in items
+        # Todo dato del cliente o de la pieza pasa por `format_html`: el
+        # formulario es público y el correo se abre en la bandeja de ventas.
+        items_html = format_html_join(
+            mark_safe("<br>"),
+            "{} × {} ({})",
+            ((i["quantity"], i["title"], i["partNumber"]) for i in items),
         )
         staff_result = resend.send_email(
             to=sales_email,
             subject=f"New TorqueTrack Quote Request {number}",
-            html=(
-                f"<h2>New Quote Request {number}</h2>"
-                f"<p><b>{name}</b><br>{email or 'No email'}<br>{phone or 'No phone'}</p>"
-                f"<p>{items_html}</p>"
-                f"<p>Total before tax/shipping: ${totals['total']:.2f}</p>"
+            html=format_html(
+                "<h2>New Quote Request {}</h2>"
+                "<p><b>{}</b><br>{}<br>{}</p>"
+                "<p>{}</p>"
+                "<p>Total before tax/shipping: ${}</p>",
+                number,
+                name,
+                email or "No email",
+                phone or "No phone",
+                items_html,
+                f"{totals['total']:.2f}",
             ),
         )
 
@@ -170,11 +182,13 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
         customer_result = resend.send_email(
             to=email,
             subject=f"TorqueTrack received your quote request {number}",
-            html=(
+            html=format_html(
                 "<h2>We received your quote request</h2>"
-                f"<p>Thank you {name}. Your reference is <b>{number}</b>. A "
+                "<p>Thank you {}. Your reference is <b>{}</b>. A "
                 "TorqueTrack representative will contact you to confirm "
-                "fitment, pricing, shipping and tax.</p>"
+                "fitment, pricing, shipping and tax.</p>",
+                name,
+                number,
             ),
         )
 

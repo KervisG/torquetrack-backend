@@ -611,3 +611,26 @@ def test_delete_reads_the_order_with_a_row_lock():
 
     assert response.status_code == 200
     assert _order_locked(queries.captured_queries)
+
+
+@pytest.mark.django_db
+def test_payment_link_email_escapes_the_order_number_and_the_session_url(monkeypatch, settings):
+    settings.RESEND_API_KEY = "re_test_fake"
+    _insert_user("usr_link_escape", permissions=["payments.take"])
+    _make_order(
+        number="<b>O1</b>",
+        data={"customer": {"email": "buyer@example.com"}, "totals": {"total": 10.0}},
+    )
+    client = _admin_client("usr_link_escape")
+    monkeypatch.setattr(
+        CREATE_SESSION,
+        lambda **kwargs: _fake_session(url='https://checkout.stripe.com/pay?a=1&b="x"'),
+    )
+    resend = install_resend(monkeypatch)
+
+    response = client.post("/api/admin/orders/ord_1/payment-link/")
+
+    assert response.status_code == 200
+    html = resend.sent[0]["html"]
+    assert "&lt;b&gt;O1&lt;/b&gt;" in html
+    assert 'href="https://checkout.stripe.com/pay?a=1&amp;b=&quot;x&quot;"' in html

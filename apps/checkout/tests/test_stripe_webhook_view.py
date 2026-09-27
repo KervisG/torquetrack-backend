@@ -483,3 +483,28 @@ def test_amount_mismatch_is_logged_and_the_order_is_not_marked_paid(monkeypatch)
     assert Payment.objects.get(pk="pay_amount_1").status == "PENDING"
     assert activity_count(entity_id="ord_amount_1", action="PAYMENT_PAID") == 0
     assert activity_count(entity_id="ord_amount_1", action="PAYMENT_AMOUNT_MISMATCH") == 1
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("closed_status", ["CANCELLED", "REJECTED"])
+def test_payment_on_a_closed_order_is_recorded_without_reopening_it(
+    monkeypatch, caplog, closed_status
+):
+    # El cliente pagó una sesión que quedó abierta después de cerrar el
+    # pedido: el dinero entró, así que el pago queda cobrado para que el
+    # staff lo reembolse, pero el pedido no vuelve a OPEN.
+    _no_card_details(monkeypatch)
+    _insert_order("ord_closed_1", "O10030", closed_status, "UNPAID", {"totals": {"core": 50}})
+    _insert_payment("pay_closed_1", "ord_closed_1", "CANCELLED", {"sessionId": "cs_closed_1"})
+
+    response = _post_event(_checkout_completed_event("ord_closed_1", session_id="cs_closed_1"))
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk="ord_closed_1")
+    assert order.status == closed_status
+    assert order.payment_status == "PAID"
+    assert "coreCase" not in order.data
+    assert Payment.objects.get(pk="pay_closed_1").status == "PAID"
+    assert activity_count(entity_id="ord_closed_1", action="PAYMENT_PAID") == 0
+    assert activity_count(entity_id="ord_closed_1", action="PAYMENT_ON_CLOSED_ORDER") == 1
+    assert "ord_closed_1" in caplog.text

@@ -10,6 +10,7 @@ from apps.audit.services import record_activity
 from apps.checkout.models import Payment
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
+    CLOSED_ORDER_STATUSES,
     cancel_pending_payment,
     get_stripe_payment_method,
     lock_order_and_payment,
@@ -47,7 +48,9 @@ def reconcile_paid_session(session_obj: dict) -> None:
     sesiones pendientes del pedido. Es idempotente: un reenvío del mismo
     evento, o dos eventos de éxito concurrentes, registran una sola vez. Si
     el pedido ya estaba pagado por otra sesión, el cobro igual existe en
-    Stripe: el pago queda PAID y la bitácora lo marca para reembolso.
+    Stripe: el pago queda PAID y la bitácora lo marca para reembolso. Lo
+    mismo con un pedido cancelado o rechazado, que además conserva su estado
+    (`PAYMENT_ON_CLOSED_ORDER`).
     """
     if session_obj.get("payment_status") != "paid":
         # Un medio asíncrono completa la sesión antes de cobrar; el cobro se
@@ -125,6 +128,9 @@ def reconcile_paid_session(session_obj: dict) -> None:
             )
             return
 
+        # Un pedido cancelado o rechazado no se reabre: el cobro queda
+        # registrado para que el staff lo reembolse.
+        closed = order.status in CLOSED_ORDER_STATUSES
         order_data = order.data or {}
         paid_patch = {
             "payment": {
@@ -136,14 +142,15 @@ def reconcile_paid_session(session_obj: dict) -> None:
             }
         }
         core_amount = money((order_data.get("totals") or {}).get("core"))
-        if core_amount > 0 and not order_data.get("coreCase"):
+        if core_amount > 0 and not order_data.get("coreCase") and not closed:
             paid_patch["coreCase"] = {
                 "status": "AWAITING CORE",
                 "amount": core_amount,
                 "createdAt": now.isoformat(),
                 "createdBy": "stripe",
             }
-        order.status = "OPEN"
+        if not closed:
+            order.status = "OPEN"
         order.payment_status = "PAID"
         order.updated_at = now
         order.data = {**order_data, **paid_patch}
@@ -155,6 +162,24 @@ def reconcile_paid_session(session_obj: dict) -> None:
         )
         for other in superseded:
             cancel_pending_payment(other, "SUPERSEDED", data={"supersededBy": session_id})
+
+        if closed:
+            logger.warning(
+                "Stripe session %s paid %s cents on %s order %s (payment %s); refund required",
+                session_id,
+                session_obj.get("amount_total"),
+                order.status,
+                order.pk,
+                payment.pk,
+            )
+            record_activity(
+                actor="stripe",
+                action="PAYMENT_ON_CLOSED_ORDER",
+                entity_type="ORDER",
+                entity_id=order.pk,
+                data={**activity, "paymentId": payment.pk, "orderStatus": order.status},
+            )
+            return
 
         record_activity(
             actor="stripe",

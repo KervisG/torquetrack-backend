@@ -2,7 +2,6 @@
 `payments` (Stripe), `storefront` (checkout público), `webhooks`
 (conciliación), `refunds` (reembolsos) y `admin` (pedidos del panel)."""
 from apps.checkout.services.admin import (
-    CLOSED_ORDER_STATUSES,
     CORE_STATUSES,
     ORDER_STATUSES,
     RETURN_STATUSES,
@@ -14,6 +13,7 @@ from apps.checkout.services.admin import (
 )
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
+    CLOSED_ORDER_STATUSES,
     STRIPE_REQUEST_FAILED,
     cancel_pending_payment,
     cancel_pending_payments,

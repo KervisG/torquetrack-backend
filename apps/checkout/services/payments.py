@@ -22,6 +22,9 @@ logger = logging.getLogger(__name__)
 # cobró. Un reembolso no convierte el cobro en "no pagado": el pedido no se
 # vuelve a cobrar ni el webhook lo marca PAID otra vez.
 CHARGED_PAYMENT_STATUSES = ("PAID", "PARTIALLY_REFUNDED", "REFUNDED")
+# Estados en los que el pedido ya no se va a cobrar ni despachar. Vive aquí
+# porque lo usan el panel y el webhook, y `webhooks` no importa `admin`.
+CLOSED_ORDER_STATUSES = {"CANCELLED", "REJECTED"}
 # El staff sabe que falló Stripe (link de pago, cobro, reembolso), pero el
 # texto del proveedor queda en el log.
 STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."

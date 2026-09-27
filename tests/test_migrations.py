@@ -18,6 +18,7 @@ DOMAIN_TABLES = {
     "quotes",
     "orders",
     "payments",
+    "refunds",
     "activity_logs",
     "document_sequences",
 }

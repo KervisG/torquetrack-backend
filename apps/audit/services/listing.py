@@ -6,7 +6,7 @@ from apps.audit.models import ActivityLog
 
 # Ids de Stripe que escriben los pagos en `data`. Verlos exige lo mismo que en
 # el detalle del pedido (`payments.transaction_id`), no solo `activity.view`.
-PAYMENT_ID_KEYS = frozenset({"sessionId", "paymentIntent"})
+PAYMENT_ID_KEYS = frozenset({"sessionId", "paymentIntent", "stripeRefundId"})
 
 
 def _without_keys(value, keys: frozenset[str]):

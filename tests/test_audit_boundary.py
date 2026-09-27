@@ -73,5 +73,6 @@ def test_the_boundary_check_sees_the_real_callers():
 
     assert "apps/checkout/services/webhooks.py" in callers
     assert "apps/checkout/services/admin.py" in callers
+    assert "apps/checkout/services/refunds.py" in callers
     assert "apps/quotes/services/admin.py" in callers
     assert "apps/authorization/services/users.py" in callers

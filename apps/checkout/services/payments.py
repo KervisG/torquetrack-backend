@@ -18,6 +18,14 @@ from apps.integrations.payments import stripe as stripe_payments
 
 logger = logging.getLogger(__name__)
 
+# Estados de un pago (y de `order.payment_status`) en los que Stripe ya
+# cobró. Un reembolso no convierte el cobro en "no pagado": el pedido no se
+# vuelve a cobrar ni el webhook lo marca PAID otra vez.
+CHARGED_PAYMENT_STATUSES = ("PAID", "PARTIALLY_REFUNDED", "REFUNDED")
+# El staff sabe que falló Stripe (link de pago, cobro, reembolso), pero el
+# texto del proveedor queda en el log.
+STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."
+
 
 def _line(name: str, unit_price: float, qty: int) -> dict:
     return {"name": name, "unit_amount": int(money_decimal(unit_price) * 100), "quantity": qty}
@@ -86,6 +94,14 @@ def start_stripe_payment(order: Order, *, data: dict | None = None) -> tuple[Pay
         for other in previous:
             cancel_pending_payment(other, "REPLACED", data={"replacedBy": session["id"]})
     return payment, session
+
+
+def lock_order_and_payment(payment: Payment) -> tuple[Order | None, Payment]:
+    """Bloquea primero el pedido y después el pago, siempre en ese orden
+    (webhook, reembolsos), y relee el pago ya bloqueado para ver lo que otro
+    evento acaba de confirmar."""
+    order = Order.objects.select_for_update().filter(pk=payment.order_id).first()
+    return order, Payment.objects.select_for_update().get(pk=payment.pk)
 
 
 def cancel_pending_payment(payment: Payment, reason: str, *, data: dict | None = None) -> None:

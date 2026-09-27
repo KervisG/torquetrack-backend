@@ -8,6 +8,9 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 APPS_DIR = BACKEND_DIR / "apps"
 INTEGRATIONS_DIR = APPS_DIR / "integrations"
 OWNER = APPS_DIR / "checkout" / "services" / "payments.py"
+# Único dueño de los reembolsos: pide el reembolso a Stripe y crea las filas
+# `Refund`, también las que llegan por webhook desde el dashboard.
+REFUNDS_OWNER = APPS_DIR / "checkout" / "services" / "refunds.py"
 
 
 def _domain_modules():
@@ -78,3 +81,18 @@ def test_pending_payments_are_cancelled_only_through_cancel_pending_payment():
 
     assert offenders == []
     assert "stripe_payments.expire_checkout_session" in set(_attribute_calls(OWNER))
+
+
+def test_only_checkout_refunds_creates_stripe_refunds_or_refund_rows():
+    offenders = []
+    for path in _domain_modules():
+        if path == REFUNDS_OWNER:
+            continue
+        for call in _attribute_calls(path):
+            if call.endswith(".create_refund") or call == "Refund.objects.create":
+                offenders.append(f"{path.relative_to(BACKEND_DIR).as_posix()}: {call}")
+
+    assert offenders == []
+    calls = set(_attribute_calls(REFUNDS_OWNER))
+    assert "stripe_payments.create_refund" in calls
+    assert "Refund.objects.create" in calls

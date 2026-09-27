@@ -23,6 +23,15 @@ def test_payment_ids_are_dropped_at_any_depth_by_default():
 
 
 @pytest.mark.django_db
+def test_stripe_refund_ids_are_dropped_by_default():
+    _log({"refundId": "RFD1", "stripeRefundId": "re_1", "amount": 10.0})
+
+    data, _ = list_activity_page()
+
+    assert data["items"][0]["data"] == {"refundId": "RFD1", "amount": 10.0}
+
+
+@pytest.mark.django_db
 def test_payment_ids_are_kept_when_the_viewer_may_see_them():
     _log({"sessionId": "cs_1", "paymentIntent": "pi_1"})
 

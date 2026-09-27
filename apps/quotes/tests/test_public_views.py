@@ -439,7 +439,9 @@ def _forbid_stripe(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_public_checkout_refuses_a_quote_that_is_already_paid(client, monkeypatch):
+# Un reembolso no vuelve a abrir el cobro: el pedido sigue cobrado.
+@pytest.mark.parametrize("payment_status", ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"])
+def test_public_checkout_refuses_a_quote_that_is_already_paid(client, monkeypatch, payment_status):
     token = "tok_" + "p" * 48
     quote = _make_quote(
         quote_id="quo_paid_1",
@@ -448,7 +450,7 @@ def test_public_checkout_refuses_a_quote_that_is_already_paid(client, monkeypatc
         status="CONVERTED",
         data={"orderNumber": "O20001"},
     )
-    _insert_quote_order(quote, "OID_PAID", "O20001", payment_status="PAID", status="OPEN")
+    _insert_quote_order(quote, "OID_PAID", "O20001", payment_status=payment_status, status="OPEN")
     _forbid_stripe(monkeypatch)
 
     response = client.post(f"/api/quote/public/{token}/checkout/")

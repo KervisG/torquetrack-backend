@@ -14,6 +14,7 @@ from apps.checkout.services import (
     delete_admin_order,
     list_admin_orders,
     patch_admin_order,
+    refund_order,
     take_admin_payment,
 )
 
@@ -89,3 +90,18 @@ class AdminOrderTakePaymentView(APIView):
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))
         return Response(result)
+
+
+class AdminOrderRefundsView(APIView):
+    permission_classes = [HasRolePermission]
+    required_permission = "payments.refund"
+
+    def post(self, request, order_id):
+        body = request.data if isinstance(request.data, dict) else {}
+        data, status = refund_order(
+            order_id,
+            body,
+            request.user.email,
+            can_view_transaction_ids=has_role_permission(request.user, "payments.transaction_id"),
+        )
+        return Response(data, status=status)

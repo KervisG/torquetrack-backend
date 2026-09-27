@@ -9,6 +9,7 @@ from django.utils import timezone
 
 from apps.checkout.models import Order
 from apps.checkout.services import (
+    CHARGED_PAYMENT_STATUSES,
     PAYMENT_START_FAILED,
     cancel_unpaid_order,
     next_order_number,
@@ -252,7 +253,7 @@ def is_quote_payable(quote: Quote) -> bool:
     if _checkout_refusal(quote) is not None:
         return False
     return not Order.objects.filter(
-        data__quoteNumber=quote.number, payment_status="PAID"
+        data__quoteNumber=quote.number, payment_status__in=CHARGED_PAYMENT_STATUSES
     ).exists()
 
 
@@ -279,7 +280,8 @@ def checkout_from_quote(quote: Quote) -> dict:
             .filter(data__quoteNumber=quote.number)
             .order_by("-created_at")
         )
-        if any(order.payment_status == "PAID" for order in orders):
+        # Un pedido reembolsado sigue cobrado: la cotización no se vuelve a pagar.
+        if any(order.payment_status in CHARGED_PAYMENT_STATUSES for order in orders):
             return {"error": "This quote has already been paid", "status": 409}
 
         data = quote.data or {}

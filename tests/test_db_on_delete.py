@@ -11,7 +11,7 @@ import pytest
 from django.db import connection
 
 from apps.authentication.models import AccountToken
-from apps.checkout.models import Order, Payment
+from apps.checkout.models import Order, Payment, Refund
 from apps.customers.models import Customer
 from apps.quotes.models import Quote
 from tests.factories import create_customer, create_user
@@ -21,6 +21,7 @@ EXPECTED_ON_DELETE = {
     ("orders", "customer_id"): "n",
     ("quotes", "customer_id"): "n",
     ("payments", "order_id"): "n",
+    ("refunds", "payment_id"): "c",
     ("customers", "user_id"): "n",
     ("account_tokens", "user_id"): "c",
     # `admin.LogEntry` del `AUTH_USER_MODEL` (`authentication/0003_db_on_delete`).
@@ -82,6 +83,16 @@ def test_raw_delete_of_an_order_keeps_its_payments():
 
     payment.refresh_from_db()
     assert payment.order_id is None
+
+
+@pytest.mark.django_db
+def test_raw_delete_of_a_payment_drops_its_refunds():
+    payment = Payment.objects.create(id="PAY1", provider="stripe", status="PAID")
+    Refund.objects.create(id="RFD1", payment=payment, amount=10, created_by="stripe")
+
+    _raw_delete("payments", payment.id)
+
+    assert not Refund.objects.filter(pk="RFD1").exists()
 
 
 @pytest.mark.django_db

@@ -7,8 +7,14 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.checkout.models import Order, Payment
-from apps.checkout.services.payments import cancel_pending_payment, get_stripe_payment_method
+from apps.checkout.models import Payment
+from apps.checkout.services.payments import (
+    CHARGED_PAYMENT_STATUSES,
+    cancel_pending_payment,
+    get_stripe_payment_method,
+    lock_order_and_payment,
+)
+from apps.checkout.services.refunds import sync_stripe_refund
 from apps.common.numbers import money, money_decimal
 
 logger = logging.getLogger(__name__)
@@ -34,14 +40,6 @@ def _session_payment(session_obj: dict) -> Payment | None:
     return payment
 
 
-def _locked_order_and_payment(payment: Payment) -> tuple[Order | None, Payment]:
-    """Bloquea primero el pedido y después el pago, siempre en ese orden, y
-    relee el pago ya bloqueado para ver lo que otro evento acaba de
-    confirmar."""
-    order = Order.objects.select_for_update().filter(pk=payment.order_id).first()
-    return order, Payment.objects.select_for_update().get(pk=payment.pk)
-
-
 def reconcile_paid_session(session_obj: dict) -> None:
     """`checkout.session.completed` / `async_payment_succeeded`.
 
@@ -56,7 +54,8 @@ def reconcile_paid_session(session_obj: dict) -> None:
         # confirma con `async_payment_succeeded`, que vuelve a pasar por aquí.
         return
     payment = _session_payment(session_obj)
-    if payment is None or payment.status == "PAID":
+    # Un pago reembolsado sigue cobrado: un reenvío del evento no lo repaga.
+    if payment is None or payment.status in CHARGED_PAYMENT_STATUSES:
         return
 
     # Fuera del bloqueo: es una llamada de red y es solo decorativa.
@@ -65,8 +64,8 @@ def reconcile_paid_session(session_obj: dict) -> None:
     now = timezone.now()
 
     with transaction.atomic():
-        order, payment = _locked_order_and_payment(payment)
-        if order is None or payment.status == "PAID":
+        order, payment = lock_order_and_payment(payment)
+        if order is None or payment.status in CHARGED_PAYMENT_STATUSES:
             return
 
         expected_cents = int(money_decimal(payment.amount) * 100)
@@ -116,7 +115,7 @@ def reconcile_paid_session(session_obj: dict) -> None:
             "brand": method.get("brand"),
             "last4": method.get("last4"),
         }
-        if order.payment_status == "PAID":
+        if order.payment_status in CHARGED_PAYMENT_STATUSES:
             record_activity(
                 actor="stripe",
                 action="DUPLICATE_PAYMENT_RECEIVED",
@@ -175,13 +174,53 @@ def reconcile_failed_session(session_obj: dict) -> None:
 
     now = timezone.now()
     with transaction.atomic():
-        order, payment = _locked_order_and_payment(payment)
+        order, payment = lock_order_and_payment(payment)
         if payment.status != "PENDING":
             return
         payment.status = "FAILED"
         payment.updated_at = now
         payment.save(update_fields=["status", "updated_at"])
-        if order is not None and order.payment_status not in ("PAID", "FAILED"):
+        if order is not None and order.payment_status not in (*CHARGED_PAYMENT_STATUSES, "FAILED"):
             order.payment_status = "FAILED"
             order.updated_at = now
             order.save(update_fields=["payment_status", "updated_at"])
+
+
+def _refund_payment(payment_intent) -> Payment | None:
+    """`Payment` cobrado del PaymentIntent, o `None` si no es nuestro."""
+    payment = (
+        Payment.objects.filter(provider="stripe", data__payment_intent=payment_intent)
+        .order_by("created_at")
+        .first()
+        if payment_intent
+        else None
+    )
+    if payment is None or payment.order_id is None:
+        # Se responde 200 igual: reintentar no va a hacer aparecer el pago.
+        logger.warning("Stripe refund for payment intent %s matches no payment", payment_intent)
+        return None
+    return payment
+
+
+def reconcile_stripe_refund(refund_obj: dict, payment_intent=None) -> None:
+    """`refund.created`, `refund.updated` y `refund.failed`: crea o actualiza
+    la fila `Refund` (idempotente por `stripe_refund_id`) y recalcula el
+    estado del pago y del pedido, con el mismo bloqueo pedido → pago que el
+    cobro."""
+    payment = _refund_payment(refund_obj.get("payment_intent") or payment_intent)
+    if payment is None:
+        return
+    with transaction.atomic():
+        order, payment = lock_order_and_payment(payment)
+        if order is None:
+            return
+        sync_stripe_refund(order, payment, refund_obj)
+
+
+def reconcile_refunded_charge(charge_obj: dict) -> None:
+    """`charge.refunded`: sincroniza los reembolsos que trae el cargo. Desde
+    la API 2022-11-15 la lista `refunds` no viene en el evento; en ese caso
+    no hay nada que hacer y sincronizan los eventos `refund.*`."""
+    refunds = (charge_obj.get("refunds") or {}).get("data") or []
+    for refund_obj in refunds:
+        reconcile_stripe_refund(refund_obj, payment_intent=charge_obj.get("payment_intent"))

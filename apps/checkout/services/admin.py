@@ -8,15 +8,18 @@ from django.db.models import Prefetch
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.checkout.models import Order, Payment
-from apps.checkout.services.payments import cancel_pending_payments, start_stripe_payment
+from apps.checkout.models import Order, Payment, Refund
+from apps.checkout.services.payments import (
+    CHARGED_PAYMENT_STATUSES,
+    STRIPE_REQUEST_FAILED,
+    cancel_pending_payments,
+    start_stripe_payment,
+)
+from apps.checkout.services.refunds import order_refund_summary, serialize_refund
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
 
 logger = logging.getLogger(__name__)
-
-# El staff sabe que falló Stripe, pero el texto del proveedor queda en el log.
-STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."
 
 ORDER_STATUSES = ["OPEN", "PENDING_PAYMENT", "PROCESSING", "COMPLETED", "CANCELLED", "REJECTED"]
 # Estados en los que el pedido ya no se va a cobrar ni despachar.
@@ -44,6 +47,8 @@ def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
     else:
         customer = data.get("customer")
 
+    payments = list(order.payments.all())
+    refunds = order_refund_summary(order, payments)
     extra = {}
     if isinstance(data.get("payment"), dict) and not can_view_transaction_ids:
         extra["payment"] = {k: v for k, v in data["payment"].items() if k != "paymentIntent"}
@@ -58,9 +63,13 @@ def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
         "createdAt": order.created_at,
         "customer": customer,
         "payments": [
-            _serialize_payment(payment, can_view_transaction_ids)
-            for payment in order.payments.all()
+            _serialize_payment(payment, can_view_transaction_ids) for payment in payments
         ],
+        "refunds": [
+            serialize_refund(refund, can_view_transaction_ids) for refund in refunds["refunds"]
+        ],
+        "amountRefunded": float(refunds["amountRefunded"]),
+        "refundableAmount": float(refunds["refundableAmount"]),
     }
 
 
@@ -84,7 +93,14 @@ def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict
 def list_admin_orders(can_view_transaction_ids: bool = False) -> list[dict]:
     orders = (
         Order.objects.select_related("customer")
-        .prefetch_related(Prefetch("payments", queryset=Payment.objects.order_by("created_at")))
+        .prefetch_related(
+            Prefetch(
+                "payments",
+                queryset=Payment.objects.order_by("created_at").prefetch_related(
+                    Prefetch("refunds", queryset=Refund.objects.order_by("created_at"))
+                ),
+            )
+        )
         .order_by("created_at")
     )
     return [_serialize_order(order, can_view_transaction_ids) for order in orders]
@@ -207,7 +223,7 @@ def create_admin_payment_link(order_id: str) -> dict:
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
-    if order.payment_status == "PAID":
+    if order.payment_status in CHARGED_PAYMENT_STATUSES:
         return {"error": "Order is already paid", "status": 409}
     if order.status in CLOSED_ORDER_STATUSES:
         return {"error": "Closed orders cannot be paid", "status": 409}
@@ -249,7 +265,7 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
     order = Order.objects.filter(pk=order_id).first()
     if order is None:
         return {"error": "Order not found", "status": 404}
-    if order.payment_status == "PAID":
+    if order.payment_status in CHARGED_PAYMENT_STATUSES:
         return {"error": "Order is already paid", "status": 409}
     if order.status in CLOSED_ORDER_STATUSES:
         return {"error": "Closed orders cannot be paid", "status": 409}

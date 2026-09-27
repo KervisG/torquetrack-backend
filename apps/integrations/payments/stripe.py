@@ -118,6 +118,26 @@ def retrieve_payment_method(payment_intent_id: str) -> dict:
     }
 
 
+def create_refund(*, payment_intent, amount_cents, idempotency_key, metadata) -> dict:
+    """Devuelve `{"id", "status", "amount"}` con el `status` crudo de Stripe
+    (`pending`, `requires_action`, `succeeded`, `failed`, `canceled`).
+
+    La `idempotency_key` hace que reintentar la misma llamada devuelva el
+    mismo reembolso en vez de crear otro."""
+    api_key = _secret_key()
+    try:
+        refund = stripe.Refund.create(
+            api_key=api_key,
+            payment_intent=payment_intent,
+            amount=amount_cents,
+            idempotency_key=idempotency_key,
+            metadata=metadata,
+        )
+    except stripe.StripeError as exc:
+        raise ProviderError(str(exc) or "Stripe request failed") from exc
+    return {"id": refund["id"], "status": refund["status"], "amount": refund["amount"]}
+
+
 def construct_webhook_event(payload: bytes, signature_header: str) -> dict:
     """Sin firma válida no se parsea nada."""
     secret = settings.STRIPE_WEBHOOK_SECRET

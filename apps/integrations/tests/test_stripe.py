@@ -285,6 +285,70 @@ def test_payment_method_stripe_error_maps_to_provider_error(settings, monkeypatc
         stripe.retrieve_payment_method("pi_missing")
 
 
+# --- create_refund -----------------------------------------------------------
+
+REFUND_ARGS = {
+    "payment_intent": "pi_test_1",
+    "amount_cents": 2500,
+    "idempotency_key": "RFD0123456789AB",
+    "metadata": {"refund_id": "RFD0123456789AB", "order_id": "OID1"},
+}
+
+
+def test_refund_not_configured_never_calls_stripe(settings, monkeypatch):
+    settings.STRIPE_SECRET_KEY = ""
+
+    def _boom(**kwargs):
+        raise AssertionError("Stripe must not be called without a key")
+
+    monkeypatch.setattr("stripe.Refund.create", _boom)
+
+    with pytest.raises(ProviderNotConfigured):
+        stripe.create_refund(**REFUND_ARGS)
+
+
+def test_refund_passes_the_idempotency_key_and_returns_a_plain_dict(settings, monkeypatch):
+    settings.STRIPE_SECRET_KEY = SECRET_KEY
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "re_test_1",
+            "object": "refund",
+            "status": "succeeded",
+            "amount": 2500,
+            "payment_intent": "pi_test_1",
+            "balance_transaction": "txn_1",
+        }
+
+    monkeypatch.setattr("stripe.Refund.create", _create)
+
+    result = stripe.create_refund(**REFUND_ARGS)
+
+    assert result == {"id": "re_test_1", "status": "succeeded", "amount": 2500}
+    assert type(result) is dict
+    assert captured == {
+        "api_key": SECRET_KEY,
+        "payment_intent": "pi_test_1",
+        "amount": 2500,
+        "idempotency_key": "RFD0123456789AB",
+        "metadata": {"refund_id": "RFD0123456789AB", "order_id": "OID1"},
+    }
+
+
+def test_refund_stripe_error_maps_to_provider_error(settings, monkeypatch):
+    settings.STRIPE_SECRET_KEY = SECRET_KEY
+
+    def _raise(**kwargs):
+        raise stripe_sdk.InvalidRequestError("Charge has already been refunded", param="amount")
+
+    monkeypatch.setattr("stripe.Refund.create", _raise)
+
+    with pytest.raises(ProviderError, match="already been refunded"):
+        stripe.create_refund(**REFUND_ARGS)
+
+
 # --- construct_webhook_event ------------------------------------------------
 
 

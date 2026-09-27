@@ -5,6 +5,14 @@ from django.utils import timezone
 from apps.checkout.models.payment import Payment
 
 
+class RefundStatus(models.TextChoices):
+    # `CANCELED` con una sola L, como lo escribe Stripe; `Payment` usa `CANCELLED`.
+    PENDING = "PENDING"
+    SUCCEEDED = "SUCCEEDED"
+    FAILED = "FAILED"
+    CANCELED = "CANCELED"
+
+
 class Refund(models.Model):
     """Un reembolso de un `Payment` de Stripe, pedido desde el panel o hecho
     en el dashboard de Stripe y sincronizado por webhook.
@@ -13,15 +21,12 @@ class Refund(models.Model):
     `idempotency_key`: un reintento de la misma operación no reembolsa dos
     veces. `stripe_refund_id` queda vacío hasta que Stripe responde."""
 
-    PENDING = "PENDING"
-    SUCCEEDED = "SUCCEEDED"
-    FAILED = "FAILED"
-    CANCELED = "CANCELED"
-
     id = models.TextField(primary_key=True)
     payment = models.ForeignKey(Payment, on_delete=models.CASCADE, related_name="refunds")
     amount = models.DecimalField(max_digits=12, decimal_places=2)
-    status = models.TextField(default=PENDING, db_default=PENDING)
+    status = models.TextField(
+        choices=RefundStatus, default=RefundStatus.PENDING, db_default=RefundStatus.PENDING
+    )
     reason = models.TextField(blank=True, default="", db_default="")
     stripe_refund_id = models.TextField(unique=True, null=True, blank=True)
     # Email del staff o `"stripe"` para los que llegan del dashboard, igual

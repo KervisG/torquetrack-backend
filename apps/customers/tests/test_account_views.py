@@ -160,6 +160,30 @@ def test_orders_returns_only_the_customers_own_orders():
 
 
 @pytest.mark.django_db
+def test_orders_include_the_shipment_and_tracking_link():
+    client = _account()
+    order = _order("O_SHIPPED", "TT-3", "C_PAT")
+    order.fulfillment_status = "SHIPPED"
+    order.carrier = "FEDEX"
+    order.tracking_number = "123456789012"
+    order.shipped_at = timezone.now()
+    order.save()
+    _order("O_NEW", "TT-4", "C_PAT")
+
+    body = {row["id"]: row for row in client.get("/api/account/orders/").json()}
+
+    shipped = body["O_SHIPPED"]
+    assert shipped["fulfillmentStatus"] == "SHIPPED"
+    assert shipped["carrier"] == "FEDEX"
+    assert shipped["trackingNumber"] == "123456789012"
+    assert shipped["trackingUrl"] == "https://www.fedex.com/fedextrack/?trknbr=123456789012"
+    assert shipped["shippedAt"]
+    assert shipped["deliveredAt"] is None
+    assert body["O_NEW"]["fulfillmentStatus"] == "UNFULFILLED"
+    assert body["O_NEW"]["trackingUrl"] is None
+
+
+@pytest.mark.django_db
 def test_quotes_returns_only_the_customers_own_quotes():
     client = _account()
     create_customer("C_OTHER", email="other@example.com")

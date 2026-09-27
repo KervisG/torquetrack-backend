@@ -98,7 +98,14 @@ def _staff_client():
 def _panel_quote(client, items):
     return client.post(
         "/api/admin/quotes/",
-        {"customer": {"name": "Fleet Co"}, "items": items, "shipping": 0, "tax": 0},
+        {
+            "customer": {"name": "Fleet Co"},
+            "items": items,
+            "shipping": 0,
+            # Oregón no tiene impuesto de venta (no está en la tabla de
+            # respaldo): el total de la cotización queda sin impuesto.
+            "shippingAddress": {"state": "OR", "zip": "97201"},
+        },
         format="json",
     )
 

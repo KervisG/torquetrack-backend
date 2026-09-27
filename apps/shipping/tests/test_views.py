@@ -128,6 +128,19 @@ def test_builds_parcel_from_the_items(settings, monkeypatch):
 
 
 @pytest.mark.django_db
+def test_ships_from_the_configured_zip(settings, monkeypatch):
+    # El respaldo `34241` vive solo en settings: el service usa lo que haya.
+    settings.EASYPOST_API_KEY = "ep_test_fake"
+    settings.SHIP_FROM_ZIP = "33602"
+    _insert_product()
+    captured = _fake_easypost(monkeypatch)
+
+    _post_rates({"to": {"zip": "30301"}, "items": _items((PRODUCT_ID, 1))})
+
+    assert captured["from_address"] == {"zip": "33602", "country": "US"}
+
+
+@pytest.mark.django_db
 def test_ignores_a_parcel_sent_by_the_client(settings, monkeypatch):
     settings.EASYPOST_API_KEY = "ep_test_fake"
     _insert_product(data={"shippingWeight": 25})

@@ -2,6 +2,7 @@
 plantilla HTML que comparten la página pública, el correo y el PDF."""
 from __future__ import annotations
 
+from django.conf import settings
 from django.template.loader import render_to_string
 
 from apps.catalog.services.pricing import PricingError, price_lines
@@ -64,6 +65,17 @@ def _quote_line(item: dict) -> dict:
     }
 
 
+def _company_contact() -> dict:
+    """Datos de contacto del pie, desde settings: la cotización no fija un
+    dominio ni una dirección. Sin `SALES_EMAIL` el pie omite el correo."""
+    site = str(settings.APP_URL or "").split("://", 1)[-1].rstrip("/")
+    return {
+        "company_email": settings.SALES_EMAIL,
+        "company_address": settings.COMPANY_ADDRESS,
+        "company_site": site,
+    }
+
+
 def render_quote_html(
     quote: dict,
     *,
@@ -90,5 +102,6 @@ def render_quote_html(
             "pdf_url": pdf_url or (f"{public_url}/pdf" if public_url else "#"),
             "print_mode": print_mode,
             "greeting_name": greeting_name,
+            **_company_contact(),
         },
     )

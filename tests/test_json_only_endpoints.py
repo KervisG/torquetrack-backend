@@ -23,7 +23,6 @@ JSON_ONLY_PATHS = [
     "/api/password-reset/confirm/",
     "/api/checkout/",
     "/api/quote/request/",
-    "/api/cart/sync/",
 ]
 FORM_BODY = {"email": "pat@example.com", "password": "Diesel-Torque-2026!", "token": "x"}
 
@@ -59,7 +58,23 @@ def test_form_encoded_post_is_rejected_with_415(path, format_name):
         )
 
     assert response.status_code == 415
-    assert "Unsupported media type" in response.json()["detail"]
+    assert "Unsupported media type" in response.json()["error"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("format_name", ["multipart", None])
+def test_form_encoded_cart_put_is_rejected_with_415(format_name):
+    # El carrito invitado se escribe con `PUT /api/cart/`, sin CSRF.
+    client = APIClient()
+    if format_name == "multipart":
+        response = client.put("/api/cart/", FORM_BODY, format="multipart")
+    else:
+        response = client.put(
+            "/api/cart/", "items=1", content_type="application/x-www-form-urlencoded"
+        )
+
+    assert response.status_code == 415
+    assert "Unsupported media type" in response.json()["error"]
 
 
 @pytest.mark.django_db

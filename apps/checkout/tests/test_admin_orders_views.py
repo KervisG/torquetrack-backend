@@ -74,6 +74,40 @@ def test_list_returns_orders_with_expected_shape():
 
 
 @pytest.mark.django_db
+def test_list_includes_the_fulfillment_fields():
+    """El envío va en columnas propias de `Order`, separado de `status`; el
+    enlace de seguimiento lo arma el backend según el transportista."""
+    _insert_user("usr_list_fulfillment", permissions=["orders.view"])
+    shipped_at = timezone.now()
+    _make_order(
+        payment_status="PAID",
+        fulfillment_status="SHIPPED",
+        carrier="USPS",
+        tracking_number="9400111899223100000000",
+        shipped_at=shipped_at,
+    )
+    _make_order(order_id="ord_2", number="O20002")
+    client = _admin_client("usr_list_fulfillment")
+
+    body = client.get("/api/admin/orders/").json()
+
+    shipped, pending = body
+    assert shipped["fulfillmentStatus"] == "SHIPPED"
+    assert shipped["carrier"] == "USPS"
+    assert shipped["trackingNumber"] == "9400111899223100000000"
+    assert shipped["trackingUrl"] == (
+        "https://tools.usps.com/go/TrackConfirmAction?tLabels=9400111899223100000000"
+    )
+    assert shipped["shippedAt"]
+    assert shipped["deliveredAt"] is None
+    assert pending["fulfillmentStatus"] == "UNFULFILLED"
+    assert pending["carrier"] == ""
+    assert pending["trackingNumber"] == ""
+    assert pending["trackingUrl"] is None
+    assert pending["shippedAt"] is None
+
+
+@pytest.mark.django_db
 def test_list_includes_payments_without_the_provider_transaction_id():
     """El detalle del pedido en el panel muestra sus pagos. El id de Stripe
     queda fuera: verlo es `payments.transaction_id`, no `orders.view`."""
@@ -215,6 +249,34 @@ def test_patch_status_updates_and_logs_activity():
     order = Order.objects.get(pk="ord_1")
     assert order.status == "PROCESSING"
     assert activity_count(action="ORDER_STATUS_CHANGED", entity_id="ord_1") >= 1
+
+
+@pytest.mark.django_db
+def test_patch_status_rejects_a_jump():
+    """`OPEN` no salta a `COMPLETED`: hay que pasar por `PROCESSING`."""
+    _insert_user("usr_patch_jump", permissions=["orders.status"])
+    _make_order()
+    client = _admin_client("usr_patch_jump")
+
+    response = client.patch("/api/admin/orders/ord_1/", {"status": "COMPLETED"}, format="json")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Cannot move order from OPEN to COMPLETED"}
+    assert Order.objects.get(pk="ord_1").status == "OPEN"
+    assert activity_count(action="ORDER_STATUS_CHANGED", entity_id="ord_1") == 0
+
+
+@pytest.mark.django_db
+def test_patch_status_rejects_a_move_out_of_a_terminal_status():
+    _insert_user("usr_patch_done", permissions=["orders.status", "orders.cancel"])
+    _make_order(status="COMPLETED")
+    client = _admin_client("usr_patch_done")
+
+    response = client.patch("/api/admin/orders/ord_1/", {"status": "CANCELLED"}, format="json")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Cannot move order from COMPLETED to CANCELLED"}
+    assert Order.objects.get(pk="ord_1").status == "COMPLETED"
 
 
 @pytest.mark.django_db

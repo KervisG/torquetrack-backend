@@ -2,8 +2,6 @@
 clientes, así cualquier app puede registrar actividad sin crear ciclos."""
 from __future__ import annotations
 
-from django.utils import timezone
-
 from apps.audit.models import ActivityLog
 
 
@@ -22,5 +20,4 @@ def record_activity(
         entity_type=entity_type,
         entity_id=entity_id,
         data=data or {},
-        created_at=timezone.now(),
     )

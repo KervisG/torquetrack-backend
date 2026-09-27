@@ -1,4 +1,4 @@
-"""Todo lo configurable sale de variables de entorno; `env.example` las lista."""
+"""Todo lo configurable sale de variables de entorno; `.env.example` las lista."""
 from pathlib import Path
 
 import environ
@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     "apps.tax",
     "apps.vin",
     "apps.integrations",
+    "apps.health",
 ]
 
 MIDDLEWARE = [
@@ -126,6 +127,14 @@ REST_FRAMEWORK = {
     "DEFAULT_AUTHENTICATION_CLASSES": [
         "rest_framework.authentication.SessionAuthentication",
     ],
+    # Cerrado por defecto: una view que olvide declarar permisos queda solo
+    # para staff. Igual toda view declara `permission_classes` explícito
+    # (`AllowAny` las públicas); `tests/test_view_permissions.py` lo exige.
+    "DEFAULT_PERMISSION_CLASSES": [
+        "apps.authorization.permissions.HasRolePermission",
+    ],
+    # Un solo formato de error: `{"error": ...}` también para los que arma DRF.
+    "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
     "DEFAULT_THROTTLE_RATES": {
@@ -151,6 +160,19 @@ SPECTACULAR_SETTINGS = {
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_AUTHENTICATION": ["rest_framework.authentication.SessionAuthentication"],
     "SERVE_PERMISSIONS": ["apps.authorization.permissions.HasRolePermission"],
+    # Varios campos se llaman `status` con conjuntos distintos. Sin esto
+    # spectacular les pone un nombre con hash (`Status6b4Enum`) o reutiliza
+    # `FulfillmentStatusEnum` para dos conjuntos.
+    "ENUM_NAME_OVERRIDES": {
+        "OrderStatusEnum": "apps.checkout.models.order.OrderStatus",
+        "OrderPaymentStatusEnum": "apps.checkout.models.order.OrderPaymentStatus",
+        "FulfillmentStatusEnum": "apps.checkout.models.order.FulfillmentStatus",
+        "PaymentStatusEnum": "apps.checkout.models.payment.PaymentStatus",
+        "RefundStatusEnum": "apps.checkout.models.refund.RefundStatus",
+        "QuoteStatusEnum": "apps.quotes.models.quote.QuoteStatus",
+        "CartStatusEnum": "apps.cart.models.cart.CartStatus",
+        "TaxStatusEnum": "apps.customers.models.customer.TaxStatus",
+    },
 }
 
 # Key de `request.META` con la IP real del cliente. Solo es confiable si el
@@ -161,10 +183,40 @@ CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
-SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="")
+# Origen de los envíos (EasyPost) y del impuesto (TaxJar). Un valor vacío
+# cuenta como no definido, igual que `CACHE_URL`.
+SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="") or "34241"
 APP_URL = env("APP_URL", default="http://localhost:5173")
 EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
 FROM_EMAIL = env("FROM_EMAIL", default="")
 SALES_EMAIL = env("SALES_EMAIL", default="")
 REPLY_TO_EMAIL = env("REPLY_TO_EMAIL", default="")
+# Dirección que muestran la cotización y su PDF junto a `SALES_EMAIL` y
+# `APP_URL`.
+COMPANY_ADDRESS = env("COMPANY_ADDRESS", default="") or "Sarasota, FL"
+
+# Todo sale por consola (el hosting recoge stdout/stderr). El formato no lleva
+# datos del request: lo que se loguea son mensajes propios, que nunca incluyen
+# tokens, contraseñas ni datos personales. Los loggers `apps.*` no tienen
+# handler propio y propagan al root, así `LOG_LEVEL` los gobierna a todos.
+LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "plain": {"format": "%(asctime)s %(levelname)s %(name)s %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "plain"},
+    },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "loggers": {
+        # Sin los handlers por defecto de Django (consola solo con DEBUG y
+        # `mail_admins`): todo va al root, sin duplicar líneas.
+        "django": {"handlers": [], "level": "INFO", "propagate": True},
+        # 4xx y 5xx de las views; con INFO no aporta nada más.
+        "django.request": {"handlers": [], "level": "WARNING", "propagate": True},
+        "apps": {"handlers": [], "propagate": True},
+    },
+}

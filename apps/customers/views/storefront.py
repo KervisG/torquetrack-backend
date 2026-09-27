@@ -22,14 +22,11 @@ from apps.customers.services import (
     update_account,
     verify_customer_email,
 )
+from config.responses import service_response
 
 
 def _body(request) -> dict:
     return request.data if isinstance(request.data, dict) else {}
-
-
-def _error(result: dict) -> Response:
-    return Response({"error": result["error"]}, status=result.get("status", 400))
 
 
 def _signed_in(request, user: User) -> Response:
@@ -54,10 +51,8 @@ class RegisterView(APIView):
     throttle_classes = [RegisterRateThrottle]
 
     def post(self, request):
-        result = register_customer(_body(request))
-        if "error" in result:
-            return _error(result)
-        return _signed_in(request, result["user"])
+        # Sin `login()`: la respuesta es la misma exista o no la cuenta.
+        return service_response(register_customer(_body(request)), success_status=201)
 
 
 class VerifyEmailView(APIView):
@@ -70,10 +65,7 @@ class VerifyEmailView(APIView):
     throttle_classes = [VerifyEmailRateThrottle]
 
     def post(self, request):
-        result = verify_customer_email(_body(request))
-        if "error" in result:
-            return _error(result)
-        return Response(result)
+        return service_response(verify_customer_email(_body(request)))
 
 
 class _AccountView(APIView):
@@ -105,10 +97,7 @@ class AccountView(_AccountView):
         denied = self._denied(request)
         if denied is not None:
             return denied
-        result = update_account(self.customer, _body(request))
-        if "error" in result:
-            return _error(result)
-        return Response(result)
+        return service_response(update_account(self.customer, _body(request)))
 
 
 class AccountOrdersView(_AccountView):
@@ -132,10 +121,7 @@ class AccountTaxExemptionView(_AccountView):
         denied = self._denied(request)
         if denied is not None:
             return denied
-        result = submit_tax_exemption(self.customer, _body(request))
-        if "error" in result:
-            return _error(result)
-        return Response(result)
+        return service_response(submit_tax_exemption(self.customer, _body(request)))
 
 
 class ActivateAccountView(APIView):
@@ -147,5 +133,5 @@ class ActivateAccountView(APIView):
     def post(self, request):
         result = activate_customer_account(_body(request))
         if "error" in result:
-            return _error(result)
+            return service_response(result)
         return _signed_in(request, result["user"])

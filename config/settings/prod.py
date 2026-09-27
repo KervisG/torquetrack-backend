@@ -63,3 +63,28 @@ SESSION_COOKIE_PATH = "/"
 CSRF_COOKIE_PATH = "/"
 SESSION_COOKIE_DOMAIN = None
 CSRF_COOKIE_DOMAIN = None
+
+# HTTPS obligatorio. `SECURE_SSL_REDIRECT` responde 301 a todo request en
+# claro, salvo el health check: muchos hostings lo pingan por HTTP dentro de su
+# red y un 301 lo daría por caído.
+SECURE_SSL_REDIRECT = env.bool("SECURE_SSL_REDIRECT", default=True)  # noqa: F405
+SECURE_REDIRECT_EXEMPT = [r"^api/health/$"]
+# Un año de HSTS por defecto. El preload es opt-in: salir de la lista de los
+# navegadores tarda meses.
+SECURE_HSTS_SECONDS = env.int("SECURE_HSTS_SECONDS", default=31536000)  # noqa: F405
+SECURE_HSTS_INCLUDE_SUBDOMAINS = env.bool(  # noqa: F405
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS", default=True
+)
+SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)  # noqa: F405
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SECURE_REFERRER_POLICY = "same-origin"
+
+# Detrás de un proxy que termina TLS (Cloudflare, el balanceador del hosting)
+# Django ve HTTP y, con el redirect activo, entraría en un bucle de 301. Solo
+# se activa si el proxy SIEMPRE escribe `X-Forwarded-Proto` y el origen no es
+# alcanzable sin pasar por él; si no, cualquiera podría mandar el header.
+SECURE_PROXY_SSL_HEADER = (
+    ("HTTP_X_FORWARDED_PROTO", "https")
+    if env.bool("USE_X_FORWARDED_PROTO", default=False)  # noqa: F405
+    else None
+)

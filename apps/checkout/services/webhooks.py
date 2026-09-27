@@ -7,11 +7,18 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.checkout.models import Payment
+from apps.checkout.models import (
+    CoreStatus,
+    OrderPaymentStatus,
+    OrderStatus,
+    Payment,
+    PaymentStatus,
+)
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
     CLOSED_ORDER_STATUSES,
     cancel_pending_payment,
+    cancel_unpaid_order,
     get_stripe_payment_method,
     lock_order_and_payment,
 )
@@ -98,7 +105,8 @@ def reconcile_paid_session(session_obj: dict) -> None:
             return
 
         customer_details = session_obj.get("customer_details") or {}
-        payment.status = "PAID"
+        payment.status = PaymentStatus.PAID
+        payment.paid_at = now
         payment.updated_at = now
         payment.data = {
             **(payment.data or {}),
@@ -109,7 +117,7 @@ def reconcile_paid_session(session_obj: dict) -> None:
             "last4": method.get("last4"),
             "funding": method.get("funding"),
         }
-        payment.save(update_fields=["status", "updated_at", "data"])
+        payment.save(update_fields=["status", "paid_at", "updated_at", "data"])
 
         activity = {
             "sessionId": session_id,
@@ -144,21 +152,21 @@ def reconcile_paid_session(session_obj: dict) -> None:
         core_amount = money((order_data.get("totals") or {}).get("core"))
         if core_amount > 0 and not order_data.get("coreCase") and not closed:
             paid_patch["coreCase"] = {
-                "status": "AWAITING CORE",
+                "status": CoreStatus.AWAITING_CORE,
                 "amount": core_amount,
                 "createdAt": now.isoformat(),
                 "createdBy": "stripe",
             }
         if not closed:
-            order.status = "OPEN"
-        order.payment_status = "PAID"
+            order.status = OrderStatus.OPEN
+        order.payment_status = OrderPaymentStatus.PAID
         order.updated_at = now
         order.data = {**order_data, **paid_patch}
         order.save(update_fields=["status", "payment_status", "updated_at", "data"])
 
         # Las otras sesiones abiertas del pedido ya no deben cobrarse.
         superseded = Payment.objects.select_for_update().filter(
-            order=order, provider="stripe", status="PENDING"
+            order=order, provider="stripe", status=PaymentStatus.PENDING
         )
         for other in superseded:
             cancel_pending_payment(other, "SUPERSEDED", data={"supersededBy": session_id})
@@ -200,15 +208,61 @@ def reconcile_failed_session(session_obj: dict) -> None:
     now = timezone.now()
     with transaction.atomic():
         order, payment = lock_order_and_payment(payment)
-        if payment.status != "PENDING":
+        if payment.status != PaymentStatus.PENDING:
             return
-        payment.status = "FAILED"
+        payment.status = PaymentStatus.FAILED
         payment.updated_at = now
         payment.save(update_fields=["status", "updated_at"])
-        if order is not None and order.payment_status not in (*CHARGED_PAYMENT_STATUSES, "FAILED"):
-            order.payment_status = "FAILED"
+        if order is not None and order.payment_status not in (
+            *CHARGED_PAYMENT_STATUSES,
+            OrderPaymentStatus.FAILED,
+        ):
+            order.payment_status = OrderPaymentStatus.FAILED
             order.updated_at = now
             order.save(update_fields=["payment_status", "updated_at"])
+
+
+def reconcile_expired_session(session_obj: dict) -> None:
+    """`checkout.session.expired`: Stripe cerró una sesión que nadie pagó.
+
+    El `Payment` PENDING de esa sesión pasa a CANCELLED (`SESSION_EXPIRED`)
+    sin llamar a Stripe: la sesión ya está vencida. El pedido se cancela
+    (`PAYMENT_EXPIRED`, bitácora `ORDER_EXPIRED`) con `cancel_unpaid_order`,
+    la misma regla que usa el resto del checkout, solo si sigue
+    `PENDING_PAYMENT`, sin cobrar y sin otra sesión pendiente: un pedido
+    pagado, uno del panel (`OPEN`) o uno con un link más nuevo no se toca.
+    Idempotente: un reenvío encuentra el pago ya cancelado y no hace nada.
+    Con el pedido cancelado, una cotización vuelve a poder pagarse porque
+    `checkout_from_quote` ignora los pedidos `CANCELLED`.
+    """
+    payment = _session_payment(session_obj)
+    if payment is None:
+        return
+
+    with transaction.atomic():
+        order, payment = lock_order_and_payment(payment)
+        if payment.status != PaymentStatus.PENDING:
+            return
+        payment.status = PaymentStatus.CANCELLED
+        payment.updated_at = timezone.now()
+        payment.data = {**(payment.data or {}), "cancelReason": "SESSION_EXPIRED"}
+        payment.save(update_fields=["status", "updated_at", "data"])
+
+        if order is None or order.status != OrderStatus.PENDING_PAYMENT:
+            return
+        if order.payment_status in CHARGED_PAYMENT_STATUSES:
+            return
+        if Payment.objects.filter(order=order, status=PaymentStatus.PENDING).exists():
+            return
+        cancel_unpaid_order(order, "PAYMENT_EXPIRED")
+
+    record_activity(
+        actor="stripe",
+        action="ORDER_EXPIRED",
+        entity_type="ORDER",
+        entity_id=order.pk,
+        data={"sessionId": session_obj.get("id"), "paymentId": payment.pk},
+    )
 
 
 def _refund_payment(payment_intent) -> Payment | None:

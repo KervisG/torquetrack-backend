@@ -142,7 +142,7 @@ def get_shipping_rates(payload: dict) -> tuple[dict, int]:
     try:
         shipment = easypost.get_rates(
             to_address=to_address,
-            from_address={"zip": settings.SHIP_FROM_ZIP or "34241", "country": "US"},
+            from_address={"zip": settings.SHIP_FROM_ZIP, "country": "US"},
             parcel=parcel,
         )
     except ProviderError as exc:

@@ -21,13 +21,16 @@ from drf_spectacular.generators import SchemaGenerator
 
 # Ruta -> métodos documentados. Son todas las rutas de `apps/authorization/urls.py`.
 AUTHORIZATION_OPERATIONS = {
-    "/api/admin/roles/": ["get"],
+    "/api/admin/roles/": ["get", "post"],
+    "/api/admin/roles/{slug}/": ["put"],
     "/api/admin/users/": ["get"],
     "/api/admin/users/{user_id}/": ["put", "delete"],
 }
 # Operaciones que leen un body JSON.
 OPERATIONS_WITH_BODY = {
     ("/api/admin/users/{user_id}/", "put"),
+    ("/api/admin/roles/", "post"),
+    ("/api/admin/roles/{slug}/", "put"),
 }
 AUTHORIZATION_MESSAGE = re.compile(
     r"apps[\\/.]authorization|"

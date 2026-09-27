@@ -1,12 +1,19 @@
 """`GET /api/admin/dashboard/` con `dashboard.view`. Los contadores de carritos
-salen de la misma clasificación que `GET /api/admin/carts/`."""
+salen de la misma clasificación que `GET /api/admin/carts/`. Sin proveedores
+que mockear.
+
+`salesToday` son las ventas netas del día (UTC): subtotal + core + envío de
+los pedidos con un pago cobrado HOY (`Payment.paid_at`, no el `created_at` del
+pedido), sin impuesto, menos los reembolsos `SUCCEEDED` emitidos hoy.
+"""
+from decimal import Decimal
 
 import pytest
 from django.contrib.auth.models import Permission
 from django.utils import timezone
 
 from apps.cart.models import Cart
-from apps.checkout.models import Order
+from apps.checkout.models import Order, Payment, Refund
 from apps.quotes.models import Quote
 from tests.factories import create_staff_user, session_client
 
@@ -18,11 +25,40 @@ def _admin_client(user_id, permissions):
 
 
 def _insert_order(order_id, number, data, payment_status="UNPAID", created_at=None):
-    Order.objects.create(
+    return Order.objects.create(
         id=order_id,
         number=number,
         payment_status=payment_status,
         data=data,
+        created_at=created_at or timezone.now(),
+    )
+
+
+def _paid_order(order_id, totals, *, paid_at=None, created_at=None, status="PAID"):
+    """Pedido con su `Payment` cobrado en `paid_at` (ahora por defecto)."""
+    order = _insert_order(
+        order_id, f"N-{order_id}", {"totals": totals}, payment_status=status,
+        created_at=created_at,
+    )
+    payment = Payment.objects.create(
+        id=f"PAY_{order_id}",
+        order=order,
+        provider="stripe",
+        provider_id=f"cs_{order_id}",
+        status=status,
+        amount=Decimal(str(totals.get("total") or 0)),
+        paid_at=paid_at or timezone.now(),
+    )
+    return order, payment
+
+
+def _refund(refund_id, payment, amount, status="SUCCEEDED", created_at=None):
+    Refund.objects.create(
+        id=refund_id,
+        payment=payment,
+        amount=Decimal(amount),
+        status=status,
+        created_by="staff@example.com",
         created_at=created_at or timezone.now(),
     )
 
@@ -49,7 +85,7 @@ def test_dashboard_returns_403_without_permission():
 
 @pytest.mark.django_db
 def test_dashboard_returns_aggregate_counts():
-    _insert_order("OID_1", "O10001", {"totals": {"total": 100.0}}, payment_status="PAID")
+    _paid_order("OID_1", {"subtotal": 100.0, "total": 100.0})
     _insert_order("OID_2", "O10002", {"totals": {"total": 50.0}}, payment_status="UNPAID")
     _insert_cart("cart_active", timezone.now())
     _insert_cart("cart_abandoned", timezone.now() - timezone.timedelta(minutes=45))
@@ -102,25 +138,73 @@ def test_dashboard_does_not_count_quotes_past_their_expiry_date():
     assert counts["buildingQuotes"] == 0
 
 
-@pytest.mark.django_db
-def test_dashboard_sales_today_sums_exact_cents_and_skips_other_days():
-    _insert_order("OID_A", "O10001", {"totals": {"total": 10.10}}, payment_status="PAID")
-    _insert_order("OID_B", "O10002", {"totals": {"total": 20.20}}, payment_status="PAID")
-    _insert_order("OID_C", "O10003", {"totals": {}}, payment_status="PAID")
-    _insert_order(
-        "OID_OLD",
-        "O10004",
-        {"totals": {"total": 999.0}},
-        payment_status="PAID",
-        created_at=timezone.now() - timezone.timedelta(days=2),
-    )
+def _sales_today():
     client = _admin_client("usr_dash_sales", ["dashboard.view"])
-
     response = client.get("/api/admin/dashboard/")
-
     assert response.status_code == 200
-    # La suma se hace como numeric: sin error de coma flotante.
-    assert response.json()["counts"]["salesToday"] == 30.3
+    return response.json()["counts"]["salesToday"]
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_sums_exact_cents_without_tax():
+    _paid_order("OID_A", {"subtotal": 10.10, "core": 0, "shipping": 0, "tax": 0.61, "total": 10.71})
+    _paid_order("OID_B", {"subtotal": 15.00, "core": 5.00, "shipping": 0.20, "tax": 9.99})
+    _paid_order("OID_C", {})
+
+    # La suma se hace como numeric: sin error de coma flotante, y sin impuesto.
+    assert _sales_today() == 30.3
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_counts_by_payment_date_not_order_date():
+    yesterday = timezone.now() - timezone.timedelta(days=1)
+    _paid_order("OID_OLD_ORDER", {"subtotal": 40.0}, created_at=yesterday)
+    _paid_order("OID_PAID_BEFORE", {"subtotal": 999.0}, paid_at=yesterday)
+
+    assert _sales_today() == 40.0
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_skips_orders_without_a_charged_payment():
+    totals = {"subtotal": 70.0, "total": 70.0}
+    _insert_order("OID_UNPAID", "O1", {"totals": totals}, payment_status="PAID")
+    order = _insert_order("OID_PENDING", "O2", {"totals": {"subtotal": 80.0}})
+    Payment.objects.create(
+        id="PAY_PENDING", order=order, provider="stripe", status="PENDING", amount=Decimal("80")
+    )
+
+    assert _sales_today() == 0.0
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_is_net_of_refunds_that_succeeded_today():
+    _, payment = _paid_order("OID_R", {"subtotal": 100.0, "shipping": 10.0})
+    _refund("REF_OK", payment, "25.50")
+    _refund("REF_PENDING", payment, "10.00", status="PENDING")
+    _refund("REF_FAILED", payment, "10.00", status="FAILED")
+
+    assert _sales_today() == 84.5
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_subtracts_today_refunds_of_older_payments():
+    yesterday = timezone.now() - timezone.timedelta(days=1)
+    _, old_payment = _paid_order(
+        "OID_OLD", {"subtotal": 50.0}, paid_at=yesterday, status="PARTIALLY_REFUNDED"
+    )
+    _, payment = _paid_order("OID_NEW", {"subtotal": 30.0})
+    _refund("REF_TODAY", old_payment, "20.00")
+    _refund("REF_YESTERDAY", payment, "5.00", created_at=yesterday)
+
+    assert _sales_today() == 10.0
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_counts_refunded_payments_as_charged():
+    _, payment = _paid_order("OID_FULL", {"subtotal": 60.0}, status="REFUNDED")
+    _refund("REF_FULL", payment, "60.00")
+
+    assert _sales_today() == 0.0
 
 
 @pytest.mark.django_db

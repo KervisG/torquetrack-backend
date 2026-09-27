@@ -1,11 +1,15 @@
+import copy
 import importlib
 import logging
+import logging.config
+import re
 import sys
 
 import pytest
 from django.conf import settings
 from django.core.cache import cache
 from django.core.exceptions import ImproperlyConfigured
+from django.test import override_settings
 from rest_framework.test import APIClient
 
 from tests.factories import DEFAULT_PASSWORD, create_user
@@ -38,13 +42,20 @@ def test_installed_apps_include_drf_and_every_domain_app():
     assert EXPECTED_APPS.issubset(set(settings.INSTALLED_APPS))
 
 
+HTTPS_ENV = (
+    "SECURE_SSL_REDIRECT",
+    "SECURE_HSTS_SECONDS",
+    "SECURE_HSTS_INCLUDE_SUBDOMAINS",
+    "SECURE_HSTS_PRELOAD",
+    "USE_X_FORWARDED_PROTO",
+)
 VALID_SECRET_KEY = "k7#Qz!v2Lp9@Xr4$Wm8^Tn3&Hs6*Jd1(Fb5)Gc0-Ye_Ua+Io=Pe"
 
 
 def _load_prod(monkeypatch, **environ):
     """`prod.py` valida el entorno al importarse, así que cada test lo recarga
     en vez de reusar el módulo cacheado."""
-    for name in ("DJANGO_SECRET_KEY", "RESEND_API_KEY", "FROM_EMAIL", "APP_URL"):
+    for name in ("DJANGO_SECRET_KEY", "RESEND_API_KEY", "FROM_EMAIL", "APP_URL", *HTTPS_ENV):
         monkeypatch.delenv(name, raising=False)
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
@@ -197,7 +208,7 @@ def test_app_url_defaults_to_the_vite_spa(monkeypatch, restore_base_settings):
 
 
 def test_empty_cache_url_falls_back_to_the_database_cache(monkeypatch, restore_base_settings):
-    # `env.example` deja `CACHE_URL=` vacío; copiarlo a `.env` no puede
+    # `.env.example` deja `CACHE_URL=` vacío; copiarlo a `.env` no puede
     # romper el arranque.
     base = _load_base(monkeypatch, CACHE_URL="")
 
@@ -208,3 +219,136 @@ def test_active_settings_use_the_database_cache():
     assert settings.CACHES["default"]["BACKEND"] == (
         "django.core.cache.backends.db.DatabaseCache"
     )
+
+
+# --- HTTPS en producción -------------------------------------------------------
+
+
+def test_prod_forces_https_with_safe_defaults(prod):
+    assert prod.SECURE_SSL_REDIRECT is True
+    assert prod.SECURE_HSTS_SECONDS == 31536000
+    assert prod.SECURE_HSTS_INCLUDE_SUBDOMAINS is True
+    # El preload es difícil de revertir (listas de los navegadores): opt-in.
+    assert prod.SECURE_HSTS_PRELOAD is False
+    assert prod.SECURE_CONTENT_TYPE_NOSNIFF is True
+    assert prod.SECURE_REFERRER_POLICY == "same-origin"
+
+
+def test_prod_trusts_x_forwarded_proto_only_when_enabled(monkeypatch):
+    # Sin proxy delante, cualquiera podría mandar el header y hacerse pasar
+    # por HTTPS; por eso es opt-in.
+    default = _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY)
+    assert default.SECURE_PROXY_SSL_HEADER is None
+
+    behind_proxy = _load_prod(
+        monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY, USE_X_FORWARDED_PROTO="true"
+    )
+    assert behind_proxy.SECURE_PROXY_SSL_HEADER == ("HTTP_X_FORWARDED_PROTO", "https")
+
+
+def test_prod_https_settings_can_be_tuned_from_the_environment(monkeypatch):
+    prod = _load_prod(
+        monkeypatch,
+        DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+        SECURE_SSL_REDIRECT="false",
+        SECURE_HSTS_SECONDS="3600",
+        SECURE_HSTS_INCLUDE_SUBDOMAINS="false",
+        SECURE_HSTS_PRELOAD="true",
+    )
+
+    assert prod.SECURE_SSL_REDIRECT is False
+    assert prod.SECURE_HSTS_SECONDS == 3600
+    assert prod.SECURE_HSTS_INCLUDE_SUBDOMAINS is False
+    assert prod.SECURE_HSTS_PRELOAD is True
+
+
+def test_prod_exempts_only_the_health_check_from_the_https_redirect(prod):
+    exempt = [re.compile(pattern) for pattern in prod.SECURE_REDIRECT_EXEMPT]
+
+    assert any(pattern.search("api/health/") for pattern in exempt)
+    assert not any(pattern.search("api/login/") for pattern in exempt)
+    assert not any(pattern.search("api/health/extra/") for pattern in exempt)
+
+
+@pytest.mark.django_db
+def test_health_check_answers_plain_http_under_the_prod_redirect(prod):
+    with override_settings(
+        SECURE_SSL_REDIRECT=True, SECURE_REDIRECT_EXEMPT=prod.SECURE_REDIRECT_EXEMPT
+    ):
+        health = APIClient().get("/api/health/")
+        other = APIClient().get("/api/products/")
+
+    assert health.status_code == 200
+    assert other.status_code == 301
+    assert other["Location"].startswith("https://")
+
+
+# --- logging -----------------------------------------------------------------
+
+
+def test_logging_defaults_to_info_on_the_console(monkeypatch, restore_base_settings):
+    base = _load_base(monkeypatch)
+
+    assert base.LOGGING["root"] == {"handlers": ["console"], "level": "INFO"}
+    assert base.LOGGING["handlers"]["console"]["class"] == "logging.StreamHandler"
+    assert base.LOGGING["formatters"]["plain"]["format"] == (
+        "%(asctime)s %(levelname)s %(name)s %(message)s"
+    )
+    assert base.LOGGING["loggers"]["django.request"]["level"] == "WARNING"
+    assert base.LOGGING["disable_existing_loggers"] is False
+
+
+def test_logging_level_comes_from_log_level(monkeypatch, restore_base_settings):
+    base = _load_base(monkeypatch, LOG_LEVEL="debug")
+
+    assert base.LOGGING["root"]["level"] == "DEBUG"
+
+
+def test_logging_config_loads_and_app_loggers_reach_the_root(
+    monkeypatch, restore_base_settings
+):
+    base = _load_base(monkeypatch, LOG_LEVEL="WARNING")
+    root = logging.getLogger()
+    previous_level, previous_handlers = root.level, root.handlers[:]
+    try:
+        logging.config.dictConfig(copy.deepcopy(base.LOGGING))
+        app_logger = logging.getLogger("apps.checkout.services.payments")
+
+        assert root.level == logging.WARNING
+        assert app_logger.propagate is True
+        assert app_logger.handlers == []
+        assert app_logger.getEffectiveLevel() == logging.WARNING
+    finally:
+        logging.config.dictConfig(copy.deepcopy(settings.LOGGING))
+        root.setLevel(previous_level)
+        root.handlers[:] = previous_handlers
+
+
+# --- datos de la empresa y origen de los envíos ---------------------------------
+
+
+def test_company_address_and_ship_from_zip_have_defaults(monkeypatch, restore_base_settings):
+    monkeypatch.delenv("COMPANY_ADDRESS", raising=False)
+    monkeypatch.delenv("SHIP_FROM_ZIP", raising=False)
+    base = _load_base(monkeypatch)
+
+    assert base.COMPANY_ADDRESS == "Sarasota, FL"
+    assert base.SHIP_FROM_ZIP == "34241"
+
+
+def test_empty_company_address_and_ship_from_zip_fall_back(monkeypatch, restore_base_settings):
+    # Copiar `.env.example` con la variable vacía no puede dejar el origen de
+    # los envíos o el pie de la cotización en blanco.
+    base = _load_base(monkeypatch, COMPANY_ADDRESS="", SHIP_FROM_ZIP="")
+
+    assert base.COMPANY_ADDRESS == "Sarasota, FL"
+    assert base.SHIP_FROM_ZIP == "34241"
+
+
+def test_company_address_and_ship_from_zip_come_from_the_environment(
+    monkeypatch, restore_base_settings
+):
+    base = _load_base(monkeypatch, COMPANY_ADDRESS="Tampa, FL", SHIP_FROM_ZIP="33602")
+
+    assert base.COMPANY_ADDRESS == "Tampa, FL"
+    assert base.SHIP_FROM_ZIP == "33602"

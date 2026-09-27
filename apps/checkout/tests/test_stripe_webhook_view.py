@@ -157,6 +157,9 @@ def test_valid_signature_marks_order_paid_and_reconciles_payment(monkeypatch):
     assert payment.status == "PAID"
     assert payment.provider_id == "cs_test_1"
     assert payment.data["customer_email"] == "buyer@example.com"
+    # La fecha de cobro es la del dashboard ("ventas de hoy").
+    assert payment.paid_at is not None
+    assert payment.paid_at.isoformat() == order.data["payment"]["paidAt"]
 
     assert activity_count(entity_id="ord_paid_1", action="PAYMENT_PAID") == 1
 

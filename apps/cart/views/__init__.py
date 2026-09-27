@@ -1,4 +1,4 @@
 from apps.cart.views.admin import AdminCartsView
-from apps.cart.views.storefront import CartSyncView
+from apps.cart.views.storefront import CartView
 
-__all__ = ["AdminCartsView", "CartSyncView"]
+__all__ = ["AdminCartsView", "CartView"]

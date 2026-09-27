@@ -44,3 +44,16 @@ def test_reads_sent_quote_with_expiry():
     assert quote.status == "SENT"
     assert quote.customer_id is None
     assert quote.expires_at is not None
+
+
+def test_quotes_are_valid_for_thirty_days_from_a_single_constant():
+    # Storefront, panel y reapertura usan `quote_expires_at`: la vigencia se
+    # cambia en un solo lugar.
+    from datetime import UTC, datetime, timedelta
+
+    from apps.quotes.services.lifecycle import QUOTE_VALIDITY_DAYS, quote_expires_at
+
+    start = datetime(2026, 9, 1, 12, 0, tzinfo=UTC)
+
+    assert QUOTE_VALIDITY_DAYS == 30
+    assert quote_expires_at(start) == start + timedelta(days=30)

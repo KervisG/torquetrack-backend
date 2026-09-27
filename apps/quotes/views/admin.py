@@ -4,16 +4,18 @@ from rest_framework.views import APIView
 from apps.authorization.permissions import HasRolePermission, has_role_permission
 from apps.quotes.models import Quote
 from apps.quotes.services import (
+    TAX_OVERRIDE_PERMISSION,
     convert_quote_to_order,
     delete_or_archive_quote,
     ensure_public_token,
+    estimate_admin_quote_tax,
     list_admin_quotes,
     reopen_quote,
     send_quote_email,
     upsert_admin_quote,
 )
-from apps.tax.services import estimate_tax
 from apps.vin.services import decode_vehicle
+from config.responses import service_response
 
 
 class _AdminQuoteActionView(APIView):
@@ -32,9 +34,7 @@ class QuoteConvertView(_AdminQuoteActionView):
             return Response({"error": "Quote not found"}, status=404)
 
         result = convert_quote_to_order(quote, request.user.email)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)
 
 
 class QuotePreviewView(_AdminQuoteActionView):
@@ -73,9 +73,7 @@ class QuoteSendView(_AdminQuoteActionView):
             return Response({"error": "Quote not found"}, status=404)
 
         result = send_quote_email(quote, request.user.email)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)
 
 
 class AdminQuoteVinView(APIView):
@@ -86,19 +84,19 @@ class AdminQuoteVinView(APIView):
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        data, status = decode_vehicle(body.get("vin"))
-        return Response(data, status=status)
+        return service_response(decode_vehicle(body.get("vin")))
 
 
 class AdminQuoteTaxView(APIView):
-    """El impuesto lo calcula el mismo servicio que el checkout."""
+    """El impuesto lo calcula el mismo servicio que el checkout, con la
+    exención del cliente de la cotización y nunca la del empleado."""
 
     permission_classes = [HasRolePermission]
     required_permission = "quotes.create"
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        return Response(estimate_tax(body, request.user))
+        return Response(estimate_admin_quote_tax(body))
 
 
 class AdminQuoteListCreateView(APIView):
@@ -122,10 +120,14 @@ class AdminQuoteListCreateView(APIView):
         # alta exige el permiso de edición.
         if body.get("id") and not has_role_permission(request.user, "quotes.edit"):
             return Response({"error": "Forbidden"}, status=403)
-        result = upsert_admin_quote(body, request.user.email)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        # El servicio decide si el override vale; la view solo resuelve el
+        # permiso, como `audit` con `payments.transaction_id`.
+        result = upsert_admin_quote(
+            body,
+            request.user.email,
+            can_override_tax=has_role_permission(request.user, TAX_OVERRIDE_PERMISSION),
+        )
+        return service_response(result)
 
 
 class QuoteDeleteView(_AdminQuoteActionView):

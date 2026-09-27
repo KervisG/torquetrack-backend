@@ -5,6 +5,15 @@ from apps.tax.services.sales_tax import (
     FALLBACK_TAX_RATES,
     calculate_sales_tax,
     estimate_tax,
+    estimate_tax_for_customer,
+    is_tax_exempt,
 )
 
-__all__ = ["EXEMPT_ESTIMATE", "FALLBACK_TAX_RATES", "calculate_sales_tax", "estimate_tax"]
+__all__ = [
+    "EXEMPT_ESTIMATE",
+    "FALLBACK_TAX_RATES",
+    "calculate_sales_tax",
+    "estimate_tax",
+    "estimate_tax_for_customer",
+    "is_tax_exempt",
+]

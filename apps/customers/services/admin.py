@@ -8,16 +8,25 @@ from apps.audit.services import record_activity
 from apps.authentication.services import invited_emails, issue_activation_token
 from apps.common.ids import random_id
 from apps.common.links import app_url
-from apps.customers.models import Customer
+from apps.customers.models import Customer, PortalStatus, TaxStatus
 from apps.customers.services.storefront import _profile_patch
 
-ALLOWED_TAX_STATUSES = [
-    "VERIFIED",
-    "REJECTED",
-    "EXPIRED",
-    "PENDING VERIFICATION",
-    "NOT SUBMITTED",
-]
+
+def find_staff_customer(customer_id=None, email=None) -> Customer | None:
+    """Perfil que el staff eligió para un documento del panel: por id o, sin
+    id, por el email de una cuenta registrada. Un invitado encontrado por email
+    no cuenta: el email tipeado no prueba que sea esa persona, y un invitado
+    nunca tiene una exención propia."""
+    if customer_id:
+        return Customer.objects.filter(pk=customer_id).first()
+    email = str(email or "").strip()
+    if not email:
+        return None
+    return (
+        Customer.objects.filter(email__iexact=email, user__isnull=False)
+        .order_by("created_at")
+        .first()
+    )
 
 
 def _serialize_customer_masked(customer: Customer, invited: set[str]) -> dict:
@@ -79,7 +88,6 @@ def upsert_admin_customer(payload: dict) -> dict:
             id=random_id("C"),
             email=email or None,
             data=patch,
-            created_at=timezone.now(),
             updated_at=timezone.now(),
         )
 
@@ -108,7 +116,7 @@ def get_customer_tax_exemption(customer_id: str) -> dict:
     return {
         "id": customer.pk,
         "email": customer.email,
-        "status": customer.tax_status or "NOT SUBMITTED",
+        "status": customer.tax_status or TaxStatus.NOT_SUBMITTED,
         "tax": {
             "company": data.get("taxCompany") or "",
             "taxId": data.get("taxId") or "",
@@ -125,7 +133,7 @@ def get_customer_tax_exemption(customer_id: str) -> dict:
 
 def update_customer_tax_status(customer_id: str, payload: dict, reviewer_email: str) -> dict:
     status = str(payload.get("status") or "").strip().upper()
-    if status not in ALLOWED_TAX_STATUSES:
+    if status not in TaxStatus.values:
         return {"error": "Invalid tax status", "status": 400}
 
     customer = Customer.objects.filter(pk=customer_id).first()
@@ -135,7 +143,7 @@ def update_customer_tax_status(customer_id: str, payload: dict, reviewer_email: 
     reviewed_at = timezone.now().isoformat()
     patch = (
         {}
-        if status in ("PENDING VERIFICATION", "NOT SUBMITTED")
+        if status in (TaxStatus.PENDING_VERIFICATION, TaxStatus.NOT_SUBMITTED)
         else {"taxReviewedAt": reviewed_at, "taxReviewedBy": reviewer_email}
     )
 
@@ -163,10 +171,10 @@ def portal_status(customer: Customer, invited: set[str]) -> str:
     """Se deriva del vínculo con `User` y de los tokens de activación para no
     tener una columna que mantener sincronizada."""
     if customer.user_id is not None:
-        return "ACTIVE"
+        return PortalStatus.ACTIVE
     if customer.email and customer.email in invited:
-        return "INVITED"
-    return "NOT ACTIVATED"
+        return PortalStatus.INVITED
+    return PortalStatus.NOT_ACTIVATED
 
 
 def create_portal_invite(payload: dict) -> dict:

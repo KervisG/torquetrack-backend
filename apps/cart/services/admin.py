@@ -6,7 +6,7 @@ from django.db.models import Q
 from django.db.models.fields.json import KT
 from django.utils import timezone
 
-from apps.cart.models import Cart
+from apps.cart.models import Cart, CartStage, CartStatus
 
 # Un carrito en etapa CART sin cambios por más de esta ventana es abandonado.
 CART_IDLE_WINDOW = timedelta(minutes=30)
@@ -22,10 +22,10 @@ _EMPTY_ITEMS = Q(data__items__isnull=True) | ~Q(data__items__contains=[]) | Q(da
 def classify_cart(stage, updated_at, now) -> str:
     """Única regla de estado de un carrito; la usan el listado del panel y los
     contadores del dashboard para que nunca discrepen."""
-    stage = str(stage or "CART").upper()
-    if stage != "CART":
+    stage = str(stage or CartStage.CART).upper()
+    if stage != CartStage.CART:
         return stage
-    return "ACTIVE" if now - updated_at <= CART_IDLE_WINDOW else "ABANDONED"
+    return CartStatus.ACTIVE if now - updated_at <= CART_IDLE_WINDOW else CartStatus.ABANDONED
 
 
 def _listed_carts():
@@ -37,10 +37,14 @@ def list_admin_carts() -> list[dict]:
     `manage.py purge_carts`."""
     now = timezone.now()
     rows = []
-    for cart in _listed_carts().order_by("-updated_at"):
+    for cart in _listed_carts().select_related("user").order_by("-updated_at"):
         data = cart.data or {}
         status = classify_cart(data.get("stage"), cart.updated_at, now)
-        rows.append({**data, "id": cart.pk, "status": status, "updatedAt": cart.updated_at})
+        row = {**data, "id": cart.pk, "status": status, "updatedAt": cart.updated_at}
+        # El carrito de una cuenta muestra su email para contactar al cliente.
+        if cart.user is not None:
+            row["email"] = cart.user.email
+        rows.append(row)
     return rows
 
 

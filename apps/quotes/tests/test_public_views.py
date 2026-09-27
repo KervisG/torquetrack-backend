@@ -198,6 +198,31 @@ def test_quote_request_links_the_session_cart():
 
 
 @pytest.mark.django_db
+def test_signed_in_quote_request_links_the_account_cart():
+    from tests.factories import create_user, session_client
+
+    _insert_product()
+    user = create_user("U_QUOTE_CART")
+    Cart.objects.create(
+        id="cart_account",
+        user=user,
+        data={"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"},
+    )
+    client, _ = session_client("U_QUOTE_CART")
+
+    response = client.post(
+        "/api/quote/request/",
+        {"customer": {"name": "Jane Diesel"}, "items": [{"id": PRODUCT_ID, "qty": 1}]},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    data = Cart.objects.get(pk="cart_account").data
+    assert data["stage"] == "BUILDING_QUOTE"
+    assert data["quoteId"] == response.json()["quoteId"]
+
+
+@pytest.mark.django_db
 def test_quote_request_ignores_a_body_cart_id(client):
     _insert_product()
     victim = {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"}
@@ -233,6 +258,35 @@ def test_public_view_renders_html_for_valid_token(client):
     assert "Q10001" in body
     assert "Jane Diesel" in body
     assert "HX35-590" in body
+
+
+@pytest.mark.django_db
+def test_public_view_footer_uses_the_company_settings(client, settings):
+    settings.SALES_EMAIL = "parts@shop.example.com"
+    settings.APP_URL = "https://shop.example.com/"
+    settings.COMPANY_ADDRESS = "Tampa, FL"
+    _make_quote()
+
+    body = client.get(f"/api/quote/public/{'tok_' + 'a' * 48}/").content.decode()
+
+    assert "parts@shop.example.com" in body
+    assert "Tampa, FL" in body
+    assert "shop.example.com</div>" in body
+    assert "torquetrackdiesel.com" not in body
+    assert "Sarasota" not in body
+
+
+@pytest.mark.django_db
+def test_public_view_footer_omits_an_unset_sales_email(client, settings):
+    settings.SALES_EMAIL = ""
+    settings.COMPANY_ADDRESS = "Tampa, FL"
+    _make_quote()
+
+    body = client.get(f"/api/quote/public/{'tok_' + 'a' * 48}/").content.decode()
+
+    assert "Tampa, FL" in body
+    assert "&bull; Tampa" not in body
+    assert "teams@" not in body
 
 
 @pytest.mark.django_db

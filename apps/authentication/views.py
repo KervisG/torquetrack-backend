@@ -25,6 +25,7 @@ from apps.authentication.utils.throttling import (
     PasswordResetRateThrottle,
     VerifyEmailResendRateThrottle,
 )
+from config.responses import service_response
 
 
 def _body(request) -> dict:
@@ -50,10 +51,14 @@ class LoginView(APIView):
     def post(self, request):
         body = _body(request)
         user = authenticate_user(request, body.get("email"), body.get("password"))
+        account_throttle = LoginAccountRateThrottle()
         if user is None:
+            account_throttle.record_failure(request)
             return Response({"error": "Incorrect email or password"}, status=401)
-        # `login()` rota la session key (anti fijación) y el token CSRF, y
-        # conserva los datos de la sesión anónima, como el carrito.
+        account_throttle.reset(request)
+        # `login()` rota la session key (anti fijación) y el token CSRF; su
+        # señal `user_logged_in` fusiona el carrito invitado con el de la
+        # cuenta (`apps.cart`).
         login(request, user)
         return Response(_session_payload(request, user))
 
@@ -83,12 +88,6 @@ class SessionView(APIView):
         return Response(_session_payload(request, request.user))
 
 
-def _result(result: dict) -> Response:
-    if "error" in result:
-        return Response({"error": result["error"]}, status=result["status"])
-    return Response(result)
-
-
 class PasswordResetView(APIView):
     parser_classes = [JSONParser]
     authentication_classes = []
@@ -106,7 +105,7 @@ class PasswordResetConfirmView(APIView):
     throttle_classes = [PasswordResetConfirmRateThrottle]
 
     def post(self, request):
-        return _result(confirm_password_reset(_body(request)))
+        return service_response(confirm_password_reset(_body(request)))
 
 
 class VerifyEmailResendView(APIView):

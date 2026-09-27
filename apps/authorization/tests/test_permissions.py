@@ -94,4 +94,4 @@ def test_unauthenticated_request_gets_the_same_403_as_a_missing_permission():
     response = _call(_TakePaymentView)
 
     assert response.status_code == 403
-    assert response.data == {"detail": "You do not have permission to perform this action."}
+    assert response.data == {"error": "You do not have permission to perform this action."}

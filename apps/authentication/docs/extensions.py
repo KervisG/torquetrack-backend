@@ -23,8 +23,6 @@ from apps.authentication.docs.schemas import (
 )
 from apps.authorization.docs import examples as shared_ex
 from apps.authorization.docs.schemas import (
-    DetailResponseSerializer,
-    ErrorOrDetailResponse,
     ErrorResponseSerializer,
     OkResponseSerializer,
 )
@@ -37,24 +35,24 @@ AUTH_TAG = "auth"
 
 def _throttled(scopes: str) -> OpenApiResponse:
     return OpenApiResponse(
-        DetailResponseSerializer,
+        ErrorResponseSerializer,
         description=f"Rate limit exceeded ({scopes}). Includes a `Retry-After` header.",
         examples=[ex.THROTTLED],
     )
 
 
 CSRF_FORBIDDEN = OpenApiResponse(
-    DetailResponseSerializer,
+    ErrorResponseSerializer,
     description="A valid session was sent without a matching `X-CSRFToken` header.",
     examples=[shared_ex.CSRF_FAILED],
 )
 MALFORMED_JSON = OpenApiResponse(
-    DetailResponseSerializer,
+    ErrorResponseSerializer,
     description="The body is not valid JSON.",
     examples=[shared_ex.MALFORMED_JSON],
 )
 UNSUPPORTED_MEDIA_TYPE = OpenApiResponse(
-    DetailResponseSerializer,
+    ErrorResponseSerializer,
     description=(
         "The body is not `application/json` (form-encoded or multipart). Only JSON "
         "is accepted, so a cross-site HTML form cannot reach this public route."
@@ -79,11 +77,14 @@ class LoginViewExtension(OpenApiViewExtension):
                     "Starts a session for a customer or a staff member; both use the "
                     "same account. Public, no CSRF check. Does not require a verified "
                     "email.\n\n"
-                    "- Throttles: `login` (10/min per IP) and `login_account` (20/hour "
-                    "per email in the body).\n"
-                    "- Discards the previous session key, keeps the session cart and "
-                    "rotates the CSRF token: replace the stored `csrfToken` with the "
-                    "one in the response.\n"
+                    "- Throttles: `login` (10/min per IP, every attempt) and "
+                    "`login_account` (20 failed attempts/hour per email in the body; "
+                    "a successful login resets it).\n"
+                    "- Discards the previous session key and rotates the CSRF token: "
+                    "replace the stored `csrfToken` with the one in the response.\n"
+                    "- Merges the guest cart of the session into the account cart "
+                    "(quantities of the same product are added, capped at 99); read "
+                    "it again with `GET /api/cart/`.\n"
                     "- Unknown email, wrong password, inactive account and empty body "
                     "all return the same `401`."
                 ),
@@ -126,7 +127,8 @@ class LogoutViewExtension(OpenApiViewExtension):
                 summary="Log out",
                 description=(
                     "Ends the current session: deletes the session row, clears the "
-                    "cookie and drops the session cart. Returns `200` with or without "
+                    "cookie; the account cart stays with the account and the new "
+                    "session starts with an empty cart. Returns `200` with or without "
                     "a session. When the request carries a valid session it must send "
                     "`X-CSRFToken`; otherwise the session is kept and the response is "
                     "`403`. No body. Not throttled."
@@ -257,7 +259,7 @@ class PasswordResetConfirmViewExtension(OpenApiViewExtension):
                 responses={
                     200: OpenApiResponse(OkResponseSerializer, examples=[shared_ex.OK]),
                     400: OpenApiResponse(
-                        ErrorOrDetailResponse,
+                        ErrorResponseSerializer,
                         description=(
                             "Invalid, expired or used token; missing password; weak "
                             "password; or malformed JSON."

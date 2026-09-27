@@ -3,9 +3,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.cart.services import CART_SESSION_KEY
+from apps.cart.services import current_cart_id
 from apps.checkout.services import create_storefront_checkout
 from apps.integrations.payments import stripe as stripe_payments
+from config.responses import service_response
 
 
 class CheckoutView(APIView):
@@ -28,7 +29,8 @@ class CheckoutView(APIView):
             )
 
         body = request.data if isinstance(request.data, dict) else {}
-        payload, status = create_storefront_checkout(
-            request.user, body, cart_id=request.session.get(CART_SESSION_KEY)
+        return service_response(
+            create_storefront_checkout(
+                request.user, body, cart_id=current_cart_id(request.user, request.session)
+            )
         )
-        return Response(payload, status=status)

@@ -6,8 +6,7 @@ from rest_framework.test import APIClient
 
 from apps.cart.models import Cart
 from apps.catalog.models import Product
-from apps.checkout.models import Order, Payment
-from apps.checkout.services.admin import ORDER_STATUSES
+from apps.checkout.models import Order, OrderStatus, Payment
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from tests.factories import create_customer, guest_cart_client
@@ -166,6 +165,30 @@ def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch, settings)
     order = Order.objects.get(pk=response.json()["orderId"])
     # 189.99 * 2 = 379.98, nunca el 0.01 * 2 que mandó el cliente.
     assert order.data["totals"]["subtotal"] == 379.98
+
+
+@pytest.mark.django_db
+def test_charges_the_current_price_even_when_the_cart_announced_an_older_one(monkeypatch, settings):
+    # El `priceAtAdd` del carrito solo sirve para avisar; el cobro nunca lo usa.
+    _insert_product()
+    _insert_cart(
+        "cart_price_changed",
+        {"items": [{"id": PRODUCT_ID, "qty": 1, "priceAtAdd": 150.0}], "stage": "CART"},
+    )
+    items = [{"id": PRODUCT_ID, "qty": 1, "priceAtAdd": 150.0, "previousPrice": 150.0}]
+    shipping = quote_shipping(monkeypatch, settings, zip_code="33701", items=items)
+    sessions = []
+    monkeypatch.setattr(
+        CREATE_SESSION, lambda **kwargs: sessions.append(kwargs) or _fake_session()
+    )
+
+    response = _post(_body(shipping, items=items), guest_cart_client("cart_price_changed"))
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.data["totals"]["subtotal"] == 189.99
+    assert "priceAtAdd" not in order.data["items"][0]
+    assert float(Payment.objects.get(order=order).amount) == order.data["totals"]["total"]
 
 
 @pytest.mark.django_db
@@ -451,7 +474,7 @@ def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypa
     order = Order.objects.get()
     # El número ya emitido queda en un pedido visible, no se reutiliza.
     assert order.status == "CANCELLED"
-    assert order.status in ORDER_STATUSES
+    assert order.status in OrderStatus.values
     assert order.payment_status == "UNPAID"
     assert order.data["cancelReason"] == "PAYMENT_SETUP_FAILED"
     assert not Payment.objects.filter(order=order).exists()
@@ -492,6 +515,30 @@ def test_session_cart_transitions_to_checkout_stage(monkeypatch, shipping):
     assert data["stage"] == "CHECKOUT"
     assert data["orderId"] == response.json()["orderId"]
     assert Order.objects.get().data["cartId"] == "cart_uuid_checkout_1"
+
+
+@pytest.mark.django_db
+def test_signed_in_checkout_links_the_account_cart(monkeypatch, shipping):
+    # Con sesión el carrito es el de la cuenta (`Cart.user`), no uno de la sesión.
+    from tests.factories import create_user, session_client
+
+    _insert_product()
+    user = create_user("U_CHECKOUT_CART")
+    Cart.objects.create(
+        id="cart_account",
+        user=user,
+        data={"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"},
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+    client, _ = session_client("U_CHECKOUT_CART")
+
+    response = _post(_body(shipping), client)
+
+    assert response.status_code == 200
+    data = Cart.objects.get(pk="cart_account").data
+    assert data["stage"] == "CHECKOUT"
+    assert data["orderId"] == response.json()["orderId"]
+    assert Order.objects.get().data["cartId"] == "cart_account"
 
 
 @pytest.mark.django_db

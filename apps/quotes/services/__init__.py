@@ -1,11 +1,13 @@
 """API pública de los services de cotizaciones; cada módulo es dueño de su
 tema: `lifecycle` (número, token y vencimiento), `rendering` (serialización,
 enlaces y HTML), `pdf` (WeasyPrint), `storefront` (solicitud, enlace público
-y checkout) y `admin` (editor y acciones del panel)."""
+y checkout), `admin` (editor y acciones del panel) y `tax` (impuesto que
+calcula el servidor al guardar desde el panel)."""
 from apps.quotes.services.admin import (
     convert_quote_to_order,
     delete_or_archive_quote,
     ensure_public_token,
+    estimate_admin_quote_tax,
     list_admin_quotes,
     reopen_quote,
     send_quote_email,
@@ -13,10 +15,12 @@ from apps.quotes.services.admin import (
 )
 from apps.quotes.services.lifecycle import (
     EXPIRABLE_QUOTE_STATUSES,
+    QUOTE_VALIDITY_DAYS,
     effective_quote_status,
     expire_stale_quotes,
     is_expired,
     next_quote_number,
+    quote_expires_at,
     quote_token,
     unexpired_quotes_q,
 )
@@ -34,16 +38,20 @@ from apps.quotes.services.storefront import (
     is_quote_payable,
     serialize_public_quote,
 )
+from apps.quotes.services.tax import TAX_OVERRIDE_PERMISSION
 
 __all__ = [
     "EXPIRABLE_QUOTE_STATUSES",
     "PAYABLE_QUOTE_STATUSES",
+    "QUOTE_VALIDITY_DAYS",
+    "TAX_OVERRIDE_PERMISSION",
     "checkout_from_quote",
     "convert_quote_to_order",
     "create_quote_from_request",
     "delete_or_archive_quote",
     "effective_quote_status",
     "ensure_public_token",
+    "estimate_admin_quote_tax",
     "expire_stale_quotes",
     "is_expired",
     "is_quote_payable",
@@ -51,6 +59,7 @@ __all__ = [
     "next_quote_number",
     "public_quote_pdf_url",
     "public_quote_url",
+    "quote_expires_at",
     "quote_token",
     "render_quote_html",
     "render_quote_pdf_base64",

@@ -3,6 +3,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.checkout.services import (
+    reconcile_expired_session,
     reconcile_failed_session,
     reconcile_paid_session,
     reconcile_refunded_charge,
@@ -36,6 +37,8 @@ class StripeWebhookView(APIView):
             reconcile_paid_session(event_obj)
         elif event_type == "checkout.session.async_payment_failed":
             reconcile_failed_session(event_obj)
+        elif event_type == "checkout.session.expired":
+            reconcile_expired_session(event_obj)
         elif event_type in REFUND_EVENTS:
             reconcile_stripe_refund(event_obj)
         elif event_type == "charge.refunded":

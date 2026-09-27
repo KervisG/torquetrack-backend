@@ -16,14 +16,16 @@ from django.utils import timezone
 
 from apps.authentication.models import User, split_full_name
 from apps.authentication.services import (
+    EMAIL_ALREADY_EXISTS,
     consume_email_verification,
     create_account,
     lock_activation_token,
     parse_email,
+    send_existing_account_email,
     send_verification_email,
 )
 from apps.common.ids import random_id
-from apps.customers.models import Customer
+from apps.customers.models import Customer, TaxStatus
 
 
 def activate_customer_account(payload: dict) -> dict:
@@ -112,12 +114,24 @@ def customer_for_user(user) -> Customer | None:
     return Customer.objects.filter(user=user).first()
 
 
+# El registro responde lo mismo exista o no la cuenta y no abre sesión: si el
+# alta nueva entrara directo, la respuesta de un email ya registrado se
+# distinguiría y serviría para enumerar cuentas.
+REGISTRATION_ACCEPTED = {"ok": True, "message": "Check your email to verify your account."}
+
+
 def register_customer(payload: dict) -> dict:
     """El registro no toca un Customer invitado con el mismo email: el correo
     todavía no está verificado y adueñarse de ese perfil le daría a
     cualquiera el historial de otra persona. Ese historial se vincula recién
     en `verify_customer_email`, cuando el enlace prueba que la persona
-    controla la casilla; hasta entonces puede entrar y comprar igual.
+    controla la casilla.
+
+    Un email que ya tiene cuenta recibe la misma respuesta que un alta nueva
+    (`REGISTRATION_ACCEPTED`) y no cambia nada: el dueño recibe un aviso con
+    enlaces a login y reset, en segundo plano como el correo de verificación.
+    `create_account` hashea la contraseña en los dos casos para que el tiempo
+    tampoco lo revele. Los 400 de validación no dependen de la cuenta.
     """
     email = parse_email(payload.get("email"))
     password = payload.get("password")
@@ -137,6 +151,11 @@ def register_customer(payload: dict) -> dict:
             last_name=last_name,
             display_name=name,
         )
+        if result.get("error") == EMAIL_ALREADY_EXISTS:
+            existing = User.objects.filter(email=email).first()
+            if existing is not None:
+                send_existing_account_email(existing)
+            return dict(REGISTRATION_ACCEPTED)
         if "error" in result:
             return result
         user = result["user"]
@@ -157,7 +176,7 @@ def register_customer(payload: dict) -> dict:
             updated_at=now,
         )
     send_verification_email(user)
-    return {"user": user}
+    return dict(REGISTRATION_ACCEPTED)
 
 
 def verify_customer_email(payload: dict) -> dict:
@@ -296,6 +315,7 @@ def list_account_orders(customer: Customer) -> list[dict]:
                 "totals": data.get("totals") or {},
                 "vehicle": data.get("vehicle") or {},
                 "shipping": data.get("shipping") or {},
+                **order.fulfillment_summary(),
             }
         )
     return result
@@ -354,7 +374,7 @@ def submit_tax_exemption(customer: Customer, payload: dict) -> dict:
             return error
 
     submitted_at = timezone.now().isoformat()
-    customer.tax_status = "PENDING VERIFICATION"
+    customer.tax_status = TaxStatus.PENDING_VERIFICATION
     customer.data = {
         **(customer.data or {}),
         "taxCompany": company,
@@ -369,4 +389,4 @@ def submit_tax_exemption(customer: Customer, payload: dict) -> dict:
     }
     customer.updated_at = timezone.now()
     customer.save(update_fields=["tax_status", "data", "updated_at"])
-    return {"ok": True, "status": "PENDING VERIFICATION", "submittedAt": submitted_at}
+    return {"ok": True, "status": TaxStatus.PENDING_VERIFICATION, "submittedAt": submitted_at}

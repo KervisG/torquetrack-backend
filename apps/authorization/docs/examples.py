@@ -1,9 +1,9 @@
 """Ejemplos de request y response del esquema OpenAPI de `apps.authorization`.
 
 Los mensajes de `{"error": ...}` son los literales de `views.py` y
-`services/`; los de `{"detail": ...}` son los que arma DRF. Si un
-mensaje cambia en el código, hay que cambiarlo aquí. `apps.authentication.docs`
-reutiliza `error_example`, `detail_example`, los errores de DRF y `OK`.
+`services/`, o los de DRF que `config.exceptions.api_exception_handler` pasa a
+`error`. Si un mensaje cambia en el código, hay que cambiarlo aquí.
+`apps.authentication.docs` reutiliza `error_example`, los errores de DRF y `OK`.
 """
 from drf_spectacular.utils import OpenApiExample
 
@@ -12,17 +12,13 @@ def error_example(name: str, message: str) -> OpenApiExample:
     return OpenApiExample(name, value={"error": message})
 
 
-def detail_example(name: str, message: str) -> OpenApiExample:
-    return OpenApiExample(name, value={"detail": message})
-
-
 # --- errores de DRF ---------------------------------------------------------------
 
-MALFORMED_JSON = detail_example(
+MALFORMED_JSON = error_example(
     "Malformed JSON", "JSON parse error - Expecting value: line 1 column 1 (char 0)"
 )
-CSRF_FAILED = detail_example("CSRF token missing", "CSRF Failed: CSRF token missing.")
-UNSUPPORTED_MEDIA_TYPE = detail_example(
+CSRF_FAILED = error_example("CSRF token missing", "CSRF Failed: CSRF token missing.")
+UNSUPPORTED_MEDIA_TYPE = error_example(
     "Form body",
     'Unsupported media type "application/x-www-form-urlencoded" in request.',
 )
@@ -87,7 +83,14 @@ ADMIN_USER_RESULT = OpenApiExample("User saved", value={"ok": True, "user": ADMI
 # drf-spectacular envuelve en una lista los ejemplos de respuestas `many=True`.
 ADMIN_USER_LIST = OpenApiExample("Users", value=ADMIN_USER)
 ADMIN_ROLE_LIST = OpenApiExample(
-    "Roles", value={"id": 1, "slug": "admin", "name": "Admin", "fullAccess": True}
+    "Roles",
+    value={
+        "id": 1,
+        "slug": "admin",
+        "name": "Admin",
+        "fullAccess": True,
+        "permissions": ["dashboard.view", "users.manage"],
+    },
 )
 
 # --- requests ---------------------------------------------------------------------

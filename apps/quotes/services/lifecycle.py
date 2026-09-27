@@ -8,7 +8,14 @@ from django.db.models import Q
 from django.utils import timezone
 
 from apps.numbering.services import next_document_number
-from apps.quotes.models import Quote
+from apps.quotes.models import Quote, QuoteStatus
+
+# Vigencia de toda cotización nueva o reabierta.
+QUOTE_VALIDITY_DAYS = 30
+
+
+def quote_expires_at(start):
+    return start + timezone.timedelta(days=QUOTE_VALIDITY_DAYS)
 
 
 def quote_token() -> str:
@@ -23,18 +30,15 @@ def is_expired(quote: Quote) -> bool:
     return bool(quote.expires_at and quote.expires_at < timezone.now())
 
 
-# Todos los estados de `Quote.status`; el modelo no declara `choices`.
-QUOTE_STATUSES = ("BUILDING", "ACTIVE", "CONTACTED", "EXPIRED", "CONVERTED", "LOST")
-
 # Estados abiertos que el vencimiento convierte en `EXPIRED`; los cerrados
 # (`CONVERTED`, `LOST`...) conservan el suyo.
-EXPIRABLE_QUOTE_STATUSES = ("BUILDING", "ACTIVE", "CONTACTED")
+EXPIRABLE_QUOTE_STATUSES = (QuoteStatus.BUILDING, QuoteStatus.ACTIVE, QuoteStatus.CONTACTED)
 
 
 def effective_quote_status(quote: Quote) -> str:
     """El vencimiento se calcula al leer: ningún GET persiste `EXPIRED`."""
     if quote.status in EXPIRABLE_QUOTE_STATUSES and is_expired(quote):
-        return "EXPIRED"
+        return QuoteStatus.EXPIRED
     return quote.status
 
 
@@ -45,4 +49,4 @@ def unexpired_quotes_q() -> Q:
 def expire_stale_quotes() -> int:
     return Quote.objects.filter(
         status__in=EXPIRABLE_QUOTE_STATUSES, expires_at__lt=timezone.now()
-    ).update(status="EXPIRED", updated_at=timezone.now())
+    ).update(status=QuoteStatus.EXPIRED, updated_at=timezone.now())

@@ -135,7 +135,7 @@ de admin.
   <footer class="footer">
     <div class="brand">
       <div class="tt" style="width:58px;height:58px;font-size:25px;border-radius:12px">TT</div>
-      <div><b>Torque<span class="green">Track</span> Diesel Parts</b><br>teams@torquetrackdiesel.com &bull; Sarasota, FL<br>www.torquetrackdiesel.com</div>
+      <div><b>Torque<span class="green">Track</span> Diesel Parts</b><br>{% if company_email %}{{ company_email }} &bull; {% endif %}{{ company_address }}<br>{{ company_site }}</div>
     </div>
     <p style="letter-spacing:4px;text-align:center">FIND IT. PRICE IT. SHIP IT FAST.</p>
   </footer>

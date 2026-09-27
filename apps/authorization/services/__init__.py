@@ -7,9 +7,11 @@ parchean el módulo donde se usa cada función
 (`apps.authorization.services.users.record_activity`), no este."""
 from apps.authorization.services.grants import COMMAND_ACTOR, NO_ROLE, grant_role
 from apps.authorization.services.roles import (
+    create_admin_role,
     list_admin_roles,
     permission_codenames_for_role,
     serialize_role,
+    update_admin_role,
 )
 from apps.authorization.services.users import (
     delete_admin_user,
@@ -20,11 +22,13 @@ from apps.authorization.services.users import (
 __all__ = [
     "COMMAND_ACTOR",
     "NO_ROLE",
+    "create_admin_role",
     "delete_admin_user",
     "grant_role",
     "list_admin_roles",
     "list_admin_users",
     "permission_codenames_for_role",
     "serialize_role",
+    "update_admin_role",
     "update_admin_user",
 ]

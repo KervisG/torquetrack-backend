@@ -5,6 +5,7 @@ pública para que los imports `from apps.authentication.services import ...` no
 dependan de la división. Los tests parchean el módulo donde se usa cada
 función (`apps.authentication.services.tokens.run_in_background`), no este."""
 from apps.authentication.services.credentials import (
+    EMAIL_ALREADY_EXISTS,
     change_password,
     create_account,
     parse_email,
@@ -13,6 +14,7 @@ from apps.authentication.services.credentials import (
 from apps.authentication.services.email_verification import (
     consume_email_verification,
     resend_verification_email,
+    send_existing_account_email,
     send_verification_email,
 )
 from apps.authentication.services.login import (
@@ -32,6 +34,7 @@ from apps.authentication.services.tokens import (
 )
 
 __all__ = [
+    "EMAIL_ALREADY_EXISTS",
     "authenticate_user",
     "change_password",
     "confirm_password_reset",
@@ -46,6 +49,7 @@ __all__ = [
     "password_error",
     "request_password_reset",
     "resend_verification_email",
+    "send_existing_account_email",
     "send_verification_email",
     "serialize_session_user",
 ]

@@ -1,10 +1,11 @@
-"""Documentación OpenAPI de `POST /api/admin/orders/{order_id}/refunds/`.
+"""Documentación OpenAPI de `POST /api/admin/orders/{order_id}/refunds/` y
+`POST /api/admin/orders/{order_id}/fulfillment/`.
 
 El esquema se genera con `SchemaGenerator` sin request, igual que
 `manage.py spectacular`; no hay proveedores que mockear. Lo que se assertea
 sale de `apps/checkout/docs/`: si alguien borra la extensión o deja de
-registrarla en `CheckoutConfig.ready()`, estos tests fallan. Solo cubre la
-ruta de reembolsos; las demás views de checkout todavía no están
+registrarla en `CheckoutConfig.ready()`, estos tests fallan. Solo cubre las
+rutas de reembolsos y de envío; las demás views de checkout todavía no están
 documentadas y sus errores de esquema son previos.
 """
 import pytest
@@ -12,6 +13,7 @@ from drf_spectacular.drainage import GENERATOR_STATS, reset_generator_stats
 from drf_spectacular.generators import SchemaGenerator
 
 REFUNDS_PATH = "/api/admin/orders/{order_id}/refunds/"
+FULFILLMENT_PATH = "/api/admin/orders/{order_id}/fulfillment/"
 
 
 def _examples(operation, status):
@@ -64,3 +66,50 @@ def test_schema_generation_emits_no_warnings_or_errors_for_the_refunds_view():
     messages = [*GENERATOR_STATS._warn_cache, *GENERATOR_STATS._error_cache]
     reset_generator_stats()
     assert [message for message in messages if "AdminOrderRefundsView" in message] == []
+
+
+@pytest.fixture(scope="module")
+def fulfillment_operation():
+    schema = SchemaGenerator().get_schema(request=None, public=True)
+    return schema, schema["paths"][FULFILLMENT_PATH]["post"]
+
+
+def test_fulfillment_route_documents_permission_body_and_literal_errors(fulfillment_operation):
+    schema, op = fulfillment_operation
+
+    assert op["summary"]
+    assert "orders.status" in op["description"]
+    assert op["tags"] == ["admin: orders"]
+    body = _component(schema, op["requestBody"]["content"]["application/json"]["schema"])
+    assert set(body["properties"]) == {"status", "carrier", "trackingNumber"}
+    assert body["required"] == ["status"]
+    shipment = _component(
+        schema, op["responses"]["200"]["content"]["application/json"]["schema"]
+    )
+    assert {
+        "id",
+        "number",
+        "fulfillmentStatus",
+        "carrier",
+        "trackingNumber",
+        "trackingUrl",
+        "shippedAt",
+        "deliveredAt",
+    } <= set(shipment["properties"])
+    assert {"error": "Tracking number must be 1 to 64 letters, digits or hyphens"} in _examples(
+        op, "400"
+    )
+    assert {"error": "Order not found"} in _examples(op, "404")
+    assert {"error": "Only paid orders can be fulfilled"} in _examples(op, "409")
+    assert {"error": "Cannot move fulfillment from SHIPPED to PREPARING"} in _examples(op, "409")
+    assert "403" in op["responses"]
+
+
+def test_schema_generation_emits_no_warnings_or_errors_for_the_fulfillment_view():
+    reset_generator_stats()
+    with GENERATOR_STATS.silence():
+        SchemaGenerator().get_schema(request=None, public=True)
+
+    messages = [*GENERATOR_STATS._warn_cache, *GENERATOR_STATS._error_cache]
+    reset_generator_stats()
+    assert [message for message in messages if "AdminOrderFulfillmentView" in message] == []

@@ -14,6 +14,7 @@ from rest_framework.test import APIClient
 
 from apps.authentication.models import User
 from apps.authentication.services import change_password
+from apps.cart.models import Cart
 from apps.cart.services import CART_SESSION_KEY
 from tests.factories import DEFAULT_PASSWORD, create_user, guest_cart_client, session_client
 
@@ -75,8 +76,11 @@ def test_deactivating_the_user_ends_the_session_on_the_next_request():
 
 
 @pytest.mark.django_db
-def test_login_rotates_the_session_key_and_keeps_the_cart():
+def test_login_rotates_the_session_key_and_moves_the_guest_cart_to_the_account():
+    # El carrito invitado no queda en la sesión: pasa a ser el de la cuenta
+    # (`apps.cart`, señal `user_logged_in`).
     create_user("U_CART", email="cart@example.com", password=DEFAULT_PASSWORD)
+    Cart.objects.create(id="CART_SESSION_1", data={"items": []})
     client = guest_cart_client("CART_SESSION_1")
     guest_key = client.cookies[settings.SESSION_COOKIE_NAME].value
 
@@ -86,7 +90,8 @@ def test_login_rotates_the_session_key_and_keeps_the_cart():
 
     assert response.status_code == 200
     assert client.cookies[settings.SESSION_COOKIE_NAME].value != guest_key
-    assert client.session[CART_SESSION_KEY] == "CART_SESSION_1"
+    assert CART_SESSION_KEY not in client.session
+    assert Cart.objects.get(pk="CART_SESSION_1").user_id == "U_CART"
 
 
 @pytest.mark.django_db

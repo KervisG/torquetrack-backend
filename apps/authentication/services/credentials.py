@@ -7,11 +7,12 @@ from django.contrib.auth.password_validation import validate_password
 from django.core.exceptions import ValidationError
 from django.core.validators import validate_email
 from django.db import IntegrityError, transaction
-from django.utils import timezone
 
 from apps.authentication.models import User, compose_display_name
 from apps.authentication.services.tokens import invalidate_password_reset_tokens
 from apps.common.ids import random_id
+
+EMAIL_ALREADY_EXISTS = "Email already exists"
 
 
 def parse_email(raw) -> str | None:
@@ -63,18 +64,19 @@ def create_account(
         last_name=last_name,
         display_name=display_name or compose_display_name(first_name, last_name),
         active=True,
-        created_at=timezone.now(),
     )
     error = password_error(str(password), candidate)
     if error is not None:
         return {"error": error, "status": 400}
-    if User.objects.filter(email=email).exists():
-        return {"error": "Email already exists", "status": 409}
-
+    # Se hashea antes de mirar si el email existe: así un email registrado
+    # también paga el PBKDF2 y el tiempo de respuesta no revela la cuenta.
     candidate.set_password(str(password))
+    if User.objects.filter(email=email).exists():
+        return {"error": EMAIL_ALREADY_EXISTS, "status": 409}
+
     try:
         with transaction.atomic():
             candidate.save(force_insert=True)
     except IntegrityError:
-        return {"error": "Email already exists", "status": 409}
+        return {"error": EMAIL_ALREADY_EXISTS, "status": 409}
     return {"user": candidate}

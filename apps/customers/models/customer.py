@@ -5,6 +5,24 @@ from django.db.models import Q
 from django.db.models.functions import Now
 
 
+class TaxStatus(models.TextChoices):
+    """Solo `VERIFIED` exime de impuestos (`is_tax_exempt`)."""
+
+    VERIFIED = "VERIFIED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"
+    PENDING_VERIFICATION = "PENDING VERIFICATION"
+    NOT_SUBMITTED = "NOT SUBMITTED"
+
+
+class PortalStatus(models.TextChoices):
+    """Se deriva al serializar (`portal_status`), sin columna."""
+
+    ACTIVE = "ACTIVE"
+    INVITED = "INVITED"
+    NOT_ACTIVATED = "NOT ACTIVATED"
+
+
 class Customer(models.Model):
     id = models.TextField(primary_key=True)
     user = models.OneToOneField(
@@ -16,7 +34,9 @@ class Customer(models.Model):
     )
     email = models.TextField(null=True, blank=True)
     data = models.JSONField(default=dict)
-    tax_status = models.TextField(default="NOT SUBMITTED", db_default="NOT SUBMITTED")
+    tax_status = models.TextField(
+        choices=TaxStatus, default=TaxStatus.NOT_SUBMITTED, db_default=TaxStatus.NOT_SUBMITTED
+    )
     created_at = models.DateTimeField(db_default=Now())
     updated_at = models.DateTimeField(db_default=Now())
 

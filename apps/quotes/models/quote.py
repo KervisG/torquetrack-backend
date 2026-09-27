@@ -4,6 +4,18 @@ from django.db.models.functions import Now
 from django.utils import timezone
 
 
+class QuoteStatus(models.TextChoices):
+    """`EXPIRED` se persiste solo con `expire_quotes`; al leer, el vencimiento
+    se calcula con `effective_quote_status`."""
+
+    BUILDING = "BUILDING"
+    ACTIVE = "ACTIVE"
+    CONTACTED = "CONTACTED"
+    EXPIRED = "EXPIRED"
+    CONVERTED = "CONVERTED"
+    LOST = "LOST"
+
+
 class Quote(models.Model):
     id = models.TextField(primary_key=True)
     number = models.TextField(unique=True)
@@ -14,7 +26,9 @@ class Quote(models.Model):
         blank=True,
         related_name="quotes",
     )
-    status = models.TextField(default="BUILDING", db_default="BUILDING")
+    status = models.TextField(
+        choices=QuoteStatus, default=QuoteStatus.BUILDING, db_default=QuoteStatus.BUILDING
+    )
     data = models.JSONField(default=dict)
     created_at = models.DateTimeField(default=timezone.now, db_default=Now())
     expires_at = models.DateTimeField(null=True, blank=True)

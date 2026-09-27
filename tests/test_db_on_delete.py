@@ -11,6 +11,7 @@ import pytest
 from django.db import connection
 
 from apps.authentication.models import AccountToken
+from apps.cart.models import Cart
 from apps.checkout.models import Order, Payment, Refund
 from apps.customers.models import Customer
 from apps.quotes.models import Quote
@@ -24,6 +25,9 @@ EXPECTED_ON_DELETE = {
     ("refunds", "payment_id"): "c",
     ("customers", "user_id"): "n",
     ("account_tokens", "user_id"): "c",
+    # El carrito de la cuenta es dato personal y sin su dueño nadie puede
+    # leerlo: ninguna sesión anónima apunta a un carrito con usuario.
+    ("carts", "user_id"): "c",
     # `admin.LogEntry` del `AUTH_USER_MODEL` (`authentication/0003_db_on_delete`).
     ("django_admin_log", "user_id"): "c",
     # `PROTECT` en el ORM: la base también rechaza borrar un Role en uso.
@@ -113,3 +117,14 @@ def test_raw_delete_of_a_user_unlinks_the_profile_and_drops_its_tokens():
     assert customer.user_id is None
     assert Customer.objects.filter(id="CUST1").exists()
     assert not AccountToken.objects.filter(email="ada@example.com").exists()
+
+
+@pytest.mark.django_db
+def test_raw_delete_of_a_user_drops_its_cart():
+    user = create_user("USR1", email="ada@example.com")
+    Cart.objects.create(id="cart_ada", user=user, data={"items": [{"id": "p1", "qty": 1}]})
+    Cart.objects.create(id="cart_guest", data={"items": [{"id": "p1", "qty": 1}]})
+
+    _raw_delete("users", user.id)
+
+    assert list(Cart.objects.values_list("pk", flat=True)) == ["cart_guest"]

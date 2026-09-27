@@ -31,6 +31,29 @@ def send_verification_email(user: User) -> None:
     )
 
 
+def send_existing_account_email(user: User) -> None:
+    """Aviso al dueño cuando alguien intenta registrar su email: el registro
+    responde igual que uno nuevo (para no enumerar cuentas) y el dueño se
+    entera por aquí. No emite ningún token: un tercero no puede anular así los
+    enlaces pendientes del dueño; el reset lo pide el dueño si lo necesita."""
+    if not user.active:
+        return
+    login_link = escape(app_url("/login"))
+    reset_link = escape(app_url("/forgot-password"))
+    send_account_email(
+        user,
+        "You already have a TorqueTrack account",
+        (
+            "<p>Someone tried to create a TorqueTrack account with this email, but "
+            "you already have one.</p>"
+            f'<p><a href="{login_link}">Sign in to your account</a></p>'
+            f'<p>Forgot your password? <a href="{reset_link}">Reset it here</a>.</p>'
+            "<p>If this was not you, you can ignore this email; your account has "
+            "not changed.</p>"
+        ),
+    )
+
+
 def resend_verification_email(user: User) -> dict:
     if user.email_verified_at is not None:
         return {"ok": True, "emailVerified": True}

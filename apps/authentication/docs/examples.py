@@ -1,18 +1,18 @@
 """Ejemplos de request y response del esquema OpenAPI de `apps.authentication`.
 
 Los mensajes de `{"error": ...}` son los literales de `views.py` y
-`services/`; los de `{"detail": ...}` son los que arma DRF. Si un mensaje
-cambia en el código, hay que cambiarlo aquí. Los helpers, los errores de
+`services/`, o los de DRF que `config.exceptions.api_exception_handler` pasa a
+`error`. Si un mensaje cambia en el código, hay que cambiarlo aquí. Los helpers, los errores de
 DRF que comparte con el panel (JSON mal formado, CSRF) y `OK` son los de
 `apps.authorization.docs.examples`, que está debajo de esta app.
 """
 from drf_spectacular.utils import OpenApiExample
 
-from apps.authorization.docs.examples import detail_example, error_example
+from apps.authorization.docs.examples import error_example
 
 # --- errores de DRF ---------------------------------------------------------------
 
-THROTTLED = detail_example(
+THROTTLED = error_example(
     "Throttled", "Request was throttled. Expected available in 3540 seconds."
 )
 

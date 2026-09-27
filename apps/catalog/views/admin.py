@@ -7,6 +7,7 @@ from apps.catalog.services import (
     list_admin_products,
     upsert_admin_product,
 )
+from config.responses import service_response
 
 
 class AdminProductListView(APIView):
@@ -32,14 +33,14 @@ class AdminProductDetailView(APIView):
 
     def put(self, request, product_id):
         body = request.data if isinstance(request.data, dict) else {}
-        payload, status = upsert_admin_product(
-            product_id,
-            body,
-            can_edit_pricing=has_role_permission(request.user, "pricing.edit"),
-            can_view_costs=has_role_permission(request.user, "costs.view"),
+        return service_response(
+            upsert_admin_product(
+                product_id,
+                body,
+                can_edit_pricing=has_role_permission(request.user, "pricing.edit"),
+                can_view_costs=has_role_permission(request.user, "costs.view"),
+            )
         )
-        return Response(payload, status=status)
 
     def delete(self, request, product_id):
-        payload, status = deactivate_admin_product(product_id)
-        return Response(payload, status=status)
+        return service_response(deactivate_admin_product(product_id))

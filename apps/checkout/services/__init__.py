@@ -1,15 +1,18 @@
 """API pública de los services de checkout; cada módulo es dueño de su tema:
 `payments` (Stripe), `storefront` (checkout público), `webhooks`
-(conciliación), `refunds` (reembolsos) y `admin` (pedidos del panel)."""
+(conciliación), `refunds` (reembolsos), `fulfillment` (envío y guía) y
+`admin` (pedidos del panel)."""
 from apps.checkout.services.admin import (
-    CORE_STATUSES,
-    ORDER_STATUSES,
-    RETURN_STATUSES,
+    ORDER_STATUS_TRANSITIONS,
     create_admin_payment_link,
     delete_admin_order,
     list_admin_orders,
     patch_admin_order,
     take_admin_payment,
+)
+from apps.checkout.services.fulfillment import (
+    FULFILLMENT_TRANSITIONS,
+    update_order_fulfillment,
 )
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
@@ -28,6 +31,7 @@ from apps.checkout.services.storefront import (
     next_order_number,
 )
 from apps.checkout.services.webhooks import (
+    reconcile_expired_session,
     reconcile_failed_session,
     reconcile_paid_session,
     reconcile_refunded_charge,
@@ -37,10 +41,9 @@ from apps.checkout.services.webhooks import (
 __all__ = [
     "CHARGED_PAYMENT_STATUSES",
     "CLOSED_ORDER_STATUSES",
-    "CORE_STATUSES",
-    "ORDER_STATUSES",
+    "FULFILLMENT_TRANSITIONS",
+    "ORDER_STATUS_TRANSITIONS",
     "PAYMENT_START_FAILED",
-    "RETURN_STATUSES",
     "STRIPE_REQUEST_FAILED",
     "cancel_pending_payment",
     "cancel_pending_payments",
@@ -52,6 +55,7 @@ __all__ = [
     "list_admin_orders",
     "next_order_number",
     "patch_admin_order",
+    "reconcile_expired_session",
     "reconcile_failed_session",
     "reconcile_paid_session",
     "reconcile_refunded_charge",
@@ -59,4 +63,5 @@ __all__ = [
     "refund_order",
     "start_stripe_payment",
     "take_admin_payment",
+    "update_order_fulfillment",
 ]

@@ -1,6 +1,7 @@
 """`tax-exemption` (GET) devuelve el tax ID completo y el certificado, y
 `tax-status` (POST) deja al cliente comprar sin impuestos: por eso los dos
 exigen `tax_exemptions.review`."""
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -17,6 +18,7 @@ from apps.customers.services import (
     update_customer_tax_status,
     upsert_admin_customer,
 )
+from config.responses import service_response
 
 
 class AdminCustomerListCreateView(APIView):
@@ -32,9 +34,7 @@ class AdminCustomerListCreateView(APIView):
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
         result = upsert_admin_customer(body)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)
 
 
 class AdminCustomerDeleteView(APIView):
@@ -43,12 +43,13 @@ class AdminCustomerDeleteView(APIView):
 
     def delete(self, request, customer_id):
         result = delete_admin_customer(customer_id)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)
 
 
 class AdminCustomerTaxExemptionView(APIView):
+    # Abierta a propósito: la view separa el 401 (sin sesión de staff) del 403
+    # (sin `tax_exemptions.review`); `HasRolePermission` los colapsaría.
+    permission_classes = [AllowAny]
     required_permission = "tax_exemptions.review"
 
     def get(self, request, customer_id):
@@ -58,12 +59,12 @@ class AdminCustomerTaxExemptionView(APIView):
             return Response({"error": "Forbidden"}, status=403)
 
         result = get_customer_tax_exemption(customer_id)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)
 
 
 class AdminCustomerTaxStatusView(APIView):
+    # Abierta a propósito, igual que `AdminCustomerTaxExemptionView`.
+    permission_classes = [AllowAny]
     required_permission = "tax_exemptions.review"
 
     def post(self, request, customer_id):
@@ -74,9 +75,7 @@ class AdminCustomerTaxStatusView(APIView):
 
         body = request.data if isinstance(request.data, dict) else {}
         result = update_customer_tax_status(customer_id, body, request.user.email)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)
 
 
 class AdminCustomerPortalInviteView(APIView):
@@ -86,6 +85,4 @@ class AdminCustomerPortalInviteView(APIView):
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
         result = create_portal_invite(body)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result.get("status", 400))
-        return Response(result)
+        return service_response(result)

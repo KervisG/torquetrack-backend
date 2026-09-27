@@ -18,7 +18,14 @@ from django.db.models import Sum
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.checkout.models import Order, Payment, Refund
+from apps.checkout.models import (
+    Order,
+    OrderPaymentStatus,
+    Payment,
+    PaymentStatus,
+    Refund,
+    RefundStatus,
+)
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
     STRIPE_REQUEST_FAILED,
@@ -36,17 +43,17 @@ INVALID_REFUND_AMOUNT = "Refund amount must be a positive number with at most tw
 MAX_REASON_LENGTH = 500
 
 # Solo desde estos estados del pedido se puede pedir un reembolso.
-REFUNDABLE_ORDER_STATUSES = ("PAID", "PARTIALLY_REFUNDED")
+REFUNDABLE_ORDER_STATUSES = (OrderPaymentStatus.PAID, OrderPaymentStatus.PARTIALLY_REFUNDED)
 # Los que retienen saldo: un PENDING todavía puede salir.
-HELD_REFUND_STATUSES = (Refund.PENDING, Refund.SUCCEEDED)
-FINAL_REFUND_STATUSES = (Refund.SUCCEEDED, Refund.FAILED, Refund.CANCELED)
+HELD_REFUND_STATUSES = (RefundStatus.PENDING, RefundStatus.SUCCEEDED)
+FINAL_REFUND_STATUSES = (RefundStatus.SUCCEEDED, RefundStatus.FAILED, RefundStatus.CANCELED)
 # `requires_action` espera al cliente: para el saldo es igual que `pending`.
 STRIPE_REFUND_STATUSES = {
-    "pending": Refund.PENDING,
-    "requires_action": Refund.PENDING,
-    "succeeded": Refund.SUCCEEDED,
-    "failed": Refund.FAILED,
-    "canceled": Refund.CANCELED,
+    "pending": RefundStatus.PENDING,
+    "requires_action": RefundStatus.PENDING,
+    "succeeded": RefundStatus.SUCCEEDED,
+    "failed": RefundStatus.FAILED,
+    "canceled": RefundStatus.CANCELED,
 }
 
 
@@ -100,7 +107,7 @@ def order_refund_summary(order: Order, payments) -> dict:
         key=lambda refund: refund.created_at,
     )
     refunded = sum(
-        (refund.amount for refund in refunds if refund.status == Refund.SUCCEEDED),
+        (refund.amount for refund in refunds if refund.status == RefundStatus.SUCCEEDED),
         Decimal("0"),
     )
     balance = Decimal("0")
@@ -111,12 +118,12 @@ def order_refund_summary(order: Order, payments) -> dict:
 
 
 def _charged_status(payment: Payment) -> str:
-    refunded = payment.refunds.filter(status=Refund.SUCCEEDED).aggregate(
+    refunded = payment.refunds.filter(status=RefundStatus.SUCCEEDED).aggregate(
         total=Sum("amount", default=Decimal("0"))
     )["total"]
     if refunded >= payment.amount:
-        return "REFUNDED"
-    return "PARTIALLY_REFUNDED" if refunded > 0 else "PAID"
+        return PaymentStatus.REFUNDED
+    return PaymentStatus.PARTIALLY_REFUNDED if refunded > 0 else PaymentStatus.PAID
 
 
 def apply_refund_totals(order: Order, payment: Payment) -> None:
@@ -221,7 +228,7 @@ def _open_refund(order_id: str, body: dict, actor_email: str) -> tuple[dict | No
             id=random_id("RFD"),
             payment=payment,
             amount=amount,
-            status=Refund.PENDING,
+            status=RefundStatus.PENDING,
             reason=reason,
             created_by=actor_email,
             data={"source": "ADMIN_PANEL"},
@@ -260,8 +267,8 @@ def refund_order(
         # El webhook pudo llegar antes y ya dejarla en su estado final.
         if refund.stripe_refund_id is None:
             refund.stripe_refund_id = result["id"]
-        if refund.status == Refund.PENDING:
-            refund.status = STRIPE_REFUND_STATUSES.get(result.get("status"), Refund.PENDING)
+        if refund.status == RefundStatus.PENDING:
+            refund.status = STRIPE_REFUND_STATUSES.get(result.get("status"), RefundStatus.PENDING)
         refund.updated_at = timezone.now()
         refund.save(update_fields=["stripe_refund_id", "status", "updated_at"])
         if order is not None:
@@ -282,8 +289,8 @@ def _fail_refund(refund: Refund) -> dict:
         refund = Refund.objects.select_for_update().get(pk=refund.pk)
         # Un timeout no dice si Stripe lo creó: si el webhook ya lo trajo,
         # manda lo que dijo Stripe.
-        if refund.status == Refund.PENDING and refund.stripe_refund_id is None:
-            refund.status = Refund.FAILED
+        if refund.status == RefundStatus.PENDING and refund.stripe_refund_id is None:
+            refund.status = RefundStatus.FAILED
             refund.updated_at = timezone.now()
             refund.save(update_fields=["status", "updated_at"])
     order = refund.payment.order
@@ -356,7 +363,11 @@ def sync_stripe_refund(order: Order, payment: Payment, refund_obj: dict) -> None
 
     reported_by_stripe = refund.stripe_refund_id is not None
     previous = refund.status
-    stale = status == Refund.PENDING and previous in FINAL_REFUND_STATUSES and reported_by_stripe
+    stale = (
+        status == RefundStatus.PENDING
+        and previous in FINAL_REFUND_STATUSES
+        and reported_by_stripe
+    )
     refund.stripe_refund_id = refund_obj["id"]
     if not stale:
         refund.status = status
@@ -370,9 +381,9 @@ def sync_stripe_refund(order: Order, payment: Payment, refund_obj: dict) -> None
     if refund.status == previous:
         return
     action = {
-        Refund.SUCCEEDED: "REFUND_SUCCEEDED",
-        Refund.FAILED: "REFUND_FAILED",
-        Refund.CANCELED: "REFUND_FAILED",
+        RefundStatus.SUCCEEDED: "REFUND_SUCCEEDED",
+        RefundStatus.FAILED: "REFUND_FAILED",
+        RefundStatus.CANCELED: "REFUND_FAILED",
     }.get(refund.status)
     if action:
         record_activity(

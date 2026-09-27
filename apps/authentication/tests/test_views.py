@@ -50,22 +50,21 @@ def _register_payload(**overrides):
 # --- register -----------------------------------------------------------------
 
 
+REGISTERED = {"ok": True, "message": "Check your email to verify your account."}
+
+
 @pytest.mark.django_db
-def test_register_creates_a_customer_account_without_role_and_starts_a_session():
-    response = APIClient().post("/api/register/", _register_payload(), format="json")
+def test_register_creates_a_customer_account_without_role_and_no_session():
+    client = APIClient()
+    response = client.post("/api/register/", _register_payload(), format="json")
 
     assert response.status_code == 201
-    body = response.json()
-    assert body["authenticated"] is True
-    assert body["user"]["email"] == "pat.fleet@example.com"
-    assert body["user"]["firstName"] == "Pat"
-    assert body["user"]["lastName"] == "Fleet"
-    assert body["user"]["isStaff"] is False
-    assert body["user"]["role"] is None
-    assert body["user"]["permissions"] == []
+    assert response.json() == REGISTERED
 
     user = User.objects.get(email="pat.fleet@example.com")
     assert user.role is None
+    assert user.first_name == "Pat"
+    assert user.last_name == "Fleet"
     assert user.check_password(STRONG_PASSWORD)
     customer = Customer.objects.get(user=user)
     assert customer.email == "pat.fleet@example.com"
@@ -73,9 +72,10 @@ def test_register_creates_a_customer_account_without_role_and_starts_a_session()
     assert customer.data["company"] == "Fleet LLC"
     assert customer.data["phone"] == "555-0100"
 
-    cookie = response.cookies[settings.SESSION_COOKIE_NAME]
-    assert cookie["httponly"] is True
-    assert Session.objects.get(session_key=cookie.value).get_decoded()["_auth_user_id"] == user.pk
+    # Sin sesión: si el registro nuevo la abriera, el de un email ya
+    # registrado respondería distinto y revelaría qué correos tienen cuenta.
+    assert settings.SESSION_COOKIE_NAME not in response.cookies
+    assert client.get("/api/session/").status_code == 401
 
 
 @pytest.mark.django_db
@@ -92,14 +92,38 @@ def test_register_does_not_link_an_existing_guest_customer_with_the_same_email()
 
 
 @pytest.mark.django_db
-def test_register_returns_409_for_an_existing_account_email():
+def test_register_answers_an_existing_account_email_like_a_new_one():
+    create_user("U_EXISTING", email="pat.fleet@example.com", password=DEFAULT_PASSWORD)
+
+    existing = APIClient().post("/api/register/", _register_payload(), format="json")
+    fresh = APIClient().post(
+        "/api/register/", _register_payload(email="brand.new@example.com"), format="json"
+    )
+
+    assert existing.status_code == fresh.status_code == 201
+    assert existing.json() == fresh.json() == REGISTERED
+    assert settings.SESSION_COOKIE_NAME not in existing.cookies
+    assert User.objects.filter(email="pat.fleet@example.com").count() == 1
+    assert User.objects.get(pk="U_EXISTING").check_password(DEFAULT_PASSWORD)
+    assert not Customer.objects.filter(email="pat.fleet@example.com").exists()
+
+
+@pytest.mark.django_db
+def test_register_with_an_existing_email_still_hashes_the_password(monkeypatch):
+    """El hash de relleno iguala el tiempo de respuesta de los dos casos."""
     create_user("U_EXISTING", email="pat.fleet@example.com")
+    hashed = []
+    real_set_password = User.set_password
 
-    response = APIClient().post("/api/register/", _register_payload(), format="json")
+    def spy(self, raw_password):
+        hashed.append(raw_password)
+        return real_set_password(self, raw_password)
 
-    assert response.status_code == 409
-    assert response.json() == {"error": "Email already exists"}
-    assert Customer.objects.count() == 0
+    monkeypatch.setattr(User, "set_password", spy)
+
+    APIClient().post("/api/register/", _register_payload(), format="json")
+
+    assert hashed == [STRONG_PASSWORD]
 
 
 @pytest.mark.django_db
@@ -388,6 +412,79 @@ def test_login_account_throttle_skips_requests_without_an_identifier(monkeypatch
         assert response.status_code == 401
 
 
+@pytest.mark.django_db
+def test_login_account_throttle_blocks_after_twenty_failed_attempts(monkeypatch):
+    monkeypatch.setattr(LoginRateThrottle, "rate", "1000/min", raising=False)
+    monkeypatch.setattr(LoginAccountRateThrottle, "rate", "20/hour", raising=False)
+    create_user("U_FAILS", email="fails@example.com", password=DEFAULT_PASSWORD)
+    client = APIClient()
+
+    for _ in range(20):
+        response = client.post(
+            "/api/login/", {"email": "fails@example.com", "password": "wrong"}, format="json"
+        )
+        assert response.status_code == 401
+
+    blocked = client.post(
+        "/api/login/", {"email": "fails@example.com", "password": DEFAULT_PASSWORD}, format="json"
+    )
+
+    assert blocked.status_code == 429
+    assert int(blocked["Retry-After"]) > 0
+    assert "error" in blocked.json()
+
+
+@pytest.mark.django_db
+def test_login_account_throttle_does_not_count_successful_logins(monkeypatch):
+    monkeypatch.setattr(LoginRateThrottle, "rate", "1000/min", raising=False)
+    monkeypatch.setattr(LoginAccountRateThrottle, "rate", "3/min", raising=False)
+    create_user("U_OK", email="ok@example.com", password=DEFAULT_PASSWORD)
+
+    for _ in range(6):
+        response = APIClient().post(
+            "/api/login/", {"email": "ok@example.com", "password": DEFAULT_PASSWORD}, format="json"
+        )
+        assert response.status_code == 200
+
+
+@pytest.mark.django_db
+def test_a_successful_login_resets_the_failed_attempts_of_the_account(monkeypatch):
+    monkeypatch.setattr(LoginRateThrottle, "rate", "1000/min", raising=False)
+    monkeypatch.setattr(LoginAccountRateThrottle, "rate", "3/min", raising=False)
+    create_user("U_RESET", email="reset@example.com", password=DEFAULT_PASSWORD)
+    client = APIClient()
+
+    def attempt(password):
+        return client.post(
+            "/api/login/", {"email": "reset@example.com", "password": password}, format="json"
+        ).status_code
+
+    assert [attempt("wrong"), attempt("wrong")] == [401, 401]
+    assert attempt(DEFAULT_PASSWORD) == 200
+    # Sin el reinicio, el tercer fallo llegaría al tope y el cuarto sería 429.
+    assert [attempt("wrong"), attempt("wrong"), attempt(DEFAULT_PASSWORD)] == [401, 401, 200]
+
+
+@pytest.mark.django_db
+def test_a_locked_account_does_not_block_another_account_from_the_same_ip(monkeypatch):
+    monkeypatch.setattr(LoginRateThrottle, "rate", "5/min", raising=False)
+    monkeypatch.setattr(LoginAccountRateThrottle, "rate", "2/min", raising=False)
+    create_user("U_VICTIM", email="victim@example.com", password=DEFAULT_PASSWORD)
+    create_user("U_OWNER", email="owner@example.com", password=DEFAULT_PASSWORD)
+    client = APIClient()
+
+    def attempt(email, password="wrong"):
+        return client.post(
+            "/api/login/", {"email": email, "password": password}, format="json"
+        ).status_code
+
+    assert [attempt("victim@example.com") for _ in range(3)] == [401, 401, 429]
+    assert attempt("owner@example.com") == 401
+    assert attempt("owner@example.com", DEFAULT_PASSWORD) == 200
+    # La otra cuenta sigue sujeta al tope por IP, que cuenta todos los intentos.
+    assert attempt("owner@example.com") == 429
+
+
 # --- session ------------------------------------------------------------------
 
 
@@ -503,17 +600,6 @@ def test_login_returns_a_rotated_csrf_token_that_authorizes_the_next_mutation():
     assert response.status_code == 200
     token = response.json()["csrfToken"]
     assert response.cookies[settings.CSRF_COOKIE_NAME].value != before
-    assert client.post("/api/logout/", HTTP_X_CSRFTOKEN=token).status_code == 200
-
-
-@pytest.mark.django_db
-def test_register_returns_a_csrf_token_that_authorizes_the_next_mutation():
-    client = APIClient(enforce_csrf_checks=True)
-
-    response = client.post("/api/register/", _register_payload(), format="json")
-
-    assert response.status_code == 201
-    token = response.json()["csrfToken"]
     assert client.post("/api/logout/", HTTP_X_CSRFTOKEN=token).status_code == 200
 
 

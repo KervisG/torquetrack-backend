@@ -104,3 +104,39 @@ def test_rendered_lines_use_whole_quantities_and_the_totals_rounding():
     assert "<span>3</span>" in html
     assert "<span>3.0</span>" not in html
     assert "$63.03" in html
+
+
+class _FakeHTML:
+    """Doble de `weasyprint.HTML`: guarda el HTML que recibiría WeasyPrint, así
+    el test corre sin las librerías nativas."""
+
+    rendered: list[str] = []
+
+    def __init__(self, string):
+        _FakeHTML.rendered.append(string)
+
+    def write_pdf(self):
+        return b"%PDF-fake"
+
+
+@pytest.mark.django_db
+def test_pdf_footer_uses_the_company_settings(monkeypatch, settings):
+    import sys
+    import types
+
+    from apps.quotes.services.pdf import render_quote_pdf_bytes
+    from apps.quotes.services.rendering import serialize_quote
+
+    settings.SALES_EMAIL = "parts@shop.example.com"
+    settings.APP_URL = "https://shop.example.com"
+    settings.COMPANY_ADDRESS = "Tampa, FL"
+    _FakeHTML.rendered = []
+    monkeypatch.setitem(sys.modules, "weasyprint", types.SimpleNamespace(HTML=_FakeHTML))
+
+    render_quote_pdf_bytes(serialize_quote(_make_quote()))
+
+    (html,) = _FakeHTML.rendered
+    assert "parts@shop.example.com" in html
+    assert "Tampa, FL" in html
+    assert "shop.example.com" in html
+    assert "torquetrackdiesel.com" not in html

@@ -1,3 +1,3 @@
-from apps.quotes.models.quote import Quote
+from apps.quotes.models.quote import Quote, QuoteStatus
 
-__all__ = ["Quote"]
+__all__ = ["Quote", "QuoteStatus"]

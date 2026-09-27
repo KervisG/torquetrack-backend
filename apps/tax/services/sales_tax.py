@@ -6,6 +6,7 @@ from decimal import Decimal
 from django.conf import settings
 
 from apps.common.numbers import ZERO, money, money_decimal
+from apps.customers.models import TaxStatus
 from apps.customers.services import customer_for_user
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.tax import taxjar
@@ -43,7 +44,7 @@ def calculate_sales_tax(
     if zip_code:
         try:
             quote = taxjar.calculate_tax(
-                from_zip=settings.SHIP_FROM_ZIP or "34241",
+                from_zip=settings.SHIP_FROM_ZIP,
                 to_state=state,
                 to_zip=zip_code,
                 to_city=city,
@@ -82,12 +83,16 @@ def _coalesce(payload: dict, *keys: str, default=0):
     return default
 
 
-def estimate_tax(payload: dict, user) -> dict:
-    """La exención sale solo de la sesión: con un `customerId` en el body
-    cualquiera podría pedir una estimación exenta ajena y enterarse del estado
-    fiscal de ese cliente."""
-    profile = customer_for_user(user)
-    if profile is not None and profile.tax_status == "VERIFIED":
+def is_tax_exempt(customer) -> bool:
+    """Única regla de exención: solo un certificado revisado por el staff
+    (`VERIFIED`) exime; un perfil pendiente o rechazado paga impuesto."""
+    return customer is not None and customer.tax_status == TaxStatus.VERIFIED
+
+
+def estimate_tax_for_customer(payload: dict, customer) -> dict:
+    """Estimación para un `Customer` que ya resolvió quien llama. El body nunca
+    decide la exención: solo el perfil que se recibe (o `None`, sin perfil)."""
+    if is_tax_exempt(customer):
         return dict(EXEMPT_ESTIMATE)
 
     address = payload.get("address") or {}
@@ -101,3 +106,11 @@ def estimate_tax(payload: dict, user) -> dict:
         address1=payload.get("address1") or address.get("address1"),
     )
     return {**result, "tax": money(result["tax"]), "rate": float(result["rate"])}
+
+
+def estimate_tax(payload: dict, user) -> dict:
+    """Storefront: la exención sale solo de la sesión. Con un `customerId` en
+    el body cualquiera podría pedir una estimación exenta ajena y enterarse del
+    estado fiscal de ese cliente. El panel usa `estimate_tax_for_customer` con
+    el cliente de la cotización, nunca con el perfil del empleado."""
+    return estimate_tax_for_customer(payload, customer_for_user(user))

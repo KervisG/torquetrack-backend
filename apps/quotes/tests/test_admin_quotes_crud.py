@@ -1,4 +1,5 @@
-"""`/api/admin/quotes/` (listado y CRUD). Sin proveedores que mockear.
+"""`/api/admin/quotes/` (listado y CRUD). TaxJar sin key: el impuesto que
+recalcula el servidor al guardar sale de la tabla de respaldo.
 
 El listado calcula el vencimiento al leer y nunca escribe; el estado se
 persiste con `manage.py expire_quotes`.
@@ -10,6 +11,11 @@ from django.utils import timezone
 
 from apps.quotes.models import Quote
 from tests.factories import activity_count, create_staff_user, session_client
+
+
+@pytest.fixture(autouse=True)
+def _no_taxjar(settings):
+    settings.TAXJAR_API_KEY = ""
 
 
 def _insert_user(user_id, permissions=None, active=True, full_access=False):
@@ -133,7 +139,8 @@ def test_create_computes_totals_and_allocates_number():
             "customer": {"name": "New Customer", "email": "new@example.com"},
             "items": [{"unitPrice": 100.0, "quantity": 2, "coreCharge": 10.0}],
             "shipping": 5,
-            "tax": 6,
+            "shippingAddress": {"state": "FL", "zip": "33701"},
+            "tax": 99,
         },
         format="json",
     )
@@ -144,7 +151,9 @@ def test_create_computes_totals_and_allocates_number():
     totals = body["quote"]["totals"]
     assert totals["subtotal"] == 200.0
     assert totals["core"] == 20.0
-    assert totals["total"] == 231.0
+    # El `tax` del body se ignora: 6 % de respaldo de FL sobre 225 (sin TaxJar).
+    assert totals["tax"] == 13.5
+    assert totals["total"] == 238.5
 
     quote = Quote.objects.get(pk=body["quote"]["id"])
     assert quote.number.startswith("Q")

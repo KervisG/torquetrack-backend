@@ -9,6 +9,7 @@ from django.utils import timezone
 from django.utils.html import format_html, format_html_join
 from django.utils.safestring import mark_safe
 
+from apps.cart.models import CartStage, CartStatus
 from apps.catalog.services.pricing import (
     STOREFRONT_QUANTITY_ERROR,
     InvalidQuantity,
@@ -17,7 +18,7 @@ from apps.catalog.services.pricing import (
     price_lines,
     serialize_totals,
 )
-from apps.checkout.models import Order
+from apps.checkout.models import Order, OrderPaymentStatus, OrderStatus
 from apps.checkout.services import (
     CHARGED_PAYMENT_STATUSES,
     PAYMENT_START_FAILED,
@@ -30,8 +31,8 @@ from apps.common.numbers import money
 from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
-from apps.quotes.models import Quote
-from apps.quotes.services.lifecycle import is_expired, next_quote_number
+from apps.quotes.models import Quote, QuoteStatus
+from apps.quotes.services.lifecycle import is_expired, next_quote_number, quote_expires_at
 from apps.quotes.services.rendering import _quote_line, serialize_quote
 
 logger = logging.getLogger(__name__)
@@ -66,7 +67,8 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
     el email es el de la cuenta, el nombre y el teléfono del body solo
     completan el snapshot y el perfil no se reescribe.
 
-    `cart_id` es el carrito de la sesión; el `cartId` del body se ignora.
+    `cart_id` es el carrito de la cuenta o, sin ella, el de la sesión; el
+    `cartId` del body se ignora.
     """
     customer_in = payload.get("customer")
     if not isinstance(customer_in, dict):
@@ -143,10 +145,10 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
         id=quote_id,
         number=number,
         customer_id=customer_id,
-        status="BUILDING",
+        status=QuoteStatus.BUILDING,
         data=data,
         created_at=now,
-        expires_at=now + timezone.timedelta(days=30),
+        expires_at=quote_expires_at(now),
         updated_at=now,
     )
 
@@ -212,8 +214,8 @@ def _link_cart_to_quote(cart_id, quote_id, quote_number, customer):
         return
     cart.data = {
         **(cart.data or {}),
-        "stage": "BUILDING_QUOTE",
-        "status": "BUILDING_QUOTE",
+        "stage": CartStage.BUILDING_QUOTE,
+        "status": CartStatus.BUILDING_QUOTE,
         "quoteId": quote_id,
         "quoteNumber": quote_number,
         "customer": customer,
@@ -239,14 +241,16 @@ def _matches_quote(order: Order, quote_data: dict) -> bool:
 # `CONVERTED` sigue siendo pagable: el checkout la convierte antes de abrir
 # Stripe, así que un reintento (Stripe caído, sesión abandonada) reusa el
 # pedido. Un pedido ya pagado se rechaza aparte.
-PAYABLE_QUOTE_STATUSES = frozenset({"ACTIVE", "CONTACTED", "CONVERTED"})
+PAYABLE_QUOTE_STATUSES = frozenset(
+    {QuoteStatus.ACTIVE, QuoteStatus.CONTACTED, QuoteStatus.CONVERTED}
+)
 
 
 def _checkout_refusal(quote: Quote) -> dict | None:
     """El vencimiento responde 410, igual que las vistas públicas por token."""
-    if is_expired(quote) or quote.status == "EXPIRED":
+    if is_expired(quote) or quote.status == QuoteStatus.EXPIRED:
         return {"error": "This quote has expired", "status": 410}
-    if quote.status == "BUILDING":
+    if quote.status == QuoteStatus.BUILDING:
         return {
             "error": "This quote is still being prepared. Contact TorqueTrack to finalize it.",
             "status": 409,
@@ -299,7 +303,10 @@ def checkout_from_quote(quote: Quote) -> dict:
         data = quote.data or {}
         order = None
         for candidate in orders:
-            if candidate.payment_status != "UNPAID" or candidate.status == "CANCELLED":
+            if (
+                candidate.payment_status != OrderPaymentStatus.UNPAID
+                or candidate.status == OrderStatus.CANCELLED
+            ):
                 continue
             if _matches_quote(candidate, data):
                 order = order or candidate
@@ -312,8 +319,8 @@ def checkout_from_quote(quote: Quote) -> dict:
                 id=random_id("OID"),
                 number=next_order_number(),
                 customer_id=quote.customer_id,
-                status="PENDING_PAYMENT",
-                payment_status="UNPAID",
+                status=OrderStatus.PENDING_PAYMENT,
+                payment_status=OrderPaymentStatus.UNPAID,
                 data={
                     **data,
                     "customer": serialized.get("customer") or data.get("customer") or {},
@@ -321,8 +328,8 @@ def checkout_from_quote(quote: Quote) -> dict:
                     "salesRep": data.get("createdBy") or "Online Quote",
                 },
             )
-        if quote.status != "CONVERTED" or data.get("orderNumber") != order.number:
-            quote.status = "CONVERTED"
+        if quote.status != QuoteStatus.CONVERTED or data.get("orderNumber") != order.number:
+            quote.status = QuoteStatus.CONVERTED
             quote.data = {**data, "orderNumber": order.number}
             quote.updated_at = timezone.now()
             quote.save(update_fields=["status", "data", "updated_at"])

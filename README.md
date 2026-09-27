@@ -14,8 +14,43 @@ impuestos, VIN, fitment y clientes; `authentication` (quién es cada uno: el
 `Role`, catálogo de permisos, gestión de usuarios y roles del panel, el admin
 de Django y el comando `grant_role`); `audit` (la bitácora de
 actividad, que las demás apps escriben con `record_activity`) y `dashboard`
-(agregados de solo lectura del panel, sin modelos propios); más
-`integrations`, que por ahora es un marcador vacío.
+(agregados de solo lectura del panel, sin modelos propios); `integrations`
+(adaptadores de proveedores externos) y `health` (`GET /api/health/`).
+
+## Contrato común de la API
+
+- **Permisos cerrados por defecto.** `DEFAULT_PERMISSION_CLASSES` es
+  `HasRolePermission` (solo staff): una view que olvide declarar permisos no
+  queda pública. Igual toda view declara `permission_classes` explícito
+  (`AllowAny` las públicas y las que separan 401 de 403 a mano);
+  `tests/test_view_permissions.py` recorre el URLconf y falla si alguna no lo
+  declara.
+- **Un solo formato de error.** Todo error es `{"error": "<mensaje>"}`, también
+  los que arma DRF (401, 403, 404, 405, 415, 429, JSON mal formado, CSRF):
+  `config/exceptions.py` (`EXCEPTION_HANDLER`) cambia `detail` por `error` y
+  conserva el código y los headers (`Retry-After`, `Allow`,
+  `WWW-Authenticate`). Un error de validación por campo agrega
+  `"fields": {...}` y lleva el primer mensaje en `error`. Nunca responder
+  `{"detail": ...}`.
+- **Health check.** `GET /api/health/` es público, sin sesión ni throttle:
+  `200 {"ok": true}` si la base responde y `503 {"ok": false, "error":
+  "Database unavailable"}` si no. En producción está exento del redirect a
+  HTTPS.
+- **Envío de pedidos.** `POST /api/admin/orders/<id>/fulfillment/` (permiso
+  `orders.status`) mueve el envío, que va separado de `status`:
+  `UNFULFILLED -> PREPARING -> SHIPPED -> DELIVERED`, solo hacia adelante y con
+  el salto `UNFULFILLED -> SHIPPED`. Solo avanza un pedido cobrado (`PAID` o
+  `PARTIALLY_REFUNDED`) y no cerrado (409). `SHIPPED` exige `carrier` (`UPS`,
+  `FEDEX`, `USPS`, `OTHER`) y `trackingNumber` (1 a 64 letras, dígitos o
+  guiones; 400) y avisa al cliente por correo con el enlace de seguimiento;
+  repetirlo con otra guía la corrige y vuelve a avisar. `DELIVERED` exige
+  `SHIPPED`. El listado del panel y `GET /api/account/orders/` devuelven
+  `fulfillmentStatus`, `carrier`, `trackingNumber`, `trackingUrl`, `shippedAt` y
+  `deliveredAt`. Cada cambio queda en la bitácora (`FULFILLMENT_UPDATED`).
+- **Logging.** Todo sale por consola con `fecha nivel logger mensaje`; el
+  nivel raíz sale de `LOG_LEVEL` (`INFO` por defecto), `django.request` queda
+  en `WARNING` y los loggers `apps.*` propagan al root. Nunca loguear tokens,
+  contraseñas ni datos personales.
 
 ## Desarrollo local (Docker)
 
@@ -95,6 +130,21 @@ el paso obligatorio si la cuenta se registró en la tienda.
 
 Las sesiones viejas no sobreviven: hay que volver a iniciar sesión.
 
+## Carrito
+
+El backend es la fuente de verdad del carrito (`apps/cart/`). Con sesión
+iniciada el carrito es el de la cuenta (`Cart.user`, uno por cuenta) y se ve
+igual en cualquier dispositivo; un invitado usa el carrito de su sesión
+(`cart_id`). El SPA lo lee con `GET /api/cart/` y lo reemplaza con
+`PUT /api/cart/` (`{"items": [{"id", "qty"}]}`: producto activo, cantidad
+entera de 1 a 99, cada producto una vez). Toda respuesta reprecia desde el
+catálogo e ignora cualquier precio del cliente.
+
+Al iniciar sesión (login, activación del portal) la señal `user_logged_in`
+fusiona el carrito invitado con el de la cuenta: suma las cantidades del mismo
+producto con tope 99, agrega los distintos y borra el invitado. Al cerrar
+sesión el carrito queda en la cuenta y la sesión nueva empieza vacía.
+
 ## Mantenimiento
 
 Los GET del panel son de solo lectura: el listado de cotizaciones calcula el
@@ -109,7 +159,7 @@ mano o desde el cron del host (el proyecto no trae un scheduler):
 
 ## Despliegue
 
-1. Definir las variables de entorno de producción; `env.example` las lista
+1. Definir las variables de entorno de producción; `.env.example` las lista
    todas con su explicación. Las imprescindibles:
    - `DJANGO_SETTINGS_MODULE=config.settings.prod` (`wsgi.py` cae en `dev` si
      no se define).
@@ -127,16 +177,44 @@ mano o desde el cron del host (el proyecto no trae un scheduler):
      header con una IP inventada y esquivar los rate limits.
    - `CACHE_URL`: opcional. Vacío usa la tabla `django_cache` de Postgres;
      para Redis, `redis://host:6379/1`.
+   - HTTPS: `prod.py` redirige a HTTPS (`SECURE_SSL_REDIRECT`, exento
+     `/api/health/`), manda HSTS de un año con subdominios
+     (`SECURE_HSTS_SECONDS`, `SECURE_HSTS_INCLUDE_SUBDOMAINS`) y deja el
+     preload en `false` (`SECURE_HSTS_PRELOAD`). Detrás de un proxy que
+     termina TLS, `USE_X_FORWARDED_PROTO=true` (si no, el redirect entra en
+     bucle); solo si el proxy siempre escribe `X-Forwarded-Proto` y el origen
+     no es alcanzable sin pasar por él.
+   - `SALES_EMAIL`, `COMPANY_ADDRESS` (por defecto `Sarasota, FL`) y
+     `APP_URL` arman el pie de la cotización (página, correo y PDF);
+     `SHIP_FROM_ZIP` (por defecto `34241`) es el origen de envíos e
+     impuestos. `LOG_LEVEL` fija el nivel del log.
 2. `python manage.py migrate`. Además de las tablas de dominio crea la tabla
    del cache compartido (`django_cache`, migración `authentication.0002_cache_table`),
    donde viven los contadores de los throttles: así se comparten entre
    workers y sobreviven a un deploy. Con `CACHE_URL` apuntando a Redis ese
    paso no crea nada.
-3. `python manage.py check --deploy` con los settings de producción.
-4. La primera vez: registrarse en la tienda y
+3. `python manage.py check --deploy` con los settings de producción. Queda
+   solo `security.W021` (preload de HSTS apagado a propósito) y los avisos
+   `drf_spectacular.W00x` de las views sin documentar.
+4. Apuntar el health check del hosting a `/api/health/`. El `Host` del ping
+   tiene que estar en `DJANGO_ALLOWED_HOSTS` o Django responde 400.
+5. La primera vez: registrarse en la tienda (el registro no inicia sesión:
+   hay que entrar después desde `/login`) y
    `python manage.py grant_role --email ... --role admin`.
+6. Webhook de Stripe: en el dashboard de Stripe (Developers → Webhooks) crear
+   el endpoint `https://<dominio>/api/webhooks/stripe/`, copiar su signing
+   secret en `STRIPE_WEBHOOK_SECRET` y activar estos eventos:
+   `checkout.session.completed`, `checkout.session.async_payment_succeeded`,
+   `checkout.session.async_payment_failed`, `checkout.session.expired`,
+   `refund.created`, `refund.updated`, `refund.failed` y `charge.refunded`.
+   Sin `checkout.session.expired` los pedidos `PENDING_PAYMENT` cuya sesión
+   venció sin pagarse quedan pendientes para siempre; con él, el pago pasa a
+   `CANCELLED` y el pedido a `CANCELLED` (bitácora `ORDER_EXPIRED`), y una
+   cotización con ese pedido vuelve a poder pagarse.
 
-Los correos de cuenta (reset de contraseña, verificación) salen en un hilo
+Los correos de cuenta (reset de contraseña, verificación y el aviso "You
+already have a TorqueTrack account" de un registro con un email ya
+registrado) salen en un hilo
 aparte del request (`apps/authentication/utils/background.py`) para que el tiempo de
 respuesta no revele qué correos tienen cuenta. No hay reintentos: si el
 proceso se reinicia en medio de un envío, ese correo se pierde y la persona

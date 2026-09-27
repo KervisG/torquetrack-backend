@@ -108,7 +108,7 @@ def test_register_sends_a_verification_email_and_reports_unverified(resend):
     )
 
     assert response.status_code == 201
-    assert response.json()["user"]["emailVerified"] is False
+    assert User.objects.get(email="pat@example.com").email_verified_at is None
     assert len(resend) == 1
     assert resend[0]["to"] == ["pat@example.com"]
     assert resend[0]["subject"] == "Verify your TorqueTrack email"
@@ -116,6 +116,41 @@ def test_register_sends_a_verification_email_and_reports_unverified(resend):
     stored = AccountToken.objects.get(purpose=AccountToken.EMAIL_VERIFICATION)
     assert token not in stored.token_hash
     assert stored.expires_at > timezone.now() + timezone.timedelta(hours=47)
+
+
+@pytest.mark.django_db
+def test_register_with_an_existing_email_tells_the_owner_instead_of_verifying(resend):
+    create_user("U_OWNER", email="pat@example.com")
+
+    response = APIClient().post(
+        "/api/register/",
+        {"email": "Pat@Example.com", "password": STRONG_PASSWORD, "name": "Someone Else"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert len(resend) == 1
+    assert resend[0]["to"] == ["pat@example.com"]
+    assert resend[0]["subject"] == "You already have a TorqueTrack account"
+    assert "https://shop.example.com/login" in resend[0]["html"]
+    assert "https://shop.example.com/forgot-password" in resend[0]["html"]
+    # No se emite ningún enlace: un tercero no puede anular los pendientes del dueño.
+    assert not AccountToken.objects.exists()
+    assert "Someone Else" not in resend[0]["html"]
+
+
+@pytest.mark.django_db
+def test_register_with_the_email_of_an_inactive_account_sends_nothing(monkeypatch):
+    create_user("U_OFF", email="off@example.com", active=False)
+    forbid_resend(monkeypatch)
+
+    response = APIClient().post(
+        "/api/register/",
+        {"email": "off@example.com", "password": STRONG_PASSWORD, "name": "Off"},
+        format="json",
+    )
+
+    assert response.status_code == 201
 
 
 @pytest.mark.django_db
@@ -364,6 +399,23 @@ def test_register_sends_the_verification_email_outside_the_request(slow_resend):
     assert slow_resend.delivered.wait(5)
     assert slow_resend.sent[0]["to"] == ["new@example.com"]
     assert slow_resend.sent[0]["subject"] == "Verify your TorqueTrack email"
+
+
+@pytest.mark.django_db
+def test_register_sends_the_existing_account_email_outside_the_request(slow_resend):
+    create_user("U_OWNER", email="owner@example.com")
+
+    response = APIClient().post(
+        "/api/register/",
+        {"email": "owner@example.com", "password": STRONG_PASSWORD, "name": "Owner"},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    assert slow_resend.sent == []
+    slow_resend.release.set()
+    assert slow_resend.delivered.wait(5)
+    assert slow_resend.sent[0]["subject"] == "You already have a TorqueTrack account"
 
 
 @pytest.mark.django_db

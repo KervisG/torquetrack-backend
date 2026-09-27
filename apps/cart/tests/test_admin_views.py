@@ -97,3 +97,30 @@ def test_non_cart_stage_status_uses_stage_verbatim():
     assert response.status_code == 200
     body = response.json()
     assert body[0]["status"] == "CHECKOUT"
+
+
+@pytest.mark.django_db
+def test_carts_written_by_the_storefront_keep_the_same_admin_row():
+    # El panel sigue viendo título, número de parte y cantidad de cada línea,
+    # y el email de la cuenta cuando el carrito es de un usuario.
+    from apps.catalog.models import Product
+    from tests.factories import create_user
+
+    Product.objects.create(
+        id="p1", data={"id": "p1", "title": "Injector", "partNumber": "INJ-1", "price": 80}
+    )
+    _insert_user("usr_carts5", permissions=["carts.view"])
+    create_user("U_SHOPPER", email="shopper@example.com")
+    shopper, _ = session_client("U_SHOPPER")
+    shopper.put("/api/cart/", {"items": [{"id": "p1", "qty": 2}]}, format="json")
+
+    body = _admin_client("usr_carts5").get("/api/admin/carts/").json()
+
+    assert len(body) == 1
+    row = body[0]
+    assert row["status"] == "ACTIVE"
+    assert row["stage"] == "CART"
+    assert row["email"] == "shopper@example.com"
+    assert row["items"] == [
+        {"id": "p1", "qty": 2, "title": "Injector", "partNumber": "INJ-1", "priceAtAdd": 80.0}
+    ]

@@ -10,7 +10,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.catalog.services.pricing import price_lines
-from apps.checkout.models import Order, Payment
+from apps.checkout.models import Order, OrderStatus, Payment, PaymentStatus
 from apps.common.ids import random_id
 from apps.common.links import app_url
 from apps.common.numbers import money_decimal, to_cents
@@ -22,10 +22,14 @@ logger = logging.getLogger(__name__)
 # Estados de un pago (y de `order.payment_status`) en los que Stripe ya
 # cobró. Un reembolso no convierte el cobro en "no pagado": el pedido no se
 # vuelve a cobrar ni el webhook lo marca PAID otra vez.
-CHARGED_PAYMENT_STATUSES = ("PAID", "PARTIALLY_REFUNDED", "REFUNDED")
+CHARGED_PAYMENT_STATUSES = (
+    PaymentStatus.PAID,
+    PaymentStatus.PARTIALLY_REFUNDED,
+    PaymentStatus.REFUNDED,
+)
 # Estados en los que el pedido ya no se va a cobrar ni despachar. Vive aquí
 # porque lo usan el panel y el webhook, y `webhooks` no importa `admin`.
-CLOSED_ORDER_STATUSES = {"CANCELLED", "REJECTED"}
+CLOSED_ORDER_STATUSES = {OrderStatus.CANCELLED, OrderStatus.REJECTED}
 # El staff sabe que falló Stripe (link de pago, cobro, reembolso), pero el
 # texto del proveedor queda en el log.
 STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."
@@ -84,7 +88,7 @@ def start_stripe_payment(order: Order, *, data: dict | None = None) -> tuple[Pay
             order=order,
             provider="stripe",
             provider_id=session["id"],
-            status="PENDING",
+            status=PaymentStatus.PENDING,
             amount=money_decimal((order_data.get("totals") or {}).get("total")),
             data={"sessionId": session["id"], **(data or {})},
         )
@@ -92,7 +96,7 @@ def start_stripe_payment(order: Order, *, data: dict | None = None) -> tuple[Pay
         # otro intento de checkout) se expira solo cuando la nueva ya existe.
         previous = (
             Payment.objects.select_for_update()
-            .filter(order=order, provider="stripe", status="PENDING")
+            .filter(order=order, provider="stripe", status=PaymentStatus.PENDING)
             .exclude(pk=payment.pk)
         )
         for other in previous:
@@ -117,9 +121,9 @@ def cancel_pending_payment(payment: Payment, reason: str, *, data: dict | None =
     en el peor caso el cliente paga una sesión cancelada y el webhook la marca
     para reembolso (`DUPLICATE_PAYMENT_RECEIVED`).
     """
-    if payment.status != "PENDING":
+    if payment.status != PaymentStatus.PENDING:
         return
-    payment.status = "CANCELLED"
+    payment.status = PaymentStatus.CANCELLED
     payment.updated_at = timezone.now()
     payment.data = {**(payment.data or {}), "cancelReason": reason, **(data or {})}
     payment.save(update_fields=["status", "updated_at", "data"])
@@ -152,14 +156,16 @@ def _expire_stripe_session(session_id: str, payment_id: str) -> None:
 
 def cancel_pending_payments(order: Order, reason: str) -> None:
     with transaction.atomic():
-        for payment in Payment.objects.select_for_update().filter(order=order, status="PENDING"):
+        for payment in Payment.objects.select_for_update().filter(
+            order=order, status=PaymentStatus.PENDING
+        ):
             cancel_pending_payment(payment, reason)
 
 
 def cancel_unpaid_order(order: Order, reason: str) -> None:
     """El número queda emitido en el pedido cancelado: la serie no se reutiliza ni se salta."""
     with transaction.atomic():
-        order.status = "CANCELLED"
+        order.status = OrderStatus.CANCELLED
         order.data = {**(order.data or {}), "cancelReason": reason}
         order.updated_at = timezone.now()
         order.save(update_fields=["status", "data", "updated_at"])

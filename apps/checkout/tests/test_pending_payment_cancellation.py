@@ -313,7 +313,9 @@ def test_admin_status_change_that_keeps_the_order_alive_keeps_its_sessions(
 ):
     create_staff_user("U_STATUS", permissions=["orders.status"])
     client, _ = session_client("U_STATUS")
-    _pending("PAY_OPEN", _order(), "cs_open")
+    # `PENDING_PAYMENT` solo puede cancelarse o rechazarse; pasar a
+    # `PROCESSING` es el cambio que deja el pedido vivo, y sale de `OPEN`.
+    _pending("PAY_OPEN", _order(status="OPEN", payment_status="PAID"), "cs_open")
 
     with django_capture_on_commit_callbacks(execute=True):
         response = client.patch("/api/admin/orders/OID_1/", {"status": "PROCESSING"}, format="json")

@@ -84,7 +84,36 @@ class _EmailRateThrottle(SimpleRateThrottle):
 
 
 class LoginAccountRateThrottle(_EmailRateThrottle):
+    """Cuenta solo los intentos FALLIDOS por email: si contara todos, cualquiera
+    podría bloquear una cuenta ajena tipeando su email, y el dueño no podría
+    entrar ni con la contraseña correcta. `allow_request` solo mira el
+    historial; la view suma un fallo con `record_failure` tras credenciales
+    inválidas y lo reinicia con `reset` al entrar. El tope por IP
+    (`LoginRateThrottle`) sigue contando todos los intentos."""
+
     scope = "login_account"
+
+    def throttle_success(self):
+        return True
+
+    def _history_key(self, request):
+        if self.rate is None:
+            return None
+        return self.get_cache_key(request, None)
+
+    def record_failure(self, request):
+        key = self._history_key(request)
+        if key is None:
+            return
+        now = self.timer()
+        history = [moment for moment in self.cache.get(key, []) if moment > now - self.duration]
+        history.insert(0, now)
+        self.cache.set(key, history, self.duration)
+
+    def reset(self, request):
+        key = self._history_key(request)
+        if key is not None:
+            self.cache.delete(key)
 
 
 class PasswordResetAccountRateThrottle(_EmailRateThrottle):

@@ -23,9 +23,9 @@ from apps.authorization.docs.schemas import (
     AdminUserResultSerializer,
     AdminUserSerializer,
     AdminUserUpdateRequestSerializer,
-    ErrorOrDetailResponse,
     ErrorResponseSerializer,
     OkResponseSerializer,
+    RoleWriteRequestSerializer,
 )
 
 ADMIN_USERS_TAG = "admin: users"
@@ -58,7 +58,7 @@ def _admin_forbidden(description: str, *business_examples) -> OpenApiResponse:
     """403 de una ruta del panel que muta: el propio de la view, el de CSRF de
     DRF y los de las reglas de privilegio del service."""
     return OpenApiResponse(
-        ErrorOrDetailResponse,
+        ErrorResponseSerializer,
         description=description,
         examples=[ex.FORBIDDEN, *business_examples, ex.CSRF_FAILED],
     )
@@ -95,8 +95,7 @@ class AdminRolesViewExtension(OpenApiViewExtension):
                 description=(
                     f"{ADMIN_ACCESS_RULES}\n\n"
                     "Roles for the admin selectors: full access roles first, then by "
-                    "`name`. Does not include each role's permissions. User endpoints "
-                    "take the `slug`, not the `id`."
+                    "`name`. Each row includes the catalog codes it grants."
                 ),
                 responses={
                     200: OpenApiResponse(
@@ -109,7 +108,60 @@ class AdminRolesViewExtension(OpenApiViewExtension):
             def get(self, request):
                 return super().get(request)
 
+            @extend_schema(
+                operation_id="admin_roles_create",
+                tags=[ADMIN_USERS_TAG],
+                summary="Create a role",
+                description=(
+                    f"{ADMIN_ACCESS_RULES}\n\n"
+                    "The slug is derived from `name` and cannot be changed later. "
+                    "A user without full access cannot create a full access role or "
+                    "grant a permission they do not have."
+                ),
+                request=RoleWriteRequestSerializer,
+                responses={
+                    201: OpenApiResponse(AdminRoleSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    401: ADMIN_UNAUTHORIZED,
+                    403: _admin_forbidden("Staff without `users.manage`, or a privilege rule."),
+                },
+            )
+            def post(self, request):
+                return super().post(request)
+
         return AdminRolesView
+
+
+class AdminRoleDetailViewExtension(OpenApiViewExtension):
+    target_class = "apps.authorization.views.AdminRoleDetailView"
+
+    def view_replacement(self):
+        class AdminRoleDetailView(self.target_class):
+            @extend_schema(
+                operation_id="admin_role_update",
+                tags=[ADMIN_USERS_TAG],
+                summary="Update a role",
+                description=(
+                    f"{ADMIN_ACCESS_RULES}\n\n"
+                    "Replaces `name`, `fullAccess` and `permissions`. The slug in the "
+                    "path does not change. The only full access role cannot lose full access."
+                ),
+                parameters=[
+                    OpenApiParameter("slug", str, OpenApiParameter.PATH, description="Role slug.")
+                ],
+                request=RoleWriteRequestSerializer,
+                responses={
+                    200: OpenApiResponse(AdminRoleSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    401: ADMIN_UNAUTHORIZED,
+                    403: _admin_forbidden("Staff without `users.manage`, or a privilege rule."),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def put(self, request, slug):
+                return super().put(request, slug)
+
+        return AdminRoleDetailView
 
 
 class AdminUsersViewExtension(OpenApiViewExtension):
@@ -179,7 +231,7 @@ class AdminUserDetailViewExtension(OpenApiViewExtension):
                         AdminUserResultSerializer, examples=[ex.ADMIN_USER_RESULT]
                     ),
                     400: OpenApiResponse(
-                        ErrorOrDetailResponse,
+                        ErrorResponseSerializer,
                         description="A field other than `role`/`active`, a validation "
                         "error or malformed JSON.",
                         examples=[

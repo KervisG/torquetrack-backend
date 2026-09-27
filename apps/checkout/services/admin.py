@@ -9,7 +9,15 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from apps.audit.services import record_activity
-from apps.checkout.models import Order, Payment, Refund
+from apps.checkout.models import (
+    CoreStatus,
+    Order,
+    OrderPaymentStatus,
+    OrderStatus,
+    Payment,
+    Refund,
+    ReturnStatus,
+)
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
     CLOSED_ORDER_STATUSES,
@@ -24,13 +32,17 @@ from apps.integrations.exceptions import ProviderError
 
 logger = logging.getLogger(__name__)
 
-ORDER_STATUSES = ["OPEN", "PENDING_PAYMENT", "PROCESSING", "COMPLETED", "CANCELLED", "REJECTED"]
-CORE_STATUSES = [
-    "AWAITING CORE", "IN TRANSIT", "RECEIVED", "INSPECTING", "ACCEPTED", "REJECTED", "REFUNDED",
-]
-RETURN_STATUSES = [
-    "REQUESTED", "APPROVED", "IN TRANSIT", "RECEIVED", "INSPECTING", "REFUNDED", "REJECTED",
-]
+# El panel no salta estados. El cobro (`PENDING_PAYMENT` → `OPEN`), la
+# expiración sin pago (`CANCELLED`) y el reembolso no pasan por aquí: el
+# reembolso solo cambia `payment_status`, y el envío vive en `fulfillment`.
+ORDER_STATUS_TRANSITIONS = {
+    OrderStatus.PENDING_PAYMENT: {OrderStatus.CANCELLED, OrderStatus.REJECTED},
+    OrderStatus.OPEN: {OrderStatus.PROCESSING, OrderStatus.CANCELLED, OrderStatus.REJECTED},
+    OrderStatus.PROCESSING: {OrderStatus.COMPLETED, OrderStatus.CANCELLED, OrderStatus.REJECTED},
+    OrderStatus.COMPLETED: set(),
+    OrderStatus.CANCELLED: set(),
+    OrderStatus.REJECTED: set(),
+}
 
 
 # Ids de Stripe: verlos exige `payments.transaction_id`, no `orders.view`.
@@ -71,6 +83,7 @@ def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
         ],
         "amountRefunded": money(refunds["amountRefunded"]),
         "refundableAmount": money(refunds["refundableAmount"]),
+        **order.fulfillment_summary(),
     }
 
 
@@ -114,14 +127,14 @@ def _workflow_patch(workflow: dict, actor_email: str) -> dict:
     core_case = workflow.get("coreCase")
     if core_case:
         core_status = str(core_case.get("status") or "").upper()
-        if core_status not in CORE_STATUSES:
+        if core_status not in CoreStatus.values:
             return {"error": "Invalid core status", "status": 400}
         patch["coreCase"] = {**core_case, "status": core_status, "updatedBy": actor_email}
 
     return_case = workflow.get("returnCase")
     if return_case:
         return_status = str(return_case.get("status") or "").upper()
-        if return_status not in RETURN_STATUSES:
+        if return_status not in ReturnStatus.values:
             return {"error": "Invalid return status", "status": 400}
         patch["returnCase"] = {**return_case, "status": return_status, "updatedBy": actor_email}
 
@@ -134,7 +147,7 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
     """`status` y `workflow` se validan juntos y se aplican en la misma
     transacción: o cambian los dos o ninguno."""
     status = str(payload["status"]).upper() if payload.get("status") else None
-    if status is not None and status not in ORDER_STATUSES:
+    if status is not None and status not in OrderStatus.values:
         return {"error": "Invalid order status", "status": 400}
 
     workflow = payload.get("workflow")
@@ -154,6 +167,13 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
         order = Order.objects.select_for_update().filter(pk=order_id).first()
         if order is None:
             return {"error": "Order not found", "status": 404}
+        if status is not None and status != order.status:
+            allowed = ORDER_STATUS_TRANSITIONS.get(order.status, set())
+            if status not in allowed:
+                return {
+                    "error": f"Cannot move order from {order.status} to {status}",
+                    "status": 409,
+                }
         fields = ["updated_at"]
         if status is not None:
             order.status = status
@@ -197,7 +217,7 @@ def delete_admin_order(order_id: str, actor_email: str) -> dict:
         if order is None:
             return {"error": "Order not found", "status": 404}
 
-        if order.payment_status != "UNPAID":
+        if order.payment_status != OrderPaymentStatus.UNPAID:
             return {
                 "error": "Paid/processed orders cannot be deleted. Cancel or refund them to "
                 "preserve payment history.",
@@ -238,7 +258,7 @@ def create_admin_payment_link(order_id: str) -> dict:
         return {"error": STRIPE_REQUEST_FAILED, "status": 502}
 
     total = money_decimal(payment.amount)
-    order.status = "PENDING_PAYMENT"
+    order.status = OrderStatus.PENDING_PAYMENT
     order.updated_at = timezone.now()
     order.save(update_fields=["status", "updated_at"])
 

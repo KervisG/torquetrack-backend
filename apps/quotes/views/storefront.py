@@ -6,7 +6,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.cart.services import CART_SESSION_KEY
+from apps.cart.services import current_cart_id
 from apps.quotes.models import Quote
 from apps.quotes.services import (
     checkout_from_quote,
@@ -16,6 +16,7 @@ from apps.quotes.services import (
     serialize_public_quote,
     serialize_quote,
 )
+from config.responses import service_response
 
 
 def _find_by_token(token: str) -> Quote | None:
@@ -34,10 +35,9 @@ class QuoteRequestView(APIView):
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
         result = create_quote_from_request(
-            body, request.user, cart_id=request.session.get(CART_SESSION_KEY)
+            body, request.user, cart_id=current_cart_id(request.user, request.session)
         )
-        status = result.pop("status", 200) if "error" in result else 200
-        return Response(result, status=status)
+        return service_response(result)
 
 
 class PublicQuoteView(APIView):
@@ -86,7 +86,4 @@ class PublicQuoteCheckoutView(APIView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
 
-        result = checkout_from_quote(quote)
-        if "error" in result:
-            return Response({"error": result["error"]}, status=result["status"])
-        return Response(result)
+        return service_response(checkout_from_quote(quote))

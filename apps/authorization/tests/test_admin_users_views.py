@@ -430,9 +430,96 @@ def test_roles_lists_every_role_with_slug_name_and_full_access():
     assert response.status_code == 200
     body = response.json()
     assert {"slug": "admin", "name": "Admin", "fullAccess": True} == {
-        key: value for key, value in body[0].items() if key != "id"
+        key: value
+        for key, value in body[0].items()
+        if key not in {"id", "permissions"}
     }
     slugs = [item["slug"] for item in body]
     assert "employee" in slugs and "parts-desk" in slugs
-    assert all(set(item) == {"id", "slug", "name", "fullAccess"} for item in body)
+    assert all(set(item) == {"id", "slug", "name", "fullAccess", "permissions"} for item in body)
     assert body[0]["id"] == Role.objects.get(slug="admin").pk
+    assert "users.manage" in body[0]["permissions"]
+
+
+@pytest.mark.django_db
+def test_create_role_saves_the_name_as_a_slug_and_its_permissions():
+    client = _manager_client("U_ROLE_CREATE")
+
+    response = client.post(
+        "/api/admin/roles/",
+        {"name": "Parts Desk", "fullAccess": False, "permissions": ["orders.view", "orders.view"]},
+        format="json",
+    )
+
+    assert response.status_code == 201
+    body = response.json()
+    assert body["slug"] == "parts-desk"
+    assert body["permissions"] == ["orders.view"]
+    role = Role.objects.get(slug="parts-desk")
+    assert role.name == "Parts Desk"
+    assert activity_count(action="ROLE_CREATED", entity_id=str(role.pk)) == 1
+
+
+@pytest.mark.django_db
+def test_create_role_rejects_a_duplicate_name():
+    client = _manager_client("U_ROLE_DUP")
+
+    response = client.post(
+        "/api/admin/roles/",
+        {"name": "Admin", "permissions": []},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "A role with this name already exists"}
+
+
+@pytest.mark.django_db
+def test_create_role_rejects_permissions_the_actor_does_not_have():
+    client = _manager_client("U_ROLE_LIMITED", full_access=False)
+
+    response = client.post(
+        "/api/admin/roles/",
+        {"name": "Refunds", "fullAccess": False, "permissions": ["payments.refund"]},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "You cannot grant permissions you do not have"}
+    assert not Role.objects.filter(slug="refunds").exists()
+
+
+@pytest.mark.django_db
+def test_update_role_renames_and_replaces_permissions_without_changing_the_slug():
+    client = _manager_client("U_ROLE_EDIT")
+    create_role("parts-desk", name="Parts desk", permissions=["orders.view"])
+
+    response = client.put(
+        "/api/admin/roles/parts-desk/",
+        {"name": "Counter", "fullAccess": False, "permissions": ["quotes.view"]},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["slug"] == "parts-desk"
+    assert response.json()["name"] == "Counter"
+    assert response.json()["permissions"] == ["quotes.view"]
+    role_id = str(Role.objects.get(slug="parts-desk").pk)
+    assert activity_count(action="ROLE_UPDATED", entity_id=role_id) == 1
+
+
+@pytest.mark.django_db
+def test_update_role_refuses_to_remove_the_only_full_access_role():
+    admin = Role.objects.get(slug="admin")
+    create_user("U_ROLE_LAST", role=admin)
+    client, _ = session_client("U_ROLE_LAST")
+
+    response = client.put(
+        "/api/admin/roles/admin/",
+        {"name": "Admin", "fullAccess": False, "permissions": ["users.manage"]},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "At least one active full access user is required"}
+    assert Role.objects.get(slug="admin").full_access is True

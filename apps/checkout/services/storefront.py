@@ -6,6 +6,7 @@ import logging
 from django.db import transaction
 from django.utils import timezone
 
+from apps.cart.models import CartStage, CartStatus
 from apps.catalog.services.pricing import (
     STOREFRONT_QUANTITY_ERROR,
     InvalidQuantity,
@@ -15,10 +16,11 @@ from apps.catalog.services.pricing import (
     price_lines,
     serialize_totals,
 )
-from apps.checkout.models import Order
+from apps.checkout.models import Order, OrderPaymentStatus, OrderStatus
 from apps.checkout.services.payments import cancel_unpaid_order, start_stripe_payment
 from apps.common.ids import random_id
 from apps.common.numbers import money
+from apps.customers.models import TaxStatus
 from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.exceptions import ProviderError
 from apps.numbering.services import next_document_number
@@ -68,8 +70,8 @@ def _link_cart_to_order(cart_id, order: Order, customer: dict) -> None:
         return
     cart.data = {
         **(cart.data or {}),
-        "stage": "CHECKOUT",
-        "status": "CHECKOUT",
+        "stage": CartStage.CHECKOUT,
+        "status": CartStatus.CHECKOUT,
         "orderId": order.pk,
         "orderNumber": order.number,
         "customer": customer,
@@ -88,8 +90,9 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     número. Si Stripe falla, el pedido queda `CANCELLED` y el carrito no pasa a
     `CHECKOUT`: el carrito solo se vincula cuando la sesión existe.
 
-    `cart_id` es el carrito de la sesión; el `cartId` del body se ignora para
-    que nadie pueda marcar como vendido el carrito de otro.
+    `cart_id` es el carrito de la cuenta o, sin ella, el de la sesión; el
+    `cartId` del body se ignora para que nadie pueda marcar como vendido el
+    carrito de otro.
     """
     from apps.fitment.services import check_product_fitment
     from apps.shipping.services import verify_shipping_selection
@@ -151,7 +154,7 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
 
     # La exención sale solo del perfil de la sesión: un email tipeado por un
     # invitado no prueba que el comprador sea ese cliente exento.
-    if profile is not None and profile.tax_status == "VERIFIED":
+    if profile is not None and profile.tax_status == TaxStatus.VERIFIED:
         tax_result = {"tax": 0, "rate": 0, "source": "Tax exempt"}
     else:
         tax_result = calculate_sales_tax(
@@ -174,8 +177,8 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
             id=random_id("OID"),
             number=next_order_number(),
             customer_id=customer_id,
-            status="PENDING_PAYMENT",
-            payment_status="UNPAID",
+            status=OrderStatus.PENDING_PAYMENT,
+            payment_status=OrderPaymentStatus.UNPAID,
             data={
                 "customer": customer,
                 "vehicle": vehicle,

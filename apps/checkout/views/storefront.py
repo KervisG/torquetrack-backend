@@ -1,3 +1,4 @@
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -11,6 +12,9 @@ class CheckoutView(APIView):
     """La sesión es opcional: sin ella es un checkout invitado; con ella el
     pedido queda en el `Customer` de la cuenta y se exige CSRF."""
 
+    # Solo JSON: un formulario de otro sitio no puede mandar `application/json`
+    # sin preflight de CORS, así que no llega a esta ruta sin CSRF (415).
+    parser_classes = [JSONParser]
     permission_classes = [AllowAny]
 
     def post(self, request):

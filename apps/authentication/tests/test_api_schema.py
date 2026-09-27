@@ -146,3 +146,19 @@ def test_schema_generation_emits_no_warnings_or_errors_for_auth():
     auth_messages = [message for message in messages if AUTH_MESSAGE.search(message)]
     reset_generator_stats()
     assert auth_messages == []
+
+
+def test_body_operations_accept_only_json_and_document_the_415(schema):
+    # Las views con body declaran `parser_classes = [JSONParser]`: un formulario
+    # recibe 415 y el esquema no ofrece `form` ni `multipart`.
+    for path, method in OPERATIONS_WITH_BODY:
+        operation = schema["paths"][path][method]
+        assert list(operation["requestBody"]["content"]) == ["application/json"], path
+        assert "415" in operation["responses"], path
+
+
+def test_link_requests_document_that_earlier_links_are_voided(schema):
+    for path in ("/api/password-reset/", "/api/verify-email/resend/"):
+        description = schema["paths"][path]["post"]["description"].lower()
+        assert "earlier links stay valid" not in description, path
+        assert "invalidates the earlier pending" in description, path

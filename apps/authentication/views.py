@@ -3,6 +3,7 @@ decide el Role."""
 from django.contrib.auth import login, logout
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import ensure_csrf_cookie
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -39,6 +40,9 @@ def _session_payload(request, user: User) -> dict:
 
 
 class LoginView(APIView):
+    # Solo JSON: un formulario de otro sitio no puede mandar `application/json`
+    # sin preflight de CORS, así que no llega a esta ruta sin CSRF (415).
+    parser_classes = [JSONParser]
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [LoginRateThrottle, LoginAccountRateThrottle]
@@ -86,6 +90,7 @@ def _result(result: dict) -> Response:
 
 
 class PasswordResetView(APIView):
+    parser_classes = [JSONParser]
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [PasswordResetRateThrottle, PasswordResetAccountRateThrottle]
@@ -95,6 +100,7 @@ class PasswordResetView(APIView):
 
 
 class PasswordResetConfirmView(APIView):
+    parser_classes = [JSONParser]
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [PasswordResetConfirmRateThrottle]

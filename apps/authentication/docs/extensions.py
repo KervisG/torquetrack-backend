@@ -53,6 +53,14 @@ MALFORMED_JSON = OpenApiResponse(
     description="The body is not valid JSON.",
     examples=[shared_ex.MALFORMED_JSON],
 )
+UNSUPPORTED_MEDIA_TYPE = OpenApiResponse(
+    DetailResponseSerializer,
+    description=(
+        "The body is not `application/json` (form-encoded or multipart). Only JSON "
+        "is accepted, so a cross-site HTML form cannot reach this public route."
+    ),
+    examples=[shared_ex.UNSUPPORTED_MEDIA_TYPE],
+)
 
 
 # --- storefront ------------------------------------------------------------------
@@ -97,6 +105,7 @@ class LoginViewExtension(OpenApiViewExtension):
                             )
                         ],
                     ),
+                    415: UNSUPPORTED_MEDIA_TYPE,
                     429: _throttled("`login` or `login_account`"),
                 },
             )
@@ -191,7 +200,8 @@ class PasswordResetViewExtension(OpenApiViewExtension):
                     "no account exists).\n"
                     "- Only for an active account: creates a single-use reset token "
                     "valid for 1 hour and sends the \"Reset your TorqueTrack "
-                    "password\" email in the background. Earlier links stay valid."
+                    "password\" email in the background. Invalidates the earlier "
+                    "pending reset links of the account: only the newest one works."
                 ),
                 request=PasswordResetRequestSerializer,
                 examples=[ex.PASSWORD_RESET_REQUEST],
@@ -212,6 +222,7 @@ class PasswordResetViewExtension(OpenApiViewExtension):
                         ],
                     ),
                     400: MALFORMED_JSON,
+                    415: UNSUPPORTED_MEDIA_TYPE,
                     429: _throttled("`password_reset` or `password_reset_account`"),
                 },
             )
@@ -260,6 +271,7 @@ class PasswordResetConfirmViewExtension(OpenApiViewExtension):
                             shared_ex.MALFORMED_JSON,
                         ],
                     ),
+                    415: UNSUPPORTED_MEDIA_TYPE,
                     429: _throttled("`password_reset_confirm`"),
                 },
             )
@@ -284,8 +296,9 @@ class VerifyEmailResendViewExtension(OpenApiViewExtension):
                     "without a session), checked before the session. No body.\n\n"
                     "When the email is not verified yet, creates a new verification "
                     "token valid for 48 hours and sends the \"Verify your TorqueTrack "
-                    "email\" email in the background; earlier links stay valid. When "
-                    "it is already verified, nothing is sent."
+                    "email\" email in the background; invalidates the earlier pending "
+                    "verification links, so only the newest one works. When it is "
+                    "already verified, nothing is sent."
                 ),
                 request=None,
                 responses={

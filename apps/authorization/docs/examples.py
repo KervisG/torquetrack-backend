@@ -22,6 +22,10 @@ MALFORMED_JSON = detail_example(
     "Malformed JSON", "JSON parse error - Expecting value: line 1 column 1 (char 0)"
 )
 CSRF_FAILED = detail_example("CSRF token missing", "CSRF Failed: CSRF token missing.")
+UNSUPPORTED_MEDIA_TYPE = detail_example(
+    "Form body",
+    'Unsupported media type "application/x-www-form-urlencoded" in request.',
+)
 
 # --- errores de la aplicación -----------------------------------------------------
 

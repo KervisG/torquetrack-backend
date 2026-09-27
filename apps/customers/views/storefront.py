@@ -1,4 +1,5 @@
 from django.contrib.auth import login
+from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -45,6 +46,9 @@ def _signed_in(request, user: User) -> Response:
 
 
 class RegisterView(APIView):
+    # Solo JSON: un formulario de otro sitio no puede mandar `application/json`
+    # sin preflight de CORS, así que no llega a esta ruta sin CSRF (415).
+    parser_classes = [JSONParser]
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [RegisterRateThrottle]
@@ -60,6 +64,7 @@ class VerifyEmailView(APIView):
     """Público: el token del correo es la prueba, así funciona aunque el enlace
     se abra en otro navegador sin sesión."""
 
+    parser_classes = [JSONParser]
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [VerifyEmailRateThrottle]
@@ -134,6 +139,7 @@ class AccountTaxExemptionView(_AccountView):
 
 
 class ActivateAccountView(APIView):
+    parser_classes = [JSONParser]
     authentication_classes = []
     permission_classes = [AllowAny]
     throttle_classes = [ActivateRateThrottle]

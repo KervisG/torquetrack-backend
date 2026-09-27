@@ -154,7 +154,7 @@ def test_create_computes_totals_and_allocates_number():
 
 @pytest.mark.django_db
 def test_update_existing_quote_preserves_number_and_dates():
-    _insert_user("usr_update", permissions=["quotes.create"])
+    _insert_user("usr_update", permissions=["quotes.create", "quotes.edit"])
     quote = _make_quote(number="Q40005", status="BUILDING")
     original_created_at = quote.created_at
     original_expires_at = quote.expires_at
@@ -182,7 +182,7 @@ def test_update_keeps_the_public_link_and_the_linked_order():
     """El editor manda la cotización completa, pero no conoce el token del
     enlace ya enviado ni el pedido vinculado: perderlos rompería el correo y
     el convert idempotente."""
-    _insert_user("usr_update_keep", permissions=["quotes.create"])
+    _insert_user("usr_update_keep", permissions=["quotes.create", "quotes.edit"])
     quote = _make_quote(
         number="Q40006",
         data={"publicToken": "tok-sent", "orderNumber": "O50001", "memo": "old"},
@@ -204,7 +204,7 @@ def test_update_keeps_the_public_link_and_the_linked_order():
 
 @pytest.mark.django_db
 def test_update_returns_404_for_unknown_quote_id():
-    _insert_user("usr_update2", permissions=["quotes.create"])
+    _insert_user("usr_update2", permissions=["quotes.create", "quotes.edit"])
     client = _admin_client("usr_update2")
 
     response = client.post("/api/admin/quotes/", {"id": "does-not-exist"}, format="json")
@@ -271,3 +271,67 @@ def test_delete_returns_404_for_unknown_quote():
     response = client.delete("/api/admin/quotes/does-not-exist/")
 
     assert response.status_code == 404
+
+
+# --- reglas de edición ------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_update_requires_quotes_edit_permission():
+    _insert_user("usr_update_no_edit", permissions=["quotes.create"])
+    _make_quote(number="Q40010", status="BUILDING")
+
+    response = _admin_client("usr_update_no_edit").post(
+        "/api/admin/quotes/",
+        {"id": "quo_crud_1", "status": "ACTIVE", "items": []},
+        format="json",
+    )
+
+    assert response.status_code == 403
+    assert response.json() == {"error": "Forbidden"}
+    assert Quote.objects.get(pk="quo_crud_1").status == "BUILDING"
+
+
+@pytest.mark.django_db
+def test_update_rejects_a_converted_quote():
+    _insert_user("usr_update_converted", permissions=["quotes.create", "quotes.edit"])
+    _make_quote(number="Q40011", status="CONVERTED", data={"orderNumber": "O50002"})
+
+    response = _admin_client("usr_update_converted").post(
+        "/api/admin/quotes/",
+        {"id": "quo_crud_1", "status": "ACTIVE", "items": []},
+        format="json",
+    )
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "Converted quotes cannot be edited"}
+    assert Quote.objects.get(pk="quo_crud_1").status == "CONVERTED"
+
+
+@pytest.mark.django_db
+def test_create_rejects_an_unknown_status():
+    _insert_user("usr_create_status", permissions=["quotes.create"])
+
+    response = _admin_client("usr_create_status").post(
+        "/api/admin/quotes/", {"status": "PAID_IN_FULL", "items": []}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Invalid quote status"}
+    assert not Quote.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("quantity", [2.5, 0, -1, "abc"])
+def test_create_rejects_a_line_quantity_that_is_not_a_whole_number(quantity):
+    _insert_user("usr_create_qty", permissions=["quotes.create"])
+
+    response = _admin_client("usr_create_qty").post(
+        "/api/admin/quotes/",
+        {"items": [{"unitPrice": 100.0, "quantity": quantity}]},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Item quantity must be a whole number of at least 1"}
+    assert not Quote.objects.exists()

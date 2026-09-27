@@ -23,6 +23,9 @@ def is_expired(quote: Quote) -> bool:
     return bool(quote.expires_at and quote.expires_at < timezone.now())
 
 
+# Todos los estados de `Quote.status`; el modelo no declara `choices`.
+QUOTE_STATUSES = ("BUILDING", "ACTIVE", "CONTACTED", "EXPIRED", "CONVERTED", "LOST")
+
 # Estados abiertos que el vencimiento convierte en `EXPIRED`; los cerrados
 # (`CONVERTED`, `LOST`...) conservan el suyo.
 EXPIRABLE_QUOTE_STATUSES = ("BUILDING", "ACTIVE", "CONTACTED")

@@ -5,6 +5,7 @@ from rest_framework.test import APIClient
 
 from apps.checkout.models import Order
 from apps.quotes.models import Quote
+from apps.quotes.services.admin import convert_quote_to_order
 from apps.quotes.tests.pdf_support import requires_weasyprint
 from tests.factories import activity_count, create_staff_user, session_client
 from tests.fakes import FakeResend, install_resend
@@ -297,3 +298,48 @@ def test_send_reports_unconfigured_email_before_rendering_the_pdf(settings, monk
 
     assert response.status_code == 502
     assert response.json() == {"error": "Email provider not configured"}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("status", ["LOST", "BUILDING", "CONVERTED"])
+def test_convert_rejects_a_quote_that_is_not_convertible(status):
+    # CONVERTED sin pedido vinculado: el pedido lo creó (y lo pudo borrar)
+    # otro camino; convertir de nuevo abriría un segundo cobro.
+    _insert_user("usr_convert_closed", permissions=["quotes.convert"])
+    _make_quote(status=status)
+
+    response = _admin_client("usr_convert_closed").post("/api/admin/quotes/quo_admin_1/convert/")
+
+    assert response.status_code == 409
+    assert response.json() == {"error": "This quote cannot be converted in its current status."}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_convert_rejects_an_archived_quote():
+    _insert_user("usr_convert_archived", permissions=["quotes.convert"])
+    _make_quote(data={"archived": True})
+
+    response = _admin_client("usr_convert_archived").post(
+        "/api/admin/quotes/quo_admin_1/convert/"
+    )
+
+    assert response.status_code == 409
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_double_conversion_leaves_a_single_order():
+    """Dos requests que leyeron la cotización antes de que cualquiera la
+    convirtiera: la segunda relee la fila bloqueada y reusa el pedido."""
+    _make_quote()
+    first_read = Quote.objects.get(pk="quo_admin_1")
+    second_read = Quote.objects.get(pk="quo_admin_1")
+
+    first = convert_quote_to_order(first_read, "staff@example.com")
+    second = convert_quote_to_order(second_read, "staff@example.com")
+
+    assert Order.objects.count() == 1
+    assert second["existing"] is True
+    assert second["order"]["number"] == first["order"]["number"]
+    assert activity_count(action="QUOTE_CONVERTED", entity_id="quo_admin_1") == 1

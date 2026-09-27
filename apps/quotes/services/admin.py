@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
@@ -11,7 +12,12 @@ from apps.common.ids import random_id
 from apps.common.numbers import money, to_number
 from apps.integrations.email import resend
 from apps.quotes.models import Quote
-from apps.quotes.services.lifecycle import effective_quote_status, next_quote_number, quote_token
+from apps.quotes.services.lifecycle import (
+    QUOTE_STATUSES,
+    effective_quote_status,
+    next_quote_number,
+    quote_token,
+)
 from apps.quotes.services.pdf import render_quote_pdf_base64
 from apps.quotes.services.rendering import (
     public_quote_pdf_url,
@@ -24,6 +30,13 @@ from apps.quotes.services.rendering import (
 # cotización completa; sin conservarlas, un update rompería el enlace ya
 # enviado y el convert idempotente (`orderNumber`).
 _SYSTEM_QUOTE_KEYS = ("publicToken", "orderNumber", "lastEmailedAt", "lastEmailedTo", "source")
+
+# El staff convierte solo una cotización lista para vender. No se reusa la
+# regla del checkout público: sus mensajes son para el cliente y allí
+# `CONVERTED` sigue siendo pagable.
+CONVERTIBLE_QUOTE_STATUSES = ("ACTIVE", "CONTACTED")
+NOT_CONVERTIBLE = "This quote cannot be converted in its current status."
+INVALID_QUANTITY = "Item quantity must be a whole number of at least 1"
 
 
 def ensure_public_token(quote: Quote) -> str:
@@ -47,39 +60,46 @@ def reopen_quote(quote: Quote) -> None:
 
 
 def convert_quote_to_order(quote: Quote, actor_email: str) -> dict:
-    if effective_quote_status(quote) == "EXPIRED":
-        return {"error": "Reopen this quote before converting it.", "status": 400}
+    with transaction.atomic():
+        # Todo se decide sobre la fila bloqueada: dos clics, o el checkout
+        # público a la vez, no pueden crear dos pedidos de la misma cotización.
+        quote = Quote.objects.select_for_update().get(pk=quote.pk)
+        if effective_quote_status(quote) == "EXPIRED":
+            return {"error": "Reopen this quote before converting it.", "status": 400}
 
-    data = quote.data or {}
-    existing_number = data.get("orderNumber")
-    if existing_number:
-        existing = Order.objects.filter(number=existing_number).first()
-        if existing is not None:
-            existing_order = {"id": existing.pk, "number": existing.number}
-            return {"ok": True, "existing": True, "order": existing_order}
+        data = quote.data or {}
+        existing_number = data.get("orderNumber")
+        if existing_number:
+            existing = Order.objects.filter(number=existing_number).first()
+            if existing is not None:
+                existing_order = {"id": existing.pk, "number": existing.number}
+                return {"ok": True, "existing": True, "order": existing_order}
 
-    number = next_order_number()
-    order_id = random_id("OID")
-    order_data = {
-        **data,
-        "quoteNumber": quote.number,
-        "salesRep": actor_email,
-        "totals": data.get("totals"),
-    }
-    Order.objects.create(
-        id=order_id,
-        number=number,
-        customer_id=quote.customer_id,
-        status="OPEN",
-        payment_status="UNPAID",
-        data=order_data,
-        created_at=timezone.now(),
-        updated_at=timezone.now(),
-    )
-    quote.status = "CONVERTED"
-    quote.data = {**data, "orderNumber": number}
-    quote.updated_at = timezone.now()
-    quote.save(update_fields=["status", "data", "updated_at"])
+        if quote.status not in CONVERTIBLE_QUOTE_STATUSES or data.get("archived"):
+            return {"error": NOT_CONVERTIBLE, "status": 409}
+
+        number = next_order_number()
+        order_id = random_id("OID")
+        order_data = {
+            **data,
+            "quoteNumber": quote.number,
+            "salesRep": actor_email,
+            "totals": data.get("totals"),
+        }
+        Order.objects.create(
+            id=order_id,
+            number=number,
+            customer_id=quote.customer_id,
+            status="OPEN",
+            payment_status="UNPAID",
+            data=order_data,
+            created_at=timezone.now(),
+            updated_at=timezone.now(),
+        )
+        quote.status = "CONVERTED"
+        quote.data = {**data, "orderNumber": number}
+        quote.updated_at = timezone.now()
+        quote.save(update_fields=["status", "data", "updated_at"])
 
     record_activity(
         actor=actor_email,
@@ -148,14 +168,31 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
 # --- listado, alta y baja ---
 
 
-def _quote_totals(payload: dict) -> dict:
-    items = payload.get("items") or []
+def _line_quantity(item: dict) -> int | None:
+    """Cantidad entera >= 1 de una línea, `1` si no viene, o `None` si es
+    inválida: una fracción o un negativo reprecia la cotización a un total
+    que no se puede despachar."""
+    value = item.get("quantity")
+    if value is None:
+        value = item.get("qty")
+    if value is None:
+        return 1
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        quantity = value
+    elif isinstance(value, float) and value.is_integer():
+        quantity = int(value)
+    elif isinstance(value, str) and value.strip().isdigit():
+        quantity = int(value.strip())
+    else:
+        return None
+    return quantity if quantity >= 1 else None
 
-    def qty(item):
-        value = item.get("quantity")
-        if value is None:
-            value = item.get("qty")
-        return to_number(value, 1.0) or 1.0
+
+def _quote_totals(payload: dict) -> dict:
+    """Solo recibe líneas ya validadas por `upsert_admin_quote`."""
+    items = payload.get("items") or []
 
     def unit_price(item):
         value = item.get("unitPrice")
@@ -163,8 +200,10 @@ def _quote_totals(payload: dict) -> dict:
             value = item.get("price")
         return to_number(value, 0.0)
 
-    subtotal = money(sum(unit_price(item) * qty(item) for item in items))
-    core = money(sum(to_number(item.get("coreCharge"), 0.0) * qty(item) for item in items))
+    subtotal = money(sum(unit_price(item) * _line_quantity(item) for item in items))
+    core = money(
+        sum(to_number(item.get("coreCharge"), 0.0) * _line_quantity(item) for item in items)
+    )
     shipping = money(payload.get("shipping"))
     tax = money(payload.get("tax"))
     return {
@@ -184,8 +223,13 @@ def list_admin_quotes() -> list[dict]:
 
 def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
     """Al actualizar se conservan `number`, `created_at` y `expires_at`."""
+    items = payload.get("items") or []
+    if any(not isinstance(item, dict) or _line_quantity(item) is None for item in items):
+        return {"error": INVALID_QUANTITY, "status": 400}
+    status = str(payload.get("status") or "ACTIVE").upper()
+    if status not in QUOTE_STATUSES:
+        return {"error": "Invalid quote status", "status": 400}
     totals = _quote_totals(payload)
-    status = payload.get("status") or "ACTIVE"
     customer_id = payload.get("customerId") or None
     quote_data = {**payload, "totals": totals, "createdBy": actor_email}
     now = timezone.now()
@@ -195,6 +239,9 @@ def upsert_admin_quote(payload: dict, actor_email: str) -> dict:
         quote = Quote.objects.filter(pk=quote_id).first()
         if quote is None:
             return {"error": "Quote not found", "status": 404}
+        if quote.status == "CONVERTED":
+            # Ya tiene pedido: editarla desalinearía el pedido con lo cotizado.
+            return {"error": "Converted quotes cannot be edited", "status": 409}
 
         number = quote.number
         created_at = quote.created_at

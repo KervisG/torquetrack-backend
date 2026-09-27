@@ -1,7 +1,7 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import HasRolePermission
+from apps.authorization.permissions import HasRolePermission, has_role_permission
 from apps.quotes.models import Quote
 from apps.quotes.services import (
     convert_quote_to_order,
@@ -118,6 +118,10 @@ class AdminQuoteListCreateView(APIView):
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
+        # Con `id` el POST edita una cotización existente, así que además del
+        # alta exige el permiso de edición.
+        if body.get("id") and not has_role_permission(request.user, "quotes.edit"):
+            return Response({"error": "Forbidden"}, status=403)
         result = upsert_admin_quote(body, request.user.email)
         if "error" in result:
             return Response({"error": result["error"]}, status=result.get("status", 400))

@@ -58,7 +58,9 @@ actividad, que las demás apps escriben con `record_activity`) y `dashboard`
 docker compose up --build
 ```
 
-Django queda en `http://localhost:8010` y Postgres en `localhost:5435`.
+Django queda en `http://localhost:8010` y Postgres en `localhost:5435`. El
+servicio `backend` usa el target `dev` del `Dockerfile` (runserver y
+dependencias de tests); el target por defecto es producción.
 
 ## Desarrollo local (virtualenv, sin Docker)
 
@@ -159,17 +161,34 @@ mano o desde el cron del host (el proyecto no trae un scheduler):
 
 ## Despliegue
 
+La imagen de producción es el target por defecto del `Dockerfile`:
+
+```bash
+docker build -t torquetrack-backend .
+```
+
+Instala solo `requirements/base.txt`, corre `collectstatic` al construir
+(WhiteNoise sirve `/static/` con nombres con hash y comprimidos), arranca con
+un usuario sin privilegios y ejecuta gunicorn en `0.0.0.0:$PORT` (8000 por
+defecto; `WEB_CONCURRENCY` fija los workers, 3 por defecto; timeout de 60 s
+por el PDF de WeasyPrint). `migrate` no corre solo: va como paso de release.
+
 1. Definir las variables de entorno de producción; `.env.example` las lista
    todas con su explicación. Las imprescindibles:
-   - `DJANGO_SETTINGS_MODULE=config.settings.prod` (`wsgi.py` cae en `dev` si
-     no se define).
+   - `DJANGO_SETTINGS_MODULE=config.settings.prod`: la imagen ya lo define y
+     `wsgi.py`/`asgi.py` caen en `prod` si falta (`manage.py` sigue cayendo
+     en `dev` para el uso local).
    - `DJANGO_SECRET_KEY`: aleatoria y de al menos 50 caracteres. `prod.py` no
      arranca (`ImproperlyConfigured`) si falta o es el valor de ejemplo.
-   - `DJANGO_ALLOWED_HOSTS` y `CSRF_TRUSTED_ORIGINS` con el dominio público
-     (el segundo con esquema: `https://...`).
+   - `APP_URL`: URL `https://` del SPA. `prod.py` no arranca
+     (`ImproperlyConfigured`) si falta o no es HTTPS; de ella salen el retorno
+     de Stripe y los enlaces de los correos.
+   - `DJANGO_ALLOWED_HOSTS` con el dominio público. `CSRF_TRUSTED_ORIGINS`
+     es opcional: por defecto es el origen de `APP_URL` (con esquema:
+     `https://...`).
    - `DATABASE_URL` y `DATABASE_SSL`.
-   - `APP_URL`, `RESEND_API_KEY` y `FROM_EMAIL`: sin ellas no salen los
-     correos de cuenta; `prod.py` lo avisa en el log al arrancar.
+   - `RESEND_API_KEY` y `FROM_EMAIL`: sin ellas no salen los correos de
+     cuenta; `prod.py` lo avisa en el log al arrancar.
    - `CLIENT_IP_HEADER=HTTP_CF_CONNECTING_IP` detrás de Cloudflare.
      **Solo si el origen acepta tráfico exclusivamente desde Cloudflare**
      (allowlist de las IPs de Cloudflare en el firewall o Cloudflare

@@ -44,6 +44,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # Sirve `STATIC_ROOT` (admin) desde el mismo proceso: el hosting no tiene
+    # un servidor de estáticos delante.
+    "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
@@ -111,6 +114,8 @@ USE_I18N = True
 USE_TZ = True
 
 STATIC_URL = "static/"
+# `collectstatic` copia acá los estáticos al construir la imagen.
+STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

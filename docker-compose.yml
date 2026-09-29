@@ -16,7 +16,11 @@ services:
       retries: 5
 
   backend:
-    build: .
+    # El target por defecto del Dockerfile es producción (gunicorn); en local
+    # se usa `dev`, con runserver y las dependencias de los tests.
+    build:
+      context: .
+      target: dev
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - .:/app

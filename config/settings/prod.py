@@ -1,4 +1,5 @@
 import logging
+from urllib.parse import urlsplit
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -29,17 +30,31 @@ if _is_weak_secret_key(SECRET_KEY):
         "in production."
     )
 
+# `APP_URL` arma el retorno de Stripe y los enlaces de los correos y de la
+# cotización. Sin él caerían en `http://localhost:5173` (`apps/common/links.py`),
+# así que producción no arranca con un valor vacío o sin HTTPS.
+APP_URL = env("APP_URL", default="")  # noqa: F405
+_app_url = urlsplit(APP_URL)
+if _app_url.scheme != "https" or not _app_url.netloc:
+    raise ImproperlyConfigured(
+        "APP_URL must be set to the https:// URL of the storefront in production."
+    )
+
+# El SPA manda el `Origin` de `APP_URL`; el default de `base.py` es el de Vite
+# en local. `CSRF_TRUSTED_ORIGINS` lo reemplaza si el panel vive en otro origen.
+CSRF_TRUSTED_ORIGINS = env.list(  # noqa: F405
+    "CSRF_TRUSTED_ORIGINS", default=[f"{_app_url.scheme}://{_app_url.netloc}"]
+)
+
 # Sin correo no llegan los enlaces de reset de contraseña ni de verificación,
 # pero la tienda funciona igual: se avisa en lugar de impedir el arranque.
 RESEND_API_KEY = env("RESEND_API_KEY", default="")  # noqa: F405
 FROM_EMAIL = env("FROM_EMAIL", default="")  # noqa: F405
-APP_URL = env("APP_URL", default="")  # noqa: F405
 _missing_email_settings = [
     name
     for name, value in (
         ("RESEND_API_KEY", RESEND_API_KEY),
         ("FROM_EMAIL", FROM_EMAIL),
-        ("APP_URL", APP_URL),
     )
     if not value
 ]
@@ -88,3 +103,11 @@ SECURE_PROXY_SSL_HEADER = (
     if env.bool("USE_X_FORWARDED_PROTO", default=False)  # noqa: F405
     else None
 )
+
+# Estáticos con hash en el nombre y comprimidos (gzip/brotli), servidos por
+# WhiteNoise con caché larga. Exige `collectstatic` antes de arrancar: el
+# `Dockerfile` lo corre al construir la imagen.
+STORAGES = {
+    "default": {"BACKEND": "django.core.files.storage.FileSystemStorage"},
+    "staticfiles": {"BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage"},
+}

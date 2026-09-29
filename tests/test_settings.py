@@ -2,6 +2,7 @@ import copy
 import importlib
 import logging
 import logging.config
+import os
 import re
 import sys
 
@@ -50,12 +51,20 @@ HTTPS_ENV = (
     "USE_X_FORWARDED_PROTO",
 )
 VALID_SECRET_KEY = "k7#Qz!v2Lp9@Xr4$Wm8^Tn3&Hs6*Jd1(Fb5)Gc0-Ye_Ua+Io=Pe"
+VALID_APP_URL = "https://shop.example.com"
 
 
 def _load_prod(monkeypatch, **environ):
     """`prod.py` valida el entorno al importarse, así que cada test lo recarga
     en vez de reusar el módulo cacheado."""
-    for name in ("DJANGO_SECRET_KEY", "RESEND_API_KEY", "FROM_EMAIL", "APP_URL", *HTTPS_ENV):
+    for name in (
+        "DJANGO_SECRET_KEY",
+        "RESEND_API_KEY",
+        "FROM_EMAIL",
+        "APP_URL",
+        "CSRF_TRUSTED_ORIGINS",
+        *HTTPS_ENV,
+    ):
         monkeypatch.delenv(name, raising=False)
     for name, value in environ.items():
         monkeypatch.setenv(name, value)
@@ -65,7 +74,7 @@ def _load_prod(monkeypatch, **environ):
 
 @pytest.fixture
 def prod(monkeypatch):
-    return _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY)
+    return _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY, APP_URL=VALID_APP_URL)
 
 
 def test_prod_uses_host_prefixed_cookie_names(prod):
@@ -144,14 +153,52 @@ def test_prod_accepts_a_strong_secret_key(prod):
     assert prod.SECRET_KEY == VALID_SECRET_KEY
 
 
+@pytest.mark.parametrize(
+    "app_url",
+    [None, "", "http://shop.example.com", "shop.example.com", "https://"],
+)
+def test_prod_refuses_to_start_without_an_https_app_url(monkeypatch, app_url):
+    # Sin `APP_URL` los enlaces de los correos y el retorno de Stripe caerían
+    # en `http://localhost:5173` de `apps/common/links.py`.
+    environ = {"DJANGO_SECRET_KEY": VALID_SECRET_KEY}
+    if app_url is not None:
+        environ["APP_URL"] = app_url
+
+    with pytest.raises(ImproperlyConfigured, match="APP_URL"):
+        _load_prod(monkeypatch, **environ)
+
+
+def test_prod_accepts_an_https_app_url(prod):
+    assert prod.APP_URL == VALID_APP_URL
+
+
+def test_prod_trusts_the_app_url_origin_for_csrf(monkeypatch):
+    prod = _load_prod(
+        monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY, APP_URL="https://shop.example.com/store/"
+    )
+
+    assert prod.CSRF_TRUSTED_ORIGINS == ["https://shop.example.com"]
+
+
+def test_prod_csrf_trusted_origins_can_be_set_from_the_environment(monkeypatch):
+    prod = _load_prod(
+        monkeypatch,
+        DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+        APP_URL=VALID_APP_URL,
+        CSRF_TRUSTED_ORIGINS="https://shop.example.com,https://admin.example.com",
+    )
+
+    assert prod.CSRF_TRUSTED_ORIGINS == ["https://shop.example.com", "https://admin.example.com"]
+
+
 def test_prod_warns_when_email_settings_are_missing(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="config.settings"):
-        _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY)
+        _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY, APP_URL=VALID_APP_URL)
 
     message = caplog.text
     assert "RESEND_API_KEY" in message
     assert "FROM_EMAIL" in message
-    assert "APP_URL" in message
+    assert "APP_URL" not in message
 
 
 def test_prod_does_not_warn_when_email_settings_are_present(monkeypatch, caplog):
@@ -161,7 +208,7 @@ def test_prod_does_not_warn_when_email_settings_are_present(monkeypatch, caplog)
             DJANGO_SECRET_KEY=VALID_SECRET_KEY,
             RESEND_API_KEY="re_test_fake",
             FROM_EMAIL="TorqueTrack <no-reply@example.com>",
-            APP_URL="https://shop.example.com",
+            APP_URL=VALID_APP_URL,
         )
 
     assert caplog.text == ""
@@ -237,11 +284,14 @@ def test_prod_forces_https_with_safe_defaults(prod):
 def test_prod_trusts_x_forwarded_proto_only_when_enabled(monkeypatch):
     # Sin proxy delante, cualquiera podría mandar el header y hacerse pasar
     # por HTTPS; por eso es opt-in.
-    default = _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY)
+    default = _load_prod(monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY, APP_URL=VALID_APP_URL)
     assert default.SECURE_PROXY_SSL_HEADER is None
 
     behind_proxy = _load_prod(
-        monkeypatch, DJANGO_SECRET_KEY=VALID_SECRET_KEY, USE_X_FORWARDED_PROTO="true"
+        monkeypatch,
+        DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+        APP_URL=VALID_APP_URL,
+        USE_X_FORWARDED_PROTO="true",
     )
     assert behind_proxy.SECURE_PROXY_SSL_HEADER == ("HTTP_X_FORWARDED_PROTO", "https")
 
@@ -250,6 +300,7 @@ def test_prod_https_settings_can_be_tuned_from_the_environment(monkeypatch):
     prod = _load_prod(
         monkeypatch,
         DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+        APP_URL=VALID_APP_URL,
         SECURE_SSL_REDIRECT="false",
         SECURE_HSTS_SECONDS="3600",
         SECURE_HSTS_INCLUDE_SUBDOMAINS="false",
@@ -352,3 +403,37 @@ def test_company_address_and_ship_from_zip_come_from_the_environment(
 
     assert base.COMPANY_ADDRESS == "Tampa, FL"
     assert base.SHIP_FROM_ZIP == "33602"
+
+
+# --- archivos estáticos y puntos de entrada del servidor ------------------------
+
+
+def test_static_files_are_collected_and_served_by_whitenoise():
+    assert settings.STATIC_ROOT == settings.BASE_DIR / "staticfiles"
+    security = settings.MIDDLEWARE.index("django.middleware.security.SecurityMiddleware")
+    assert settings.MIDDLEWARE[security + 1] == "whitenoise.middleware.WhiteNoiseMiddleware"
+
+
+def test_prod_serves_compressed_hashed_static_files(prod):
+    assert prod.STORAGES["staticfiles"]["BACKEND"] == (
+        "whitenoise.storage.CompressedManifestStaticFilesStorage"
+    )
+    assert prod.STORAGES["default"]["BACKEND"] == (
+        "django.core.files.storage.FileSystemStorage"
+    )
+
+
+@pytest.mark.parametrize(
+    ("module", "factory"),
+    [("config.wsgi", "get_wsgi_application"), ("config.asgi", "get_asgi_application")],
+)
+def test_server_entry_points_default_to_prod_settings(monkeypatch, module, factory):
+    # Gunicorn importa `config.wsgi`; si el entorno no define los settings,
+    # tiene que caer en producción y no en `dev` con `DEBUG = True`.
+    monkeypatch.delenv("DJANGO_SETTINGS_MODULE", raising=False)
+    monkeypatch.setattr(f"django.core.{module.split('.')[1]}.{factory}", lambda: "app")
+    monkeypatch.delitem(sys.modules, module, raising=False)
+
+    importlib.import_module(module)
+
+    assert os.environ["DJANGO_SETTINGS_MODULE"] == "config.settings.prod"

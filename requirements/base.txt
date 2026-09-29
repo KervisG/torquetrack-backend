@@ -6,3 +6,5 @@ django-environ>=0.13,<0.14
 requests>=2.32,<3
 stripe>=11,<12
 weasyprint>=70,<71
+whitenoise>=6.12,<7
+gunicorn>=26.2,<27

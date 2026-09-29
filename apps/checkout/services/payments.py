@@ -65,9 +65,9 @@ def _create_checkout_session(order: dict) -> dict:
         client_reference_id=order_id,
         line_items=line_items,
         success_url=app_url(
-            f"/checkout-success.html?session_id={{CHECKOUT_SESSION_ID}}&order_id={quote(order_id)}"
+            f"/checkout-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={quote(order_id)}"
         ),
-        cancel_url=app_url("/checkout.html?canceled=1"),
+        cancel_url=app_url("/checkout?canceled=1"),
         metadata={"order_id": order_id, "order_number": order["number"]},
         customer_email=(order.get("customer") or {}).get("email") or None,
     )

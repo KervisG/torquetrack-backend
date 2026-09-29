@@ -60,6 +60,29 @@ def test_start_stripe_payment_records_a_pending_payment_for_the_order_total(monk
 
 
 @pytest.mark.django_db
+def test_stripe_returns_to_the_spa_checkout_routes(monkeypatch, settings):
+    # El SPA de React sirve `/checkout-success` y `/checkout`; las rutas
+    # `.html` del front anterior responden 404 al volver de Stripe.
+    settings.APP_URL = "https://shop.example.com"
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return _fake_session()
+
+    monkeypatch.setattr(CREATE_SESSION, _create)
+    order = Order.objects.create(id="OID 7", number="O30007", data={"totals": {"total": 10}})
+
+    start_stripe_payment(order)
+
+    assert captured["success_url"] == (
+        "https://shop.example.com/checkout-success"
+        "?session_id={CHECKOUT_SESSION_ID}&order_id=OID%207"
+    )
+    assert captured["cancel_url"] == "https://shop.example.com/checkout?canceled=1"
+
+
+@pytest.mark.django_db
 def test_start_stripe_payment_records_nothing_when_stripe_fails(monkeypatch):
     def _boom(**kwargs):
         raise ProviderError("Stripe down")

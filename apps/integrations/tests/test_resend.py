@@ -89,3 +89,31 @@ def test_non_json_error_body_uses_generic_reason(configured, monkeypatch):
     result = resend.send_email(to="a@example.com", subject="s", html="h")
 
     assert result == {"sent": False, "reason": "Email failed"}
+
+
+def test_default_timeout_is_fifteen_seconds(configured, monkeypatch):
+    post = RecordingPost(FakeResponse({"id": "email_1"}))
+    monkeypatch.setattr("apps.integrations.email.resend.requests.post", post)
+
+    resend.send_email(to="a@example.com", subject="s", html="h")
+
+    assert post.calls[0]["timeout"] == 15
+
+
+def test_plain_text_email_with_a_short_timeout(configured, monkeypatch):
+    # Las alertas de error mandan solo texto y no pueden esperar 15 s al
+    # proveedor: el log se escribe dentro del request que falló.
+    post = RecordingPost(FakeResponse({"id": "email_2"}))
+    monkeypatch.setattr("apps.integrations.email.resend.requests.post", post)
+
+    result = resend.send_email(to=["ops@example.com"], subject="s", text="plain body", timeout=5)
+
+    assert result == {"sent": True, "id": "email_2"}
+    call = post.calls[0]
+    assert call["timeout"] == 5
+    assert call["json"] == {
+        "from": "TorqueTrack <no-reply@example.com>",
+        "to": ["ops@example.com"],
+        "subject": "s",
+        "text": "plain body",
+    }

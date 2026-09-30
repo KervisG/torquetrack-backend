@@ -22,7 +22,9 @@ class FakeResend:
         self.sent = []
         self.result = result or {"sent": True, "id": "email_1"}
 
-    def send_email(self, *, to, subject, html, attachments=None, reply_to=None):
+    def send_email(
+        self, *, to, subject, html=None, text=None, attachments=None, reply_to=None, timeout=None
+    ):
         self.sent.append(_email_payload(to, subject, html, attachments, reply_to))
         return dict(self.result)
 

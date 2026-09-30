@@ -7,6 +7,7 @@ import requests
 from django.conf import settings
 
 RESEND_EMAILS_URL = "https://api.resend.com/emails"
+DEFAULT_TIMEOUT_SECONDS = 15
 NOT_CONFIGURED_REASON = "Email provider not configured"
 
 
@@ -14,9 +15,20 @@ def is_configured() -> bool:
     return bool(settings.RESEND_API_KEY and settings.FROM_EMAIL)
 
 
-def send_email(*, to, subject, html, attachments=None, reply_to=None) -> dict:
+def send_email(
+    *,
+    to,
+    subject,
+    html=None,
+    text=None,
+    attachments=None,
+    reply_to=None,
+    timeout=DEFAULT_TIMEOUT_SECONDS,
+) -> dict:
     """`to` acepta un email o una lista; cada adjunto es
-    `{"filename", "content" (base64), "contentType"}`."""
+    `{"filename", "content" (base64), "contentType"}`. Resend exige `html`,
+    `text` o los dos; las alertas de error mandan solo `text` y un `timeout`
+    corto porque se envían dentro del request que falló."""
     if not is_configured():
         return {"sent": False, "reason": NOT_CONFIGURED_REASON}
 
@@ -24,8 +36,11 @@ def send_email(*, to, subject, html, attachments=None, reply_to=None) -> dict:
         "from": settings.FROM_EMAIL,
         "to": to if isinstance(to, list) else [to],
         "subject": subject,
-        "html": html,
     }
+    if html is not None:
+        payload["html"] = html
+    if text is not None:
+        payload["text"] = text
     if reply_to:
         payload["reply_to"] = reply_to
     if attachments:
@@ -46,7 +61,7 @@ def send_email(*, to, subject, html, attachments=None, reply_to=None) -> dict:
                 "Content-Type": "application/json",
             },
             json=payload,
-            timeout=15,
+            timeout=timeout,
         )
     except requests.RequestException as exc:
         return {"sent": False, "reason": str(exc)}

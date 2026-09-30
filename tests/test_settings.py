@@ -376,8 +376,11 @@ def test_health_check_answers_plain_http_under_the_prod_redirect(prod):
 def test_logging_defaults_to_info_on_the_console(monkeypatch, restore_base_settings):
     base = _load_base(monkeypatch)
 
-    assert base.LOGGING["root"] == {"handlers": ["console"], "level": "INFO"}
-    assert base.LOGGING["handlers"]["console"]["class"] == "logging.StreamHandler"
+    assert base.LOGGING["root"] == {"handlers": ["console", "error_email"], "level": "INFO"}
+    assert base.LOGGING["handlers"]["console"] == {
+        "class": "logging.StreamHandler",
+        "formatter": "plain",
+    }
     assert base.LOGGING["formatters"]["plain"]["format"] == (
         "%(asctime)s %(levelname)s %(name)s %(message)s"
     )
@@ -410,6 +413,30 @@ def test_logging_config_loads_and_app_loggers_reach_the_root(
         root.setLevel(previous_level)
         root.handlers[:] = previous_handlers
 
+
+
+def test_error_alert_handler_is_on_the_root_at_error_level(monkeypatch, restore_base_settings):
+    base = _load_base(monkeypatch)
+
+    assert base.LOGGING["handlers"]["error_email"] == {
+        "class": "config.error_alerts.ErrorEmailHandler",
+        "level": "ERROR",
+    }
+
+
+def test_error_alert_emails_default_to_none(monkeypatch, restore_base_settings):
+    monkeypatch.delenv("ERROR_ALERT_EMAILS", raising=False)
+    base = _load_base(monkeypatch)
+
+    assert base.ERROR_ALERT_EMAILS == []
+
+
+def test_error_alert_emails_come_from_a_comma_separated_env(
+    monkeypatch, restore_base_settings
+):
+    base = _load_base(monkeypatch, ERROR_ALERT_EMAILS="ops@example.com,owner@example.com")
+
+    assert base.ERROR_ALERT_EMAILS == ["ops@example.com", "owner@example.com"]
 
 # --- datos de la empresa y origen de los envíos ---------------------------------
 

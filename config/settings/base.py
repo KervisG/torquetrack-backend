@@ -224,6 +224,10 @@ COMPANY_ADDRESS = env("COMPANY_ADDRESS", default="") or "Sarasota, FL"
 # tokens, contraseñas ni datos personales. Los loggers `apps.*` no tienen
 # handler propio y propagan al root, así `LOG_LEVEL` los gobierna a todos.
 LOG_LEVEL = env("LOG_LEVEL", default="INFO").upper()
+# Destinatarios de las alertas de error por correo (`config/error_alerts.py`,
+# vía Resend con `FROM_EMAIL`), separados por comas. Vacío las apaga: local y
+# tests no mandan nada.
+ERROR_ALERT_EMAILS = env.list("ERROR_ALERT_EMAILS", default=[])
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -232,8 +236,10 @@ LOGGING = {
     },
     "handlers": {
         "console": {"class": "logging.StreamHandler", "formatter": "plain"},
+        # Un correo por error distinto cada 15 minutos; no toca la consola.
+        "error_email": {"class": "config.error_alerts.ErrorEmailHandler", "level": "ERROR"},
     },
-    "root": {"handlers": ["console"], "level": LOG_LEVEL},
+    "root": {"handlers": ["console", "error_email"], "level": LOG_LEVEL},
     "loggers": {
         # Sin los handlers por defecto de Django (consola solo con DEBUG y
         # `mail_admins`): todo va al root, sin duplicar líneas.

@@ -1,6 +1,6 @@
 """El PDF usa la misma plantilla que la página pública y el correo: `@media print`
 ya oculta los botones. WeasyPrint necesita Pango/Cairo, que trae la imagen de
-`backend/Dockerfile`."""
+`Dockerfile`."""
 from __future__ import annotations
 
 import base64

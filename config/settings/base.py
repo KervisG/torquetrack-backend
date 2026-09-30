@@ -64,7 +64,6 @@ TEMPLATES = [
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
-                "django.template.context_processors.debug",
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
@@ -74,7 +73,6 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "config.wsgi.application"
-ASGI_APPLICATION = "config.asgi.application"
 
 DATABASES = {
     "default": env.db(
@@ -140,6 +138,11 @@ REST_FRAMEWORK = {
     ],
     # Un solo formato de error: `{"error": ...}` también para los que arma DRF.
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
+    # Solo JSON, sin la API navegable: el SPA no la usa y `/api/docs/` ya
+    # sirve para explorar la API a mano.
+    "DEFAULT_RENDERER_CLASSES": [
+        "rest_framework.renderers.JSONRenderer",
+    ],
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
     "DEFAULT_THROTTLE_RATES": {

@@ -459,17 +459,23 @@ def test_prod_serves_compressed_hashed_static_files(prod):
     )
 
 
-@pytest.mark.parametrize(
-    ("module", "factory"),
-    [("config.wsgi", "get_wsgi_application"), ("config.asgi", "get_asgi_application")],
-)
-def test_server_entry_points_default_to_prod_settings(monkeypatch, module, factory):
+def test_wsgi_entry_point_defaults_to_prod_settings(monkeypatch):
     # Gunicorn importa `config.wsgi`; si el entorno no define los settings,
     # tiene que caer en producción y no en `dev` con `DEBUG = True`.
     monkeypatch.delenv("DJANGO_SETTINGS_MODULE", raising=False)
-    monkeypatch.setattr(f"django.core.{module.split('.')[1]}.{factory}", lambda: "app")
-    monkeypatch.delitem(sys.modules, module, raising=False)
+    monkeypatch.setattr("django.core.wsgi.get_wsgi_application", lambda: "app")
+    monkeypatch.delitem(sys.modules, "config.wsgi", raising=False)
 
-    importlib.import_module(module)
+    importlib.import_module("config.wsgi")
 
     assert os.environ["DJANGO_SETTINGS_MODULE"] == "config.settings.prod"
+
+
+def test_api_renders_json_only(monkeypatch, restore_base_settings):
+    # Sin la API navegable de DRF: el SPA solo consume JSON y `/api/docs/`
+    # ya sirve para explorar la API a mano.
+    base = _load_base(monkeypatch)
+
+    assert base.REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] == [
+        "rest_framework.renderers.JSONRenderer",
+    ]

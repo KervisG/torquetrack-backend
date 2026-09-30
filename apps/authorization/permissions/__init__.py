@@ -4,7 +4,7 @@
 Los helpers de Role (serializar, buscar por slug, comparar lo que concede)
 viven en `services/roles.py`, que importa este paquete. El paquete no importa
 `services/` ni modelos: lo usan todas las views para cablearse y
-`backend/tests/test_app_boundaries.py` exige que no dependa de nada más.
+`tests/test_app_boundaries.py` exige que no dependa de nada más.
 """
 from apps.authorization.permissions.catalog import (
     ALL_PERMISSION_CODENAMES,

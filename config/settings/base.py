@@ -10,9 +10,9 @@ env_file = BASE_DIR / ".env"
 if env_file.exists():
     environ.Env.read_env(env_file)
 
-# Solo sirve en local: `prod.py` se niega a arrancar con este valor.
-INSECURE_DEV_SECRET_KEY = "insecure-dev-key-change-me"
-SECRET_KEY = env("DJANGO_SECRET_KEY", default=INSECURE_DEV_SECRET_KEY)
+# Sin fallback en ningún entorno: firma sesiones, CSRF y enlaces por correo.
+# En local y en los tests sale de `.env`; `prod.py` además exige que sea fuerte.
+SECRET_KEY = env("DJANGO_SECRET_KEY")
 
 INSTALLED_APPS = [
     "django.contrib.admin",

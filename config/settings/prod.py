@@ -16,7 +16,7 @@ def _is_weak_secret_key(value: str) -> bool:
     # cookies de sesión y tokens.
     return (
         not value
-        or value in {INSECURE_DEV_SECRET_KEY, "change-me-in-production"}  # noqa: F405
+        or value in {"insecure-dev-key-change-me", "change-me-in-production"}
         or value.startswith("django-insecure-")
         or len(value) < 50
         or len(set(value)) < 5

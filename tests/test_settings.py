@@ -479,3 +479,19 @@ def test_api_renders_json_only(monkeypatch, restore_base_settings):
     assert base.REST_FRAMEWORK["DEFAULT_RENDERER_CLASSES"] == [
         "rest_framework.renderers.JSONRenderer",
     ]
+
+
+def test_base_refuses_to_start_without_a_secret_key(monkeypatch):
+    # Sin fallback en ningún entorno: dev, tests y Docker leen la key de `.env`
+    # o del entorno. Se anula `read_env` para que un `.env` local no la aporte.
+    import environ
+
+    monkeypatch.setattr(environ.Env, "read_env", staticmethod(lambda *args, **kwargs: None))
+    monkeypatch.delenv("DJANGO_SECRET_KEY", raising=False)
+    try:
+        with pytest.raises(ImproperlyConfigured, match="DJANGO_SECRET_KEY"):
+            _load_base(monkeypatch)
+    finally:
+        # Devuelve la key antes de recargar `base` para los demás tests.
+        monkeypatch.undo()
+        importlib.reload(importlib.import_module("config.settings.base"))

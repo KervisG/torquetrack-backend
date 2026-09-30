@@ -75,11 +75,18 @@ TEMPLATES = [
 
 WSGI_APPLICATION = "config.wsgi.application"
 
+# Mismos nombres que la imagen oficial de Postgres, así docker-compose comparte
+# las variables entre `db` y Django. Los defaults apuntan al `db` local
+# publicado en 5435; docker-compose cambia host y puerto a `db:5432`.
 DATABASES = {
-    "default": env.db(
-        "DATABASE_URL",
-        default="postgres://torquetrack:torquetrack@localhost:5435/torquetrack",
-    ),
+    "default": {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": env("POSTGRES_DB", default="torquetrack"),
+        "USER": env("POSTGRES_USER", default="torquetrack"),
+        "PASSWORD": env("POSTGRES_PASSWORD", default="torquetrack"),
+        "HOST": env("POSTGRES_HOST", default="localhost"),
+        "PORT": env.int("POSTGRES_PORT", default=5435),
+    },
 }
 if env.bool("DATABASE_SSL", default=False):
     DATABASES["default"]["OPTIONS"] = {"sslmode": "require"}

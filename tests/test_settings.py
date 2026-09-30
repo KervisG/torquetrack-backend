@@ -584,3 +584,38 @@ def test_base_refuses_to_start_without_a_secret_key(monkeypatch):
         # Devuelve la key antes de recargar `base` para los demás tests.
         monkeypatch.undo()
         importlib.reload(importlib.import_module("config.settings.base"))
+
+
+def test_database_comes_from_postgres_variables(monkeypatch, restore_base_settings):
+    base = _load_base(
+        monkeypatch,
+        POSTGRES_DB="shop",
+        POSTGRES_USER="shop_user",
+        POSTGRES_PASSWORD="s3cret",
+        POSTGRES_HOST="db.internal",
+        POSTGRES_PORT="6543",
+    )
+
+    database = base.DATABASES["default"]
+    assert database["ENGINE"] == "django.db.backends.postgresql"
+    assert (database["NAME"], database["USER"], database["PASSWORD"]) == (
+        "shop",
+        "shop_user",
+        "s3cret",
+    )
+    assert (database["HOST"], database["PORT"]) == ("db.internal", 6543)
+
+
+def test_database_defaults_to_the_local_docker_postgres(monkeypatch, restore_base_settings):
+    # Mismos valores que el servicio `db` de docker-compose, publicado en 5435.
+    for name in ("DB", "USER", "PASSWORD", "HOST", "PORT"):
+        monkeypatch.delenv(f"POSTGRES_{name}", raising=False)
+    base = _load_base(monkeypatch)
+
+    database = base.DATABASES["default"]
+    assert (database["NAME"], database["USER"], database["PASSWORD"]) == (
+        "torquetrack",
+        "torquetrack",
+        "torquetrack",
+    )
+    assert (database["HOST"], database["PORT"]) == ("localhost", 5435)

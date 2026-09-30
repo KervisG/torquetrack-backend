@@ -40,6 +40,12 @@ if _app_url.scheme != "https" or not _app_url.netloc:
         "APP_URL must be set to the https:// URL of the storefront in production."
     )
 
+# Sin broker Celery caería en `amqp://localhost`: beat publicaría los trabajos
+# programados a un broker que no existe y ningún worker los correría.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="")  # noqa: F405
+if not CELERY_BROKER_URL:
+    raise ImproperlyConfigured("CELERY_BROKER_URL must be set in production.")
+
 # El SPA manda el `Origin` de `APP_URL`; el default de `base.py` es el de Vite
 # en local. `CSRF_TRUSTED_ORIGINS` lo reemplaza si el panel vive en otro origen.
 CSRF_TRUSTED_ORIGINS = env.list(  # noqa: F405

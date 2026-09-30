@@ -11,6 +11,7 @@ En la raíz de `apps/<app>/` solo pueden quedar estos archivos:
 | `urls.py` | si la app expone endpoints (`numbering` e `integrations` no tienen) |
 | `admin.py` | solo si registra modelos en el admin de Django (hoy, solo `authorization`) |
 | `views.py` | solo si la app tiene UNA sola superficie |
+| `tasks.py` | solo si la app tiene tareas de Celery (hoy, `cart` y `quotes`): `@shared_task` que envuelven un service de la app; `autodiscover_tasks()` busca justo este módulo |
 
 Todo lo demás vive en carpetas:
 
@@ -140,7 +141,7 @@ apps/authorization/             # quién puede qué; solo la consume el panel
 | `audit` | `views.py` (panel) | `models/activity_log.py`; `services/recording.py` (`record_activity`), `services/listing.py` (`list_activity_page`, `PAYMENT_ID_KEYS`) |
 | `authentication` | `views.py` (storefront) | `models/`, `services/`, `utils/`, `docs/` |
 | `authorization` | `admin.py`, `views.py` (panel) | `models/`, `permissions/`, `services/`, `management/commands/`, `docs/` |
-| `cart` | — | `models/cart.py`; `services/storefront.py` (`get_cart`, `replace_cart`, `merge_session_cart`, `current_cart_id`, `CART_SESSION_KEY`), `services/admin.py` (listado, estado, contadores y purga); `views/storefront.py`, `views/admin.py`; `docs/`; `management/commands/purge_carts.py`; `apps.py` conecta `user_logged_in` |
+| `cart` | `tasks.py` (`purge_carts`, diaria 03:30 UTC) | `models/cart.py`; `services/storefront.py` (`get_cart`, `replace_cart`, `merge_session_cart`, `current_cart_id`, `CART_SESSION_KEY`), `services/admin.py` (listado, estado, contadores y purga); `views/storefront.py`, `views/admin.py`; `docs/`; `management/commands/purge_carts.py`; `apps.py` conecta `user_logged_in` |
 | `catalog` | — | `models/product.py`, `models/application.py`; `serializers/storefront.py`; `services/admin.py`, `services/pricing.py` (`price_lines`, `build_totals`, `serialize_totals`); `views/storefront.py`, `views/admin.py`; `management/commands/import_catalog.py`; `data/` |
 | `checkout` | — | `models/order.py`, `models/payment.py`, `models/refund.py`; `services/payments.py`, `services/storefront.py`, `services/webhooks.py`, `services/refunds.py`, `services/fulfillment.py` (envío, guía y correo "has shipped"), `services/admin.py`; `views/storefront.py`, `views/admin.py`, `views/webhooks.py`; `docs/` (solo `POST /api/admin/orders/<id>/refunds/` y `.../fulfillment/`) |
 | `customers` | — | `models/customer.py`; `services/storefront.py` (perfil de la sesión, invitados, alta, verificación, activación y cuenta), `services/admin.py`; `views/storefront.py`, `views/admin.py` |
@@ -148,7 +149,7 @@ apps/authorization/             # quién puede qué; solo la consume el panel
 | `fitment` | `views.py` (storefront) | `services/compatibility.py` |
 | `integrations` | `exceptions.py` (excepción documentada) | un paquete por capacidad con un módulo por proveedor |
 | `numbering` | — (sin endpoints ni `urls.py`) | `models/document_sequence.py`, `services/document_numbers.py` |
-| `quotes` | — | `models/quote.py`; `services/lifecycle.py`, `services/rendering.py`, `services/storefront.py`, `services/admin.py`, `services/pdf.py`, `services/tax.py` (impuesto que calcula el servidor al guardar desde el panel, dirección de envío y override); `views/storefront.py`, `views/admin.py`, `views/pdf.py`; `templates/quotes/`; `management/commands/expire_quotes.py` |
+| `quotes` | `tasks.py` (`expire_quotes`, cada hora) | `models/quote.py`; `services/lifecycle.py`, `services/rendering.py`, `services/storefront.py`, `services/admin.py`, `services/pdf.py`, `services/tax.py` (impuesto que calcula el servidor al guardar desde el panel, dirección de envío y override); `views/storefront.py`, `views/admin.py`, `views/pdf.py`; `templates/quotes/`; `management/commands/expire_quotes.py` |
 | `shipping` | `views.py` (storefront) | `services/rates.py` |
 | `tax` | `views.py` (storefront) | `services/sales_tax.py` |
 | `vin` | `views.py` (storefront) | `services/decoding.py` |

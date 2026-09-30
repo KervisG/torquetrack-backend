@@ -41,12 +41,14 @@ RUN pip install --no-cache-dir -r requirements/base.txt
 
 COPY . .
 
-# `prod.py` valida `DJANGO_SECRET_KEY` y `APP_URL` al importarse. Estos valores
-# ficticios existen solo durante este RUN (no quedan en el `ENV` de la imagen)
-# y `collectstatic` no firma nada ni se conecta a la base.
+# `prod.py` valida `DJANGO_SECRET_KEY`, `APP_URL` y `CELERY_BROKER_URL` al
+# importarse. Estos valores ficticios existen solo durante este RUN (no quedan
+# en el `ENV` de la imagen) y `collectstatic` no firma nada ni se conecta a la
+# base ni al broker.
 RUN DJANGO_SETTINGS_MODULE=config.settings.prod \
     DJANGO_SECRET_KEY=build-only-collectstatic-placeholder-not-a-real-secret-0123456789 \
     APP_URL=https://build.invalid \
+    CELERY_BROKER_URL=redis://build.invalid:6379/0 \
     python manage.py collectstatic --noinput
 
 # Con home propio: fontconfig (WeasyPrint) guarda ahí su caché de fuentes.
@@ -58,6 +60,13 @@ ENV DJANGO_SETTINGS_MODULE=config.settings.prod \
 
 EXPOSE 8000
 
+# La misma imagen corre el worker y beat de Celery cambiando el comando (un
+# proceso por contenedor, sin supervisor):
+#   worker: celery -A config worker -l info
+#   beat:   celery -A config beat -l info -s /tmp/celerybeat-schedule
+# Beat necesita `-s` en una ruta escribible: `/app` es de root y el proceso
+# corre como `app`. Una sola instancia de beat, o cada trabajo sale dos veces.
+#
 # Timeout de 60 s: el PDF de la cotización (WeasyPrint) se renderiza dentro del
 # request. `WEB_CONCURRENCY` ajusta los workers según la RAM del hosting.
 CMD ["sh", "-c", "exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]

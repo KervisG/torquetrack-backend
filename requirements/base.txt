@@ -8,3 +8,7 @@ stripe>=11,<12
 weasyprint>=70,<71
 whitenoise>=6.12,<7
 gunicorn>=26.2,<27
+celery[redis]>=5.6,<5.7
+# Lo usan el broker de Celery (vía kombu) y `RedisCache` de Django con `CACHE_URL`.
+# kombu 5.6 exige redis < 6.5.
+redis>=6.4,<6.5

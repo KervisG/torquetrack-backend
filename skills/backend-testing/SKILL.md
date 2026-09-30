@@ -4,7 +4,7 @@ description: "Trigger: escribir tests, pytest, test de endpoint, mockear stripe,
 license: Apache-2.0
 metadata:
   author: Kervis
-  version: "1.7"
+  version: "1.8"
 ---
 
 ## Activation Contract
@@ -33,6 +33,7 @@ Correr desde la raíz del repo: `python -m pytest apps/<app>` para una app, `pyt
 - **Base caída.** El 503 de `/api/health/` se prueba parcheando `apps.health.views.database_is_available`, o reemplazando `apps.health.services.database.connection` por un doble; nunca cerrando ni rompiendo la conexión real de los tests.
 - Limpiar el cache alrededor de cualquier test que toque un endpoint con throttle; `SimpleRateThrottle` guarda sus contadores en el cache compartido y los filtra entre tests. El cache es `DatabaseCache` (tabla `django_cache`), así que el fixture que llama a `cache.clear()` pide `db`.
 - `SimpleRateThrottle.THROTTLE_RATES` se resuelve al importar, así que `override_settings(REST_FRAMEWORK=...)` no cambia un rate. Fijar `rate` en la clase del throttle en su lugar. `LoginAccountRateThrottle` suma solo los logins fallidos: para llegar a su tope, mandar contraseñas incorrectas.
+- **Tareas de Celery.** `conftest.py` de la raíz pone `task_always_eager` y `task_eager_propagates` en la app de Celery para toda la sesión, así ningún test llega a Redis aunque el `.env` defina `CELERY_BROKER_URL`. Probar la tarea en `apps/<app>/tests/test_tasks.py` con `.delay()` o `.apply()` y assertear el efecto en la base, el valor de retorno (`result.get()`) y la línea INFO. `override_settings(CELERY_...)` no cambia nada: Celery lee su configuración una vez; tocar `celery_app.conf` si hace falta.
 - Una tabla nueva de dominio se agrega a `DOMAIN_TABLES` en `tests/test_migrations.py`.
 - Para assertear que una acción dejó rastro en la bitácora, usar `activity_count(action=..., entity_id=...)` de `tests/factories.py`. Fuera de `apps/audit/` ningún módulo (tampoco un test) importa `ActivityLog`; `tests/test_audit_boundary.py` lo verifica.
 - Para probar una carrera real (por ejemplo la numeración de pedidos) usar `@pytest.mark.django_db(transaction=True)` con hilos y cerrar las conexiones de cada hilo con `connections.close_all()`. Ver `apps/checkout/tests/test_document_numbers.py`.

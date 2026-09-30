@@ -32,6 +32,41 @@ python manage.py runserver
 La API queda en `http://localhost:8010` (Docker) o `http://localhost:8000`.
 Copia `.env.example` a `.env` y ajusta los valores.
 
+## Tareas programadas (Celery)
+
+`docker compose up` también levanta `redis`, `worker` y `beat`. Beat encola
+`expire_quotes` cada hora y `purge_carts` todos los días a las 03:30 UTC; los
+comandos `manage.py expire_quotes` y `manage.py purge_carts` siguen sirviendo
+para correrlos a mano. El worker y beat no recargan el código: tras cambiar una
+tarea, `docker compose restart worker beat`.
+
+Sin Docker, con el Redis del compose (`docker compose up -d redis`, puerto 6385)
+y `CELERY_BROKER_URL=redis://localhost:6385/0` en `.env`:
+
+```bash
+celery -A config worker -l info --pool=solo   # --pool=solo en Windows
+celery -A config beat -l info
+```
+
+Sin `CELERY_BROKER_URL`, en desarrollo las tareas corren en el mismo proceso.
+
+Variables de entorno:
+
+- `CELERY_BROKER_URL`: broker de Celery (`redis://host:6379/0`). Obligatoria en
+  producción; vacía en desarrollo corre las tareas en el proceso.
+- `CACHE_URL`: cache de Django (`redis://host:6379/1`). Vacía usa la tabla
+  `django_cache` de Postgres.
+
+En producción la misma imagen corre cada proceso cambiando el comando:
+
+```bash
+celery -A config worker -l info
+celery -A config beat -l info -s /tmp/celerybeat-schedule
+```
+
+Una sola instancia de beat; `-s` apunta a una ruta escribible porque la imagen
+corre sin privilegios.
+
 ## Primer usuario admin
 
 ```bash

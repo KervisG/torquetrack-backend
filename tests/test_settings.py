@@ -52,22 +52,29 @@ HTTPS_ENV = (
 )
 VALID_SECRET_KEY = "k7#Qz!v2Lp9@Xr4$Wm8^Tn3&Hs6*Jd1(Fb5)Gc0-Ye_Ua+Io=Pe"
 VALID_APP_URL = "https://shop.example.com"
+VALID_BROKER_URL = "redis://redis.internal:6379/0"
 
 
 def _load_prod(monkeypatch, **environ):
     """`prod.py` valida el entorno al importarse, así que cada test lo recarga
-    en vez de reusar el módulo cacheado."""
+    en vez de reusar el módulo cacheado.
+
+    `CELERY_BROKER_URL` trae un valor válido salvo que el test lo fije; con
+    `None` queda sin definir."""
     for name in (
         "DJANGO_SECRET_KEY",
         "RESEND_API_KEY",
         "FROM_EMAIL",
         "APP_URL",
         "CSRF_TRUSTED_ORIGINS",
+        "CELERY_BROKER_URL",
         *HTTPS_ENV,
     ):
         monkeypatch.delenv(name, raising=False)
+    environ = {"CELERY_BROKER_URL": VALID_BROKER_URL, **environ}
     for name, value in environ.items():
-        monkeypatch.setenv(name, value)
+        if value is not None:
+            monkeypatch.setenv(name, value)
     sys.modules.pop("config.settings.prod", None)
     return importlib.import_module("config.settings.prod")
 
@@ -170,6 +177,27 @@ def test_prod_refuses_to_start_without_an_https_app_url(monkeypatch, app_url):
 
 def test_prod_accepts_an_https_app_url(prod):
     assert prod.APP_URL == VALID_APP_URL
+
+
+@pytest.mark.parametrize("broker_url", [None, ""])
+def test_prod_refuses_to_start_without_a_celery_broker(monkeypatch, broker_url):
+    # Sin broker Celery caería en `amqp://localhost` y beat publicaría los
+    # trabajos programados a un broker que no existe.
+    with pytest.raises(ImproperlyConfigured, match="CELERY_BROKER_URL"):
+        _load_prod(
+            monkeypatch,
+            DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+            APP_URL=VALID_APP_URL,
+            CELERY_BROKER_URL=broker_url,
+        )
+
+
+def test_prod_accepts_a_celery_broker_url(prod):
+    assert prod.CELERY_BROKER_URL == VALID_BROKER_URL
+
+
+def test_prod_never_runs_tasks_eagerly(prod):
+    assert getattr(prod, "CELERY_TASK_ALWAYS_EAGER", False) is False
 
 
 def test_prod_trusts_the_app_url_origin_for_csrf(monkeypatch):
@@ -288,6 +316,40 @@ def test_app_url_defaults_to_the_vite_spa(monkeypatch, restore_base_settings):
     base = _load_base(monkeypatch)
 
     assert base.APP_URL == "http://localhost:5173"
+
+
+def test_celery_broker_url_defaults_to_empty(monkeypatch, restore_base_settings):
+    monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+    base = _load_base(monkeypatch)
+
+    assert base.CELERY_BROKER_URL == ""
+
+
+def test_celery_broker_url_comes_from_the_environment(monkeypatch, restore_base_settings):
+    base = _load_base(monkeypatch, CELERY_BROKER_URL="redis://redis:6379/0")
+
+    assert base.CELERY_BROKER_URL == "redis://redis:6379/0"
+
+
+def test_dev_runs_tasks_in_process_only_without_a_broker(monkeypatch, restore_base_settings):
+    # Sin Redis local `.delay()` intentaría `amqp://localhost`: en dev la
+    # tarea corre en el proceso. Con broker, la manda al worker.
+    def load_dev(**environ):
+        _load_base(monkeypatch, **environ)
+        return importlib.reload(importlib.import_module("config.settings.dev"))
+
+    try:
+        monkeypatch.delenv("CELERY_BROKER_URL", raising=False)
+        without_broker = load_dev()
+        assert without_broker.CELERY_TASK_ALWAYS_EAGER is True
+        assert without_broker.CELERY_TASK_EAGER_PROPAGATES is True
+
+        with_broker = load_dev(CELERY_BROKER_URL="redis://redis:6379/0")
+        assert with_broker.CELERY_TASK_ALWAYS_EAGER is False
+    finally:
+        monkeypatch.undo()
+        importlib.reload(importlib.import_module("config.settings.base"))
+        importlib.reload(importlib.import_module("config.settings.dev"))
 
 
 def test_empty_cache_url_falls_back_to_the_database_cache(monkeypatch, restore_base_settings):

@@ -2,6 +2,7 @@
 from pathlib import Path
 
 import environ
+from celery.schedules import crontab
 
 BASE_DIR = Path(__file__).resolve().parent.parent.parent
 
@@ -116,6 +117,46 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
+
+# Celery (`config/celery.py`). El broker es infraestructura y sale del entorno;
+# vacío, `dev.py` corre las tareas en el proceso y `prod.py` no arranca.
+CELERY_BROKER_URL = env("CELERY_BROKER_URL", default="")
+# El worker reintenta conectar al arrancar: espera a Redis en lugar de caerse
+# si levanta después. Explícito porque Celery 5.x avisa si queda implícito.
+CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+CELERY_TIMEZONE = TIME_ZONE
+CELERY_TASK_SERIALIZER = "json"
+CELERY_RESULT_SERIALIZER = "json"
+CELERY_ACCEPT_CONTENT = ["json"]
+# Sin backend de resultados: nadie espera el valor de una tarea y el worker ya
+# lo escribe en su log.
+CELERY_TASK_IGNORE_RESULT = True
+# El mensaje se confirma al terminar la tarea: si el worker muere a mitad
+# (deploy, OOM), Redis la vuelve a entregar. Exige tareas idempotentes. Con
+# prefetch 1 cada proceso reserva una sola tarea, así una larga no deja otras
+# encoladas detrás de ella mientras hay procesos libres.
+CELERY_TASK_ACKS_LATE = True
+CELERY_WORKER_PREFETCH_MULTIPLIER = 1
+# El límite blando lanza `SoftTimeLimitExceeded` para cerrar en orden; el duro
+# mata el proceso. Ambos muy por debajo del `visibility_timeout` de Redis (1 h),
+# así una tarea viva nunca se entrega dos veces.
+CELERY_TASK_SOFT_TIME_LIMIT = 240
+CELERY_TASK_TIME_LIMIT = 300
+# El worker conserva `LOGGING` (consola y alertas de error por correo) en lugar
+# de reemplazar los handlers del logger raíz por los suyos.
+CELERY_WORKER_HIJACK_ROOT_LOGGER = False
+# Trabajos programados (regla de negocio, literal). Horarios en `CELERY_TIMEZONE`
+# (UTC). Los comandos `expire_quotes` y `purge_carts` siguen para correrlos a mano.
+CELERY_BEAT_SCHEDULE = {
+    "expire-stale-quotes": {
+        "task": "apps.quotes.tasks.expire_quotes",
+        "schedule": crontab(minute=0),
+    },
+    "purge-empty-carts": {
+        "task": "apps.cart.tasks.purge_carts",
+        "schedule": crontab(hour=3, minute=30),
+    },
+}
 
 # Producción les agrega el prefijo `__Host-` a los nombres de las cookies.
 SESSION_COOKIE_AGE = 7 * 24 * 60 * 60

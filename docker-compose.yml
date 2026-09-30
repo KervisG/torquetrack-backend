@@ -1,3 +1,24 @@
+x-celery-app: &celery-app
+  # Base común de `backend`, `worker` y `beat`: mismo target, código y entorno.
+  # El worker y beat no recargan solos: tras cambiar una tarea,
+  # `docker compose restart worker beat`.
+  build:
+    context: .
+    target: dev
+  volumes:
+    - .:/app
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.dev
+    DATABASE_URL: postgres://torquetrack:torquetrack@db:5432/torquetrack
+    DATABASE_SSL: "false"
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CACHE_URL: redis://redis:6379/1
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
 services:
   db:
     image: postgres:16
@@ -15,24 +36,35 @@ services:
       timeout: 5s
       retries: 5
 
+  redis:
+    # Broker de Celery (base 0) y cache de Django (base 1). Puerto del host
+    # distinto del 6379 por defecto para no chocar con un Redis local; sirve
+    # para correr un worker desde el venv con `redis://localhost:6385/0`.
+    image: redis:7-alpine
+    ports:
+      - "6385:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   backend:
+    <<: *celery-app
     # El target por defecto del Dockerfile es producción (gunicorn); en local
     # se usa `dev`, con runserver y las dependencias de los tests.
-    build:
-      context: .
-      target: dev
     command: python manage.py runserver 0.0.0.0:8000
-    volumes:
-      - .:/app
     ports:
       - "8010:8000"
-    environment:
-      DJANGO_SETTINGS_MODULE: config.settings.dev
-      DATABASE_URL: postgres://torquetrack:torquetrack@db:5432/torquetrack
-      DATABASE_SSL: "false"
-    depends_on:
-      db:
-        condition: service_healthy
+
+  worker:
+    <<: *celery-app
+    command: celery -A config worker -l info
+
+  beat:
+    <<: *celery-app
+    # El archivo de estado de beat va fuera del volumen del código.
+    command: celery -A config beat -l info -s /tmp/celerybeat-schedule
 
 volumes:
   torquetrack_pgdata:

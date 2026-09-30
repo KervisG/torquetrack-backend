@@ -1,6 +1,6 @@
 """En `User` solo se asigna el Role y se activa o desactiva la cuenta: nadie
 crea cuentas ni cambia contraseñas por aquí (toda persona se registra como
-cliente en la tienda). `/admin/` solo lo abre un
+cliente en la tienda). `/django-admin/` solo lo abre un
 usuario activo con Role de acceso total (`User.is_staff`).
 
 Un cambio de Role o una baja no necesita cortar sesiones a mano: la sesión se

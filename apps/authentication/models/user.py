@@ -123,7 +123,7 @@ class User(AbstractBaseUser):
 
     @property
     def is_staff(self) -> bool:
-        """Acceso a `/admin/` de Django, solo para el Role de acceso total.
+        """Acceso a `/django-admin/` de Django, solo para el Role de acceso total.
         El staff del panel (cualquier Role) es `is_staff_user`."""
         return self.active and self.role_id is not None and self.role.full_access
 

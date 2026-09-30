@@ -93,7 +93,7 @@ CACHES = {
 }
 
 # Auth estándar de Django: el `User` propio es el modelo de cuentas (también
-# de `/admin/`). El login es el `ModelBackend` por defecto y los permisos
+# de `/django-admin/`). El login es el `ModelBackend` por defecto y los permisos
 # salen de `User.has_perm`, que lee solo el Role.
 AUTH_USER_MODEL = "authentication.User"
 

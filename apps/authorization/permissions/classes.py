@@ -11,7 +11,7 @@ from apps.authorization.permissions.catalog import resolve_staff_permission
 
 def is_staff_user(user) -> bool:
     """Staff del panel: cualquier Role. `user.is_staff` es otra cosa (solo el
-    acceso total entra a `/admin/` de Django)."""
+    acceso total entra a `/django-admin/` de Django)."""
     return bool(getattr(user, "is_active", False) and getattr(user, "role_id", None))
 
 

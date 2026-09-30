@@ -5,7 +5,7 @@ permisos salen solo del Role (acceso total concede todo) y `User.has_perm`
 nunca consulta a `ModelBackend`, que buscaría `user_permissions` y `groups`
 que este `User` no tiene; `request.user` trae el Role en la misma consulta, y
 `createsuperuser` crea la cuenta con el Role `admin` que siembran las
-migraciones. Quién abre `/admin/` se prueba en
+migraciones. Quién abre `/django-admin/` se prueba en
 `apps/authorization/tests/test_django_admin.py`.
 """
 import pytest

@@ -10,7 +10,7 @@ from config import urls
 
 
 def test_root_urlconf_mounts_admin_and_api_once():
-    assert [str(pattern.pattern) for pattern in urls.urlpatterns] == ["admin/", "api/"]
+    assert [str(pattern.pattern) for pattern in urls.urlpatterns] == ["django-admin/", "api/"]
 
 
 def test_api_urlpatterns_never_repeat_the_prefix():

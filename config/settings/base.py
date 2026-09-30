@@ -143,16 +143,31 @@ REST_FRAMEWORK = {
     "DEFAULT_SCHEMA_CLASS": "drf_spectacular.openapi.AutoSchema",
     # DRF solo entiende periodos `s`, `m`, `h` y `d` (`N/periodo`).
     "DEFAULT_THROTTLE_RATES": {
-        "login": env("LOGIN_THROTTLE_RATE", default="10/min"),
-        "login_account": env("LOGIN_ACCOUNT_THROTTLE_RATE", default="20/hour"),
-        "register": env("REGISTER_THROTTLE_RATE", default="10/hour"),
-        "activate": env("ACTIVATE_THROTTLE_RATE", default="10/hour"),
-        "password_reset": env("PASSWORD_RESET_THROTTLE_RATE", default="10/hour"),
-        "password_reset_account": env("PASSWORD_RESET_ACCOUNT_THROTTLE_RATE", default="5/hour"),
-        "password_reset_confirm": env("PASSWORD_RESET_CONFIRM_THROTTLE_RATE", default="10/hour"),
-        "verify_email": env("VERIFY_EMAIL_THROTTLE_RATE", default="20/hour"),
-        "verify_email_resend": env("VERIFY_EMAIL_RESEND_THROTTLE_RATE", default="5/hour"),
+        "login": "10/min",
+        "login_account": "20/hour",
+        "register": "10/hour",
+        "activate": "10/hour",
+        "password_reset": "10/hour",
+        "password_reset_account": "5/hour",
+        "password_reset_confirm": "10/hour",
+        "verify_email": "20/hour",
+        "verify_email_resend": "5/hour",
+        # Storefront público. El SPA pide envío, impuesto y VIN solo al tocar
+        # un botón, y el impuesto una vez más al pagar: los topes dejan margen
+        # para corregir la dirección varias veces sin bloquear a un cliente.
+        "checkout": "10/hour",
+        "quote_checkout": "10/hour",
+        "quote_request": "10/hour",
+        "quote_pdf": "20/hour",
+        "shipping_rates": "30/min",
+        "tax_estimate": "30/min",
+        "vin_decode": "20/min",
+        "fitment_check": "30/min",
     },
+    # Proxies de confianza que agregan su entrada a `X-Forwarded-For` (ver
+    # `get_client_ip`). 0 y no el `None` de DRF: con `None` DRF usaría el
+    # header entero, que escribe el propio cliente.
+    "NUM_PROXIES": env.int("NUM_PROXIES", default=0),
 }
 
 # `/api/schema/`, `/api/docs/` y `/api/redoc/`. Describen también las rutas

@@ -4,12 +4,14 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.authentication.utils.throttling import QuotePdfRateThrottle
 from apps.quotes.services import is_expired, render_quote_pdf_bytes, serialize_quote
 from apps.quotes.views.storefront import _find_by_token
 
 
 class PublicQuotePdfView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [QuotePdfRateThrottle]
 
     def get(self, request, token):
         quote = _find_by_token(token)

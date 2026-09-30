@@ -1,3 +1,10 @@
+"""`GET /api/vin/decode/`. Se parchea el adaptador de NHTSA
+(`apps.integrations.vehicles.nhtsa.decode_vin`); un VIN mal formado no lo
+llama. La ruta tiene throttle y sus contadores viven en el cache de la base,
+así que cada test pide `db` y limpia el cache.
+"""
+import pytest
+from django.core.cache import cache
 from rest_framework.test import APIClient
 
 from apps.integrations.exceptions import ProviderError, ProviderUnavailable
@@ -11,6 +18,13 @@ DECODED = {
     "engine_model": "POWER STROKE",
     "fuel_type": "Diesel",
 }
+
+
+@pytest.fixture(autouse=True)
+def _clear_throttle_history(db):
+    cache.clear()
+    yield
+    cache.clear()
 
 
 def _nhtsa(monkeypatch, result=None, error=None):

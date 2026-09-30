@@ -3,6 +3,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.authentication.utils.throttling import CheckoutRateThrottle
 from apps.cart.services import current_cart_id
 from apps.checkout.services import create_storefront_checkout
 from apps.integrations.payments import stripe as stripe_payments
@@ -17,6 +18,7 @@ class CheckoutView(APIView):
     # sin preflight de CORS, así que no llega a esta ruta sin CSRF (415).
     parser_classes = [JSONParser]
     permission_classes = [AllowAny]
+    throttle_classes = [CheckoutRateThrottle]
 
     def post(self, request):
         if not stripe_payments.is_configured():

@@ -21,6 +21,9 @@ class StripeWebhookView(APIView):
     desconocida: Stripe reintenta cualquier otra respuesta durante días."""
 
     permission_classes = [AllowAny]
+    # Sin throttle a propósito: Stripe reintenta ante un 429 y la firma ya
+    # descarta lo que no viene de Stripe; cortar aquí demoraría pagos reales.
+    throttle_classes = []
 
     def post(self, request):
         sig_header = request.META.get("HTTP_STRIPE_SIGNATURE", "")

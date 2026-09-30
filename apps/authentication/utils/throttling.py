@@ -2,25 +2,34 @@
 una activación sin tope sirven para crear cuentas en masa o adivinar tokens.
 Un pedido de reset sin tope convierte el formulario en un cañón de correos
 contra la casilla de un tercero.
+
+Las rutas públicas del storefront que cuestan (sesión de Stripe, correos,
+WeasyPrint, EasyPost, TaxJar, NHTSA) también tienen tope por IP: sin él,
+cualquiera las usa para gastar la cuota paga de un proveedor o saturar los
+workers. Viven acá y no en cada app porque este módulo es la infraestructura
+de request que todas las views ya importan sin crear una dependencia de
+dominio (`tests/test_app_boundaries.py`), y `apps/common/` no importa DRF.
 """
 import hashlib
 
 from django.conf import settings
-from rest_framework.throttling import SimpleRateThrottle
+from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
 
 
 def get_client_ip(request):
-    """Nunca se lee `X-Forwarded-For`: sin un proxy de confianza lo escribe el
-    propio cliente, y rotarlo abriría una cuota nueva en cada request. Solo se
-    acepta el header que `CLIENT_IP_HEADER` declara como confiable (en
-    producción, el que inyecta Cloudflare); si no está, manda `REMOTE_ADDR`.
+    """Sin un proxy de confianza `X-Forwarded-For` lo escribe el propio
+    cliente, y rotarlo abriría una cuota nueva en cada request. Primero manda
+    el header que `CLIENT_IP_HEADER` declara como confiable (el que inyecta
+    Cloudflare). Si no, `get_ident` de DRF con `NUM_PROXIES`: en 0 (el default)
+    es `REMOTE_ADDR`; en N toma la entrada que agregó el proxy más externo de
+    los N, así lo que el cliente haya puesto antes no cuenta.
     """
     header = settings.CLIENT_IP_HEADER
     if header:
         value = request.META.get(header, "").strip()
         if value:
             return value
-    return request.META.get("REMOTE_ADDR")
+    return BaseThrottle().get_ident(request)
 
 
 class _IpRateThrottle(SimpleRateThrottle):
@@ -119,3 +128,39 @@ class LoginAccountRateThrottle(_EmailRateThrottle):
 class PasswordResetAccountRateThrottle(_EmailRateThrottle):
     # Cuenta igual exista o no el correo, así el 429 no revela si hay cuenta.
     scope = "password_reset_account"
+
+
+class CheckoutRateThrottle(_IpRateThrottle):
+    # Cada intento crea un pedido `PENDING_PAYMENT` y una sesión de Stripe.
+    scope = "checkout"
+
+
+class QuoteCheckoutRateThrottle(_IpRateThrottle):
+    # Pagar una cotización también abre una sesión de Stripe.
+    scope = "quote_checkout"
+
+
+class QuoteRequestRateThrottle(_IpRateThrottle):
+    # Cada solicitud guarda una cotización y manda dos correos.
+    scope = "quote_request"
+
+
+class QuotePdfRateThrottle(_IpRateThrottle):
+    # WeasyPrint ocupa un worker varios segundos por PDF.
+    scope = "quote_pdf"
+
+
+class ShippingRatesRateThrottle(_IpRateThrottle):
+    scope = "shipping_rates"
+
+
+class TaxEstimateRateThrottle(_IpRateThrottle):
+    scope = "tax_estimate"
+
+
+class VinDecodeRateThrottle(_IpRateThrottle):
+    scope = "vin_decode"
+
+
+class FitmentCheckRateThrottle(_IpRateThrottle):
+    scope = "fitment_check"

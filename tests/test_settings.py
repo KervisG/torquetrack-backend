@@ -246,6 +246,42 @@ def test_cache_can_be_overridden_with_cache_url(monkeypatch, restore_base_settin
     assert base.CACHES["default"]["LOCATION"] == "redis://cache.internal:6379/1"
 
 
+def test_every_throttle_scope_has_a_rate(monkeypatch, restore_base_settings):
+    # Un scope sin rate no falla al arrancar: DRF lanza `ImproperlyConfigured`
+    # en la primera request a la view y responde 500.
+    from rest_framework.throttling import SimpleRateThrottle
+
+    from apps.authentication.utils import throttling
+
+    base = _load_base(monkeypatch)
+    rates = base.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]
+    scopes = {
+        cls.scope
+        for cls in vars(throttling).values()
+        if isinstance(cls, type)
+        and issubclass(cls, SimpleRateThrottle)
+        and getattr(cls, "scope", None)
+    }
+
+    assert scopes
+    assert scopes <= rates.keys()
+
+
+def test_num_proxies_defaults_to_zero(monkeypatch, restore_base_settings):
+    # 0 y no `None`: con `None` DRF confiaría en el `X-Forwarded-For` entero,
+    # que escribe el propio cliente.
+    monkeypatch.delenv("NUM_PROXIES", raising=False)
+    base = _load_base(monkeypatch)
+
+    assert base.REST_FRAMEWORK["NUM_PROXIES"] == 0
+
+
+def test_num_proxies_comes_from_the_environment(monkeypatch, restore_base_settings):
+    base = _load_base(monkeypatch, NUM_PROXIES="1")
+
+    assert base.REST_FRAMEWORK["NUM_PROXIES"] == 1
+
+
 def test_app_url_defaults_to_the_vite_spa(monkeypatch, restore_base_settings):
     # Los enlaces de los correos y el retorno de Stripe van al SPA de Vite.
     monkeypatch.delenv("APP_URL", raising=False)

@@ -104,6 +104,13 @@ SECURE_PROXY_SSL_HEADER = (
     else None
 )
 
+# IP del cliente para los throttles: `base.py` lee `CLIENT_IP_HEADER`
+# (Cloudflare) y `NUM_PROXIES` (proxies de confianza que agregan su entrada a
+# `X-Forwarded-For`). Detrás del proxy del mismo dominio que sirve el SPA y la
+# API, sin ninguno de los dos todos los clientes comparten la IP del proxy y
+# un mismo tope; con `NUM_PROXIES` mayor que los proxies reales, cualquiera
+# elige su IP.
+
 # Estáticos con hash en el nombre y comprimidos (gzip/brotli), servidos por
 # WhiteNoise con caché larga. Exige `collectstatic` antes de arrancar: el
 # `Dockerfile` lo corre al construir la imagen.

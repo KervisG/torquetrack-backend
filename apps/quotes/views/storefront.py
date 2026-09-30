@@ -6,6 +6,10 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
+from apps.authentication.utils.throttling import (
+    QuoteCheckoutRateThrottle,
+    QuoteRequestRateThrottle,
+)
 from apps.cart.services import current_cart_id
 from apps.quotes.models import Quote
 from apps.quotes.services import (
@@ -31,6 +35,7 @@ class QuoteRequestView(APIView):
     # sin preflight de CORS, así que no llega a esta ruta sin CSRF (415).
     parser_classes = [JSONParser]
     permission_classes = [AllowAny]
+    throttle_classes = [QuoteRequestRateThrottle]
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
@@ -80,6 +85,7 @@ class PublicQuoteDetailsView(APIView):
 
 class PublicQuoteCheckoutView(APIView):
     permission_classes = [AllowAny]
+    throttle_classes = [QuoteCheckoutRateThrottle]
 
     def post(self, request, token):
         quote = _find_by_token(token)

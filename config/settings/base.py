@@ -24,7 +24,6 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
-    # `authorization` va antes: `authentication.User.role` apunta a su `Role`.
     "apps.authorization",
     "apps.authentication",
     "apps.customers",

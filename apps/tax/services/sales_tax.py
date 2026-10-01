@@ -6,22 +6,21 @@ from decimal import Decimal
 from django.conf import settings
 
 from apps.common.numbers import ZERO, money, money_decimal
+from apps.common.us_addresses import (
+    normalize_state_code,
+    shipping_state_error,
+    shipping_zip_error,
+)
 from apps.customers.models import TaxStatus
 from apps.customers.services import customer_for_user
 from apps.integrations.exceptions import ProviderError
 from apps.integrations.tax import taxjar
 
-# Tasas de respaldo cuando TaxJar no está disponible. En `Decimal`: con
-# `float`, 9.25 × 0.06 da 0.55499... y se cobraba un centavo de menos.
-FALLBACK_TAX_RATES = {
-    state: Decimal(rate)
-    for state, rate in {
-        "FL": "0.06", "GA": "0.04", "TX": "0.0625", "CA": "0.0725", "NY": "0.04",
-        "NJ": "0.06625", "PA": "0.06", "IL": "0.0625", "NC": "0.0475", "SC": "0.06",
-        "VA": "0.053", "OH": "0.0575", "MI": "0.06", "AZ": "0.056", "CO": "0.029",
-        "WA": "0.065", "NV": "0.0685", "TN": "0.07", "AL": "0.04",
-    }.items()
-}
+# Tasa de respaldo cuando TaxJar no está disponible: solo la estatal de FL,
+# el único estado con nexo. El recargo discrecional del condado no se estima
+# aquí; lo calcula TaxJar. En `Decimal`: con `float`, 9.25 × 0.06 da
+# 0.55499... y se cobraba un centavo de menos.
+FALLBACK_TAX_RATES = {"FL": Decimal("0.06")}
 
 EXEMPT_ESTIMATE = {
     "tax": 0,
@@ -35,11 +34,22 @@ EXEMPT_ESTIMATE = {
 def calculate_sales_tax(
     *, subtotal, core_charge, shipping, state, zip_code, city=None, address1=None
 ) -> dict:
-    """`tax` y `rate` salen en `Decimal`; quien responde JSON los serializa."""
+    """Única puerta del impuesto: storefront, checkout y cotizaciones pasan por
+    aquí, así el nexo (`SALES_TAX_NEXUS_STATES`) se aplica en un solo lugar.
+    `tax` y `rate` salen en `Decimal`; quien responde JSON los serializa."""
     shipping = money_decimal(shipping)
     taxable_amount = money_decimal(money_decimal(subtotal) + money_decimal(core_charge))
     state = str(state or "").strip().upper()
     zip_code = str(zip_code or "").strip()
+
+    if state not in settings.SALES_TAX_NEXUS_STATES:
+        return {
+            "tax": ZERO,
+            "rate": ZERO,
+            "source": "No sales tax nexus in destination state",
+            "provider": "none",
+            "estimated": False,
+        }
 
     if zip_code:
         try:
@@ -66,6 +76,8 @@ def calculate_sales_tax(
             }
 
     rate = FALLBACK_TAX_RATES.get(state, ZERO)
+    # Florida grava el envío cuando el comprador no puede evitarlo (regla
+    # 12A-1.045), y el checkout siempre exige un método de envío.
     return {
         "tax": money_decimal((taxable_amount + shipping) * rate),
         "rate": rate,
@@ -112,5 +124,25 @@ def estimate_tax(payload: dict, user) -> dict:
     """Storefront: la exención sale solo de la sesión. Con un `customerId` en
     el body cualquiera podría pedir una estimación exenta ajena y enterarse del
     estado fiscal de ese cliente. El panel usa `estimate_tax_for_customer` con
-    el cliente de la cotización, nunca con el perfil del empleado."""
-    return estimate_tax_for_customer(payload, customer_for_user(user))
+    el cliente de la cotización, nunca con el perfil del empleado.
+
+    Sin exención el estado es obligatorio, igual que en el checkout: un 0 por
+    falta de estado se leería como "sin impuesto" aunque el envío vaya a FL."""
+    customer = customer_for_user(user)
+    if not is_tax_exempt(customer):
+        address = payload.get("address") if isinstance(payload.get("address"), dict) else {}
+        state = payload.get("state") or address.get("state")
+        state_error = shipping_state_error(state)
+        if state_error:
+            return {"error": state_error, "status": 400}
+        state = normalize_state_code(state)
+        # El ZIP es opcional en la estimación (sin él se usa la tabla por
+        # estado), pero si viene tiene que ser del estado.
+        zip_code = payload.get("zip") or address.get("zip")
+        if zip_code:
+            zip_code = zip_code.strip() if isinstance(zip_code, str) else zip_code
+            zip_error = shipping_zip_error(zip_code, state)
+            if zip_error:
+                return {"error": zip_error, "status": 400}
+        payload = {**payload, "state": state}
+    return estimate_tax_for_customer(payload, customer)

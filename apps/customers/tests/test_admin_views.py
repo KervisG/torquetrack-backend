@@ -106,6 +106,44 @@ def test_create_new_customer_without_id():
 
 
 @pytest.mark.django_db
+def test_create_customer_rejects_an_invalid_state_and_normalizes_a_valid_one():
+    _insert_user("usr_create_state", permissions=["customers.edit"])
+    client = _admin_client("usr_create_state")
+
+    rejected = client.post(
+        "/api/admin/customers/",
+        {"email": "state@example.com", "name": "State Co", "state": "Florida"},
+        format="json",
+    )
+    accepted = client.post(
+        "/api/admin/customers/",
+        {"email": "state@example.com", "name": "State Co", "state": "fl"},
+        format="json",
+    )
+
+    assert rejected.status_code == 400
+    assert rejected.json() == {"error": "State must be a valid 2-letter US state code"}
+    assert accepted.status_code == 200
+    assert Customer.objects.get(email="state@example.com").data["state"] == "FL"
+
+
+@pytest.mark.django_db
+def test_create_customer_rejects_a_zip_from_another_state():
+    _insert_user("usr_create_zip", permissions=["customers.edit"])
+    client = _admin_client("usr_create_zip")
+
+    response = client.post(
+        "/api/admin/customers/",
+        {"email": "zip@example.com", "name": "Zip Co", "state": "GA", "zip": "33701"},
+        format="json",
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "ZIP code does not match the selected state."}
+    assert not Customer.objects.filter(email="zip@example.com").exists()
+
+
+@pytest.mark.django_db
 def test_create_new_customer_without_email_is_not_flagged_as_reused():
     _insert_user("usr_create_no_email", permissions=["customers.edit"])
     client = _admin_client("usr_create_no_email")

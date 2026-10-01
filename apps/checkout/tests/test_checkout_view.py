@@ -203,6 +203,46 @@ def test_returns_409_when_fitment_check_fails(monkeypatch, shipping):
     assert not Order.objects.exists()
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize("overrides", [{"vehicle": None}, {"vehicle": {"vin": "  "}}])
+def test_accepts_checkout_without_a_vin(overrides, monkeypatch, shipping):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+    body = _body(shipping, **overrides)
+    if body["vehicle"] is None:
+        del body["vehicle"]
+
+    response = _post(body)
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert not order.data["vehicle"].get("vin")
+
+
+@pytest.mark.django_db
+def test_returns_400_when_the_submitted_vin_is_malformed(monkeypatch, shipping):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(shipping, vehicle={**VEHICLE, "vin": "1GCHK3"}))
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "VIN must contain 17 valid characters"}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_stores_the_submitted_vin_normalized(monkeypatch, shipping):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(shipping, vehicle={**VEHICLE, "vin": " 1gchk33f6vf000001 "}))
+
+    assert response.status_code == 200
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.data["vehicle"]["vin"] == "1GCHK33F6VF000001"
+
+
 # --- shipping ------------------------------------------------------------
 
 
@@ -242,20 +282,20 @@ def test_returns_400_without_a_shipping_selection(shipping_body, monkeypatch):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "selection, zip_code",
+    "selection, state, zip_code",
     [
-        ({"shipmentId": "shp_checkout", "rateId": "rate_forged"}, "33701"),
-        ({"shipmentId": "shp_other", "rateId": "rate_ground"}, "33701"),
-        ({"shipmentId": "shp_checkout", "rateId": "rate_ground"}, "90210"),
+        ({"shipmentId": "shp_checkout", "rateId": "rate_forged"}, "FL", "33701"),
+        ({"shipmentId": "shp_other", "rateId": "rate_ground"}, "FL", "33701"),
+        ({"shipmentId": "shp_checkout", "rateId": "rate_ground"}, "CA", "90210"),
     ],
 )
 def test_returns_409_when_the_shipping_rate_cannot_be_verified(
-    selection, zip_code, monkeypatch, shipping
+    selection, state, zip_code, monkeypatch, shipping
 ):
     _insert_product()
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = _post(_body(selection, customer={"state": "CA", "zip": zip_code}))
+    response = _post(_body(selection, customer={"state": state, "zip": zip_code}))
 
     assert response.status_code == 409
     assert response.json()["error"] == (
@@ -300,6 +340,163 @@ def test_accepts_the_quoted_items_split_in_several_lines(monkeypatch, settings):
     )
 
     assert response.status_code == 200
+
+
+# --- shipping address --------------------------------------------------------
+
+
+def _forbid_stripe(monkeypatch):
+    def _boom(**kwargs):
+        raise AssertionError("Stripe must not be called for an invalid shipping address")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "customer",
+    [
+        {"zip": "33701"},
+        {"state": "", "zip": "33701"},
+        {"state": "   ", "zip": "33701"},
+        {"state": None, "zip": "33701"},
+    ],
+)
+def test_returns_400_when_the_shipping_state_is_missing(customer, monkeypatch, shipping):
+    # Sin estado el impuesto daría 0 aunque el envío vaya a Florida.
+    _insert_product()
+    _forbid_stripe(monkeypatch)
+
+    response = _post(_body(shipping, customer=customer))
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Shipping state is required"}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("state", ["ZZ", "Florida", "FLA", "AE", 12, ["FL"]])
+def test_returns_400_when_the_shipping_state_is_not_a_us_state_we_ship_to(
+    state, monkeypatch, shipping
+):
+    _insert_product()
+    _forbid_stripe(monkeypatch)
+
+    response = _post(_body(shipping, customer={"state": state, "zip": "33701"}))
+
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Shipping state must be a valid 2-letter US state code"
+    }
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("zip_code", [None, "", "3370", "ABCDE", 33701])
+def test_returns_400_when_the_shipping_zip_is_missing_or_malformed(
+    zip_code, monkeypatch, shipping
+):
+    _insert_product()
+    _forbid_stripe(monkeypatch)
+
+    response = _post(_body(shipping, customer={"state": "FL", "zip": zip_code}))
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Shipping ZIP must be 5 digits or ZIP+4"}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("state", "zip_code"),
+    [("GA", "33701"), ("GA", "33701-1234"), ("FL", "30301"), ("PR", "20001")],
+)
+def test_returns_400_when_the_zip_belongs_to_another_state(
+    state, zip_code, monkeypatch, shipping
+):
+    # El paquete va al ZIP: un ZIP de Florida con estado "GA" esquivaría el
+    # impuesto de FL.
+    _insert_product()
+    _forbid_stripe(monkeypatch)
+
+    response = _post(_body(shipping, customer={"state": state, "zip": zip_code}))
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "ZIP code does not match the selected state."}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("zip_code", ["00001", "21301", "34001"])
+def test_returns_400_when_the_zip_prefix_is_not_a_us_zip_we_ship_to(
+    zip_code, monkeypatch, shipping
+):
+    _insert_product()
+    _forbid_stripe(monkeypatch)
+
+    response = _post(_body(shipping, customer={"state": "FL", "zip": zip_code}))
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "ZIP code is not a valid US ZIP code."}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_accepts_a_florida_zip_plus_four_with_florida(monkeypatch, settings):
+    _insert_product()
+    selection = quote_shipping(
+        monkeypatch, settings, zip_code="33701-1234", items=[{"id": PRODUCT_ID, "qty": 1}]
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(selection, customer={"state": "FL", "zip": "33701-1234"}))
+
+    assert response.status_code == 200
+    assert response.json()["tax"] == 15.15
+
+
+@pytest.mark.django_db
+def test_puerto_rico_zip_with_puerto_rico_is_accepted(monkeypatch, settings):
+    _insert_product()
+    selection = quote_shipping(
+        monkeypatch, settings, zip_code="00901", items=[{"id": PRODUCT_ID, "qty": 1}]
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(selection, customer={"state": "PR", "zip": "00901"}))
+
+    assert response.status_code == 200
+    assert response.json()["tax"] == 0
+
+
+@pytest.mark.django_db
+def test_the_shipping_state_is_normalized_before_tax_and_the_order(monkeypatch, shipping):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(shipping, customer={"state": " fl ", "zip": " 33701 "}))
+
+    assert response.status_code == 200
+    # 6 % de respaldo sobre 189.99 + 50 + 12.50: el estado en minúscula sigue
+    # siendo Florida.
+    assert response.json()["tax"] == 15.15
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.data["customer"]["state"] == "FL"
+    assert order.data["customer"]["zip"] == "33701"
+
+
+@pytest.mark.django_db
+def test_district_of_columbia_is_a_valid_shipping_state(monkeypatch, settings):
+    _insert_product()
+    selection = quote_shipping(
+        monkeypatch, settings, zip_code="20001", items=[{"id": PRODUCT_ID, "qty": 1}]
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(selection, customer={"state": "DC", "zip": "20001"}))
+
+    assert response.status_code == 200
+    assert response.json()["tax"] == 0
 
 
 # --- customer and tax ------------------------------------------------------
@@ -354,6 +551,30 @@ def test_non_verified_customer_gets_fallback_table_tax(monkeypatch, shipping):
 
     assert response.status_code == 200
     assert response.json()["tax"] == round((239.99 + SHIPPING_RATE) * 0.06, 2)
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("state, zip_code", [("GA", "30301"), ("CA", "90001")])
+def test_checkout_outside_florida_charges_no_tax(state, zip_code, monkeypatch, settings):
+    _insert_product()
+    selection = quote_shipping(
+        monkeypatch, settings, zip_code=zip_code, rate=SHIPPING_RATE,
+        items=[{"id": PRODUCT_ID, "qty": 1}],
+    )
+    settings.TAXJAR_API_KEY = "tj_test_fake"
+
+    def _boom(**kwargs):
+        raise AssertionError("TaxJar must not be called outside the nexus states")
+
+    monkeypatch.setattr("apps.integrations.tax.taxjar.calculate_tax", _boom)
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = _post(_body(selection, customer={"state": state, "zip": zip_code}))
+
+    assert response.status_code == 200
+    assert response.json()["tax"] == 0
+    order = Order.objects.get(pk=response.json()["orderId"])
+    assert order.data["totals"]["tax"] == 0
 
 
 @pytest.mark.django_db
@@ -418,7 +639,12 @@ def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypa
     response = _post(
         _body(
             shipping,
-            customer={"email": "owner@example.com", "city": "Elsewhere", "zip": "33701"},
+            customer={
+                "email": "owner@example.com",
+                "city": "Elsewhere",
+                "state": "FL",
+                "zip": "33701",
+            },
         )
     )
 

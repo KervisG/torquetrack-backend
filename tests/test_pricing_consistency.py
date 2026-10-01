@@ -102,8 +102,8 @@ def _panel_quote(client, items):
             "customer": {"name": "Fleet Co"},
             "items": items,
             "shipping": 0,
-            # Oregón no tiene impuesto de venta (no está en la tabla de
-            # respaldo): el total de la cotización queda sin impuesto.
+            # Fuera de Florida no hay nexo: el total de la cotización queda
+            # sin impuesto.
             "shippingAddress": {"state": "OR", "zip": "97201"},
         },
         format="json",

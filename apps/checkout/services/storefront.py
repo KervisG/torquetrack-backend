@@ -20,10 +20,15 @@ from apps.checkout.models import Order, OrderPaymentStatus, OrderStatus
 from apps.checkout.services.payments import cancel_unpaid_order, start_stripe_payment
 from apps.common.ids import random_id
 from apps.common.numbers import money
-from apps.customers.models import TaxStatus
+from apps.common.us_addresses import (
+    normalize_state_code,
+    shipping_state_error,
+    shipping_zip_error,
+)
 from apps.customers.services import customer_for_user, resolve_guest_customer
 from apps.integrations.exceptions import ProviderError
 from apps.numbering.services import next_document_number
+from apps.vin.services import VIN_FORMAT_ERROR, VIN_PATTERN
 
 logger = logging.getLogger(__name__)
 
@@ -96,7 +101,7 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     """
     from apps.fitment.services import check_product_fitment
     from apps.shipping.services import verify_shipping_selection
-    from apps.tax.services import calculate_sales_tax
+    from apps.tax.services import calculate_sales_tax, is_tax_exempt
 
     raw_items = body.get("items")
     if not isinstance(raw_items, list) or not raw_items:
@@ -107,6 +112,14 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     vehicle = _object_or_empty(body.get("vehicle"))
     if raw_customer is None or vehicle is None:
         return {"error": "Customer and vehicle must be objects"}, 400
+    # El VIN es opcional: sin él se compra igual, pero uno tipeado tiene que
+    # ser un VIN válido para no guardar en el pedido un vehículo inventado.
+    vin = str(vehicle.get("vin") or "").strip().upper()
+    vehicle = {key: value for key, value in vehicle.items() if key != "vin"}
+    if vin:
+        if not VIN_PATTERN.match(vin):
+            return {"error": VIN_FORMAT_ERROR}, 400
+        vehicle["vin"] = vin
 
     # El precio sale siempre del catálogo; un precio ausente o no positivo
     # es un error de carga y se rechaza antes de crear el pedido para no
@@ -142,6 +155,19 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     if profile is not None:
         customer["email"] = profile.email or user.email
 
+    # El nexo depende del estado: sin uno válido, un envío a Florida pagaría 0
+    # de impuesto. El perfil no lo completa; la dirección del pedido es la del body.
+    state_error = shipping_state_error(customer.get("state"))
+    if state_error:
+        return {"error": state_error}, 400
+    customer["state"] = normalize_state_code(customer["state"])
+    zip_code = customer.get("zip")
+    zip_code = zip_code.strip() if isinstance(zip_code, str) else zip_code
+    zip_error = shipping_zip_error(zip_code, customer["state"])
+    if zip_error:
+        return {"error": zip_error}, 400
+    customer["zip"] = zip_code
+
     selection = body.get("shipping")
     if not (
         isinstance(selection, dict) and selection.get("shipmentId") and selection.get("rateId")
@@ -154,7 +180,7 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
 
     # La exención sale solo del perfil de la sesión: un email tipeado por un
     # invitado no prueba que el comprador sea ese cliente exento.
-    if profile is not None and profile.tax_status == TaxStatus.VERIFIED:
+    if is_tax_exempt(profile):
         tax_result = {"tax": 0, "rate": 0, "source": "Tax exempt"}
     else:
         tax_result = calculate_sales_tax(

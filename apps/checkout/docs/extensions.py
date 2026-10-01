@@ -283,12 +283,28 @@ class CheckoutViewExtension(OpenApiViewExtension):
                 operation_id="checkout_start",
                 tags=["storefront"],
                 summary="Start checkout",
-                description="Public. Creates a pending order and a Stripe Checkout session.",
+                description=(
+                    "Public. Creates a pending order and a Stripe Checkout session. "
+                    "`vehicle` is optional; when it carries a `vin`, the VIN must have "
+                    "17 valid characters and the cart must pass the fitment check.\n\n"
+                    "`customer.state` is required and must be the 2-letter code of a US "
+                    "state, DC or inhabited territory; `customer.zip` is required (5 digits "
+                    "or ZIP+4). Either problem answers 400 and creates no order."
+                ),
                 auth=[],
                 request=CheckoutRequestSerializer,
                 responses={
                     200: OpenApiResponse(CheckoutResponseSerializer),
-                    400: OpenApiResponse(ErrorResponseSerializer),
+                    400: OpenApiResponse(
+                        ErrorResponseSerializer,
+                        examples=[
+                            ex.SHIPPING_STATE_MISSING,
+                            ex.SHIPPING_STATE_INVALID,
+                            ex.SHIPPING_ZIP_INVALID,
+                            ex.SHIPPING_ZIP_UNKNOWN,
+                            ex.SHIPPING_ZIP_MISMATCH,
+                        ],
+                    ),
                     503: OpenApiResponse(ErrorResponseSerializer),
                 },
             )

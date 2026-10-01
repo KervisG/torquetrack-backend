@@ -69,7 +69,7 @@ def _checkout(client, customer):
         {
             "items": [{"id": PRODUCT_ID, "qty": 1}],
             "vehicle": VEHICLE,
-            "customer": {"zip": "33701", **customer},
+            "customer": {"state": "FL", "zip": "33701", **customer},
             "shipping": {"shipmentId": "shp_checkout", "rateId": "rate_ground"},
         },
         format="json",
@@ -106,6 +106,19 @@ def test_signed_in_customer_body_email_cannot_redirect_the_order(_stripe):
     assert order.data["customer"]["email"] == "pat@example.com"
     assert _stripe["customer_email"] == "pat@example.com"
     assert Customer.objects.get(pk="C_GUEST").data == {}
+
+
+@pytest.mark.django_db
+def test_signed_in_checkout_still_requires_the_shipping_state():
+    # El perfil no completa el estado de envío: la dirección del pedido es la
+    # del body, y sin estado el impuesto daría 0.
+    client = _account()
+
+    response = _checkout(client, {"email": "pat@example.com", "state": ""})
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Shipping state is required"}
+    assert not Order.objects.exists()
 
 
 @pytest.mark.django_db

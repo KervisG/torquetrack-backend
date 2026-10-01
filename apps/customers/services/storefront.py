@@ -25,6 +25,7 @@ from apps.authentication.services import (
     send_verification_email,
 )
 from apps.common.ids import random_id
+from apps.common.us_addresses import normalize_state_code, shipping_zip_error
 from apps.customers.models import Customer, TaxStatus
 
 
@@ -94,6 +95,8 @@ ACCOUNT_PROFILE_FIELDS = (
     "zip",
     "country",
 )
+
+INVALID_PROFILE_STATE = "State must be a valid 2-letter US state code"
 
 # El body JSON entero tiene que caber en `DATA_UPLOAD_MAX_MEMORY_SIZE`
 # (2.5 MB por defecto) y el base64 ocupa ~4/3 del archivo.
@@ -284,6 +287,18 @@ def _profile_patch(payload: dict) -> tuple[dict, dict | None]:
         if not isinstance(value, str):
             return {}, {"error": f"{field} must be a string", "status": 400}
         patch[field] = value.strip()[:200]
+    # El estado del perfil precarga el checkout, que solo acepta un código de
+    # la lista; vacío se permite porque la dirección del perfil es opcional.
+    if patch.get("state"):
+        patch["state"] = normalize_state_code(patch["state"])
+        if not patch["state"]:
+            return {}, {"error": INVALID_PROFILE_STATE, "status": 400}
+    # Solo se cruzan si vienen los dos: un PATCH parcial no se valida contra
+    # lo guardado, y el checkout vuelve a validar el par igual.
+    if patch.get("state") and patch.get("zip"):
+        zip_error = shipping_zip_error(patch["zip"], patch["state"])
+        if zip_error:
+            return {}, {"error": zip_error, "status": 400}
     return patch, None
 
 

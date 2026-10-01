@@ -5,6 +5,13 @@ from drf_spectacular.utils import OpenApiExample
 
 from apps.authorization.docs.examples import error_example
 from apps.checkout.models import Carrier, FulfillmentStatus, RefundStatus
+from apps.common.us_addresses import (
+    INVALID_SHIPPING_STATE,
+    INVALID_SHIPPING_ZIP,
+    SHIPPING_STATE_REQUIRED,
+    UNKNOWN_SHIPPING_ZIP,
+    ZIP_STATE_MISMATCH,
+)
 
 REFUND_REQUEST = OpenApiExample(
     "Partial refund",
@@ -89,3 +96,10 @@ FULFILLMENT_ALREADY = error_example("Same status", "Fulfillment is already PREPA
 FULFILLMENT_SAME_TRACKING = error_example(
     "Same tracking number", "Order already shipped with this tracking number"
 )
+
+
+SHIPPING_STATE_MISSING = error_example("Shipping state missing", SHIPPING_STATE_REQUIRED)
+SHIPPING_STATE_INVALID = error_example("Shipping state invalid", INVALID_SHIPPING_STATE)
+SHIPPING_ZIP_INVALID = error_example("Shipping ZIP invalid", INVALID_SHIPPING_ZIP)
+SHIPPING_ZIP_UNKNOWN = error_example("Shipping ZIP unassigned", UNKNOWN_SHIPPING_ZIP)
+SHIPPING_ZIP_MISMATCH = error_example("ZIP from another state", ZIP_STATE_MISMATCH)

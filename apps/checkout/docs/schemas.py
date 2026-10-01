@@ -3,6 +3,7 @@
 from rest_framework import serializers
 
 from apps.checkout.models import Carrier, FulfillmentStatus, RefundStatus
+from apps.common.us_addresses import US_STATE_CODES
 
 
 class RefundRequestSerializer(serializers.Serializer):
@@ -48,8 +49,52 @@ class OrderPatchSerializer(serializers.Serializer):
     notes = serializers.CharField(required=False, allow_blank=True)
 
 
+class CheckoutItemSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    qty = serializers.IntegerField(min_value=1, max_value=99)
+
+
+class CheckoutCustomerSerializer(serializers.Serializer):
+    name = serializers.CharField(required=False)
+    company = serializers.CharField(required=False, allow_blank=True)
+    email = serializers.EmailField(
+        required=False, help_text="Ignored for a signed-in customer: the account email is used."
+    )
+    phone = serializers.CharField(required=False, allow_blank=True)
+    address1 = serializers.CharField(required=False)
+    address2 = serializers.CharField(required=False, allow_blank=True)
+    city = serializers.CharField(required=False)
+    state = serializers.ChoiceField(
+        choices=sorted(US_STATE_CODES),
+        help_text=(
+            "Required. Two-letter code of a US state, DC or an inhabited territory; "
+            "case-insensitive and stored uppercase. Full names are rejected. "
+            "Sales tax is charged only for the nexus states."
+        ),
+    )
+    zip = serializers.RegexField(
+        r"^\d{5}(-\d{4})?$",
+        help_text=(
+            "Required. 5 digits or ZIP+4; must match the ZIP the shipping rate was quoted for."
+        ),
+    )
+    country = serializers.CharField(required=False, help_text="Only US addresses are shipped to.")
+
+
+class CheckoutShippingSelectionSerializer(serializers.Serializer):
+    shipmentId = serializers.CharField()
+    rateId = serializers.CharField()
+
+
 class CheckoutRequestSerializer(serializers.Serializer):
-    email = serializers.EmailField(required=False)
+    items = CheckoutItemSerializer(many=True)
+    customer = CheckoutCustomerSerializer(help_text="Shipping address and contact.")
+    vehicle = serializers.DictField(
+        required=False, help_text="Optional. With a `vin`, the cart must pass the fitment check."
+    )
+    shipping = CheckoutShippingSelectionSerializer(
+        help_text="A rate returned by `POST /api/shipping/rates/`."
+    )
 
 
 class CheckoutResponseSerializer(serializers.Serializer):

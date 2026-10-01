@@ -115,6 +115,41 @@ def test_staff_without_review_cannot_lower_the_tax(taxjar_seven):
 
 
 @pytest.mark.django_db
+@pytest.mark.parametrize("state, zip_code", [("GA", "30301"), ("CA", "90001")])
+def test_quote_shipped_outside_florida_has_zero_tax(state, zip_code, settings, forbid_taxjar):
+    # Solo hay nexo en Florida: fuera de FL no se consulta TaxJar.
+    settings.TAXJAR_API_KEY = "tj_test_fake"
+    client = _staff(f"usr_tax_{state.lower()}")
+
+    response = client.post(
+        "/api/admin/quotes/",
+        _body(shippingAddress={**FL_ADDRESS, "state": state, "zip": zip_code}),
+        format="json",
+    )
+
+    assert response.status_code == 200
+    quote = _saved(response)
+    assert quote.data["totals"]["tax"] == 0
+    assert quote.data["totals"]["total"] == 100
+    assert quote.data["taxSource"] == "calculated"
+    assert quote.data["taxRate"] == 0.0
+    assert quote.data["taxProvider"] == "none"
+
+
+@pytest.mark.django_db
+def test_exempt_customer_quote_in_florida_has_zero_tax(forbid_taxjar):
+    customer = _customer("C_tax_exempt_fl", tax_status="VERIFIED")
+    client = _staff("usr_tax_exempt_fl")
+
+    response = client.post("/api/admin/quotes/", _body(customerId=customer.pk), format="json")
+
+    assert response.status_code == 200
+    quote = _saved(response)
+    assert quote.data["totals"]["tax"] == 0
+    assert quote.data["taxExempt"] is True
+
+
+@pytest.mark.django_db
 def test_the_shipping_address_is_normalized_and_saved(taxjar_seven):
     client = _staff("usr_tax_address")
 
@@ -315,8 +350,18 @@ def test_a_non_exempt_quote_without_state_and_zip_is_rejected(forbid_taxjar, add
     [
         ("FL 33701", "Shipping address must be an object with text fields"),
         ({**FL_ADDRESS, "zip": 33701}, "Shipping address must be an object with text fields"),
-        ({**FL_ADDRESS, "state": "Florida"}, "Shipping state must be a 2-letter code"),
+        (
+            {**FL_ADDRESS, "state": "Florida"},
+            "Shipping state must be a valid 2-letter US state code",
+        ),
+        (
+            {**FL_ADDRESS, "state": "ZZ"},
+            "Shipping state must be a valid 2-letter US state code",
+        ),
         ({**FL_ADDRESS, "zip": "3370"}, "Shipping ZIP must be 5 digits or ZIP+4"),
+        ({**FL_ADDRESS, "state": "GA"}, "ZIP code does not match the selected state."),
+        ({**FL_ADDRESS, "zip": "30301"}, "ZIP code does not match the selected state."),
+        ({**FL_ADDRESS, "zip": "00001"}, "ZIP code is not a valid US ZIP code."),
         (
             {**FL_ADDRESS, "city": "x" * 201},
             "Shipping address fields must be 200 characters or fewer",

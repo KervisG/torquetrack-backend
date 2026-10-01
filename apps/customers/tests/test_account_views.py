@@ -138,6 +138,31 @@ def test_patch_account_rejects_non_string_values():
     assert response.status_code == 400
 
 
+@pytest.mark.django_db
+@pytest.mark.parametrize(("raw", "saved"), [(" fl ", "FL"), ("dc", "DC"), ("", "")])
+def test_patch_account_normalizes_the_state_code(raw, saved):
+    # El estado del perfil precarga el checkout, que solo acepta un código válido.
+    client = _account()
+
+    response = client.patch("/api/account/", {"state": raw}, format="json")
+
+    assert response.status_code == 200
+    assert Customer.objects.get(pk="C_PAT").data["state"] == saved
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("state", ["Florida", "ZZ", "AE"])
+def test_patch_account_rejects_a_state_we_do_not_ship_to(state):
+    client = _account()
+
+    response = client.patch("/api/account/", {"state": state, "city": "Tampa"}, format="json")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "State must be a valid 2-letter US state code"}
+    assert "state" not in Customer.objects.get(pk="C_PAT").data
+    assert "city" not in Customer.objects.get(pk="C_PAT").data
+
+
 # --- pedidos y cotizaciones -------------------------------------------------------
 
 
@@ -300,3 +325,27 @@ def test_tax_exemption_accepts_a_submission_without_certificate():
     )
 
     assert response.status_code == 200
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(("state", "zip_code"), [("GA", "33701"), ("FL", "30301-1234")])
+def test_patch_account_rejects_a_zip_from_another_state(state, zip_code):
+    # El perfil precarga el checkout, que rechaza el mismo par.
+    client = _account()
+
+    response = client.patch("/api/account/", {"state": state, "zip": zip_code}, format="json")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "ZIP code does not match the selected state."}
+    assert "zip" not in Customer.objects.get(pk="C_PAT").data
+
+
+@pytest.mark.django_db
+def test_patch_account_accepts_a_matching_state_and_zip():
+    client = _account()
+
+    response = client.patch("/api/account/", {"state": "fl", "zip": "33701-1234"}, format="json")
+
+    assert response.status_code == 200
+    data = Customer.objects.get(pk="C_PAT").data
+    assert (data["state"], data["zip"]) == ("FL", "33701-1234")

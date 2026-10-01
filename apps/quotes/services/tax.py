@@ -10,11 +10,17 @@ convertirla o de pagarla hereda un impuesto que el staff no pudo bajar. La
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from decimal import Decimal
 
 from apps.common.numbers import ZERO, money, money_decimal
+from apps.common.us_addresses import (
+    INVALID_SHIPPING_STATE,
+    INVALID_SHIPPING_ZIP,
+    is_valid_zip,
+    normalize_state_code,
+    shipping_zip_error,
+)
 from apps.tax.services import estimate_tax_for_customer, is_tax_exempt
 
 # El mismo permiso que revisa los certificados de exención: quien puede
@@ -23,8 +29,6 @@ TAX_OVERRIDE_PERMISSION = "tax_exemptions.review"
 TAX_OVERRIDE_FORBIDDEN = "Overriding tax requires tax_exemptions.review"
 TAX_ADDRESS_REQUIRED = "Shipping state and ZIP are required to calculate tax"
 INVALID_SHIPPING_ADDRESS = "Shipping address must be an object with text fields"
-INVALID_SHIPPING_STATE = "Shipping state must be a 2-letter code"
-INVALID_SHIPPING_ZIP = "Shipping ZIP must be 5 digits or ZIP+4"
 SHIPPING_FIELD_TOO_LONG = "Shipping address fields must be 200 characters or fewer"
 INVALID_TAX_OVERRIDE = "Tax override must be an object with amount and reason"
 INVALID_TAX_OVERRIDE_AMOUNT = "Tax override amount must be 0 or more"
@@ -35,8 +39,6 @@ EXEMPT_TAX_OVERRIDE = "Tax-exempt customers cannot have a tax override"
 SHIPPING_ADDRESS_FIELDS = ("address1", "city", "state", "zip")
 MAX_ADDRESS_FIELD_LENGTH = 200
 MAX_OVERRIDE_REASON_LENGTH = 500
-_STATE_CODE = re.compile(r"[A-Z]{2}")
-_ZIP_CODE = re.compile(r"\d{5}(-\d{4})?")
 
 # Claves de `Quote.data` que escribe este módulo. El body no puede traerlas:
 # se descartan y se vuelven a escribir con lo que decidió el servidor.
@@ -87,11 +89,18 @@ def parse_shipping_address(raw) -> dict:
         if len(value) > MAX_ADDRESS_FIELD_LENGTH:
             raise QuoteTaxError(SHIPPING_FIELD_TOO_LONG)
         address[field] = value
-    address["state"] = address["state"].upper()
-    if address["state"] and not _STATE_CODE.fullmatch(address["state"]):
-        raise QuoteTaxError(INVALID_SHIPPING_STATE)
-    if address["zip"] and not _ZIP_CODE.fullmatch(address["zip"]):
+    # Vacío se permite aquí: `resolve_quote_tax` decide si hace falta (un
+    # cliente exento o un borrador sin montos no la necesitan).
+    if address["state"]:
+        address["state"] = normalize_state_code(address["state"]) or ""
+        if not address["state"]:
+            raise QuoteTaxError(INVALID_SHIPPING_STATE)
+    if address["zip"] and not is_valid_zip(address["zip"]):
         raise QuoteTaxError(INVALID_SHIPPING_ZIP)
+    if address["state"] and address["zip"]:
+        zip_error = shipping_zip_error(address["zip"], address["state"])
+        if zip_error:
+            raise QuoteTaxError(zip_error)
     return address
 
 
@@ -173,7 +182,8 @@ def resolve_quote_tax(
             },
         )
 
-    # Si TaxJar falla, `calculate_sales_tax` cae a la tabla por estado.
+    # `calculate_sales_tax` aplica el nexo (fuera de FL, 0 sin TaxJar) y, si
+    # TaxJar falla, cae a la tasa estatal de respaldo.
     estimate = estimate_tax_for_customer(
         {
             "subtotal": subtotal,

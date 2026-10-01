@@ -253,6 +253,10 @@ CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
+# Estados donde TorqueTrack tiene nexo de impuesto de venta. Es una decisión
+# fiscal del negocio, no de despliegue: por eso no sale del entorno. Fuera de
+# estos estados no se cobra impuesto ni se consulta TaxJar.
+SALES_TAX_NEXUS_STATES = ("FL",)
 # Origen de los envíos (EasyPost) y del impuesto (TaxJar). Un valor vacío
 # cuenta como no definido, igual que `CACHE_URL`.
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="") or "34241"

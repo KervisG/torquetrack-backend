@@ -8,12 +8,13 @@ from apps.integrations.vehicles import nhtsa
 
 # El alfabeto de un VIN nunca incluye I, O ni Q.
 VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
+VIN_FORMAT_ERROR = "VIN must contain 17 valid characters"
 
 
 def decode_vehicle(raw_vin: str | None) -> tuple[dict, int]:
     vin = (raw_vin or "").strip().upper()
     if not VIN_PATTERN.match(vin):
-        return {"error": "VIN must contain 17 valid characters"}, 400
+        return {"error": VIN_FORMAT_ERROR}, 400
 
     try:
         result = nhtsa.decode_vin(vin)

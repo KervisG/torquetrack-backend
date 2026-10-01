@@ -114,14 +114,14 @@ def test_signed_in_request_without_csrf_is_rejected():
 @pytest.mark.django_db
 def test_anonymous_uses_fallback_table_when_taxjar_unconfigured():
     response = APIClient().post(
-        "/api/tax/estimate/", {"amount": 100, "state": "GA", "zip": "30301"}, format="json"
+        "/api/tax/estimate/", {"amount": 100, "state": "FL", "zip": "33701"}, format="json"
     )
 
     assert response.status_code == 200
     body = response.json()
-    # Tasa de respaldo de GA: 0.04.
-    assert body["tax"] == 4.0
-    assert body["rate"] == 0.04
+    # Tasa estatal de respaldo de FL: 0.06.
+    assert body["tax"] == 6.0
+    assert body["rate"] == 0.06
     assert body["estimated"] is True
 
 
@@ -129,15 +129,79 @@ def test_anonymous_uses_fallback_table_when_taxjar_unconfigured():
 def test_reads_state_and_zip_from_nested_address():
     response = APIClient().post(
         "/api/tax/estimate/",
-        {"subtotal": 100, "address": {"state": "TX", "zip": "75001"}},
+        {"subtotal": 100, "address": {"state": "fl", "zip": "33701"}},
         format="json",
     )
 
     assert response.status_code == 200
     body = response.json()
-    # Tasa de respaldo de TX: 0.0625.
-    assert body["tax"] == 6.25
-    assert body["rate"] == 0.0625
+    assert body["tax"] == 6.0
+    assert body["rate"] == 0.06
+
+
+# --- nexo -------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"subtotal": 100, "core": 20, "shipping": 5, "state": "GA", "zip": "30301"},
+        {"subtotal": 100, "address": {"state": "ca", "zip": "90001"}},
+        {"subtotal": 100, "state": "TX"},
+    ],
+)
+def test_state_without_nexus_pays_zero_without_calling_taxjar(settings, monkeypatch, payload):
+    settings.TAXJAR_API_KEY = "tj_test_fake"
+
+    def _boom(**kwargs):
+        raise AssertionError("TaxJar must not be called outside the nexus states")
+
+    monkeypatch.setattr("apps.integrations.tax.taxjar.calculate_tax", _boom)
+
+    response = APIClient().post("/api/tax/estimate/", payload, format="json")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["tax"] == 0
+    assert body["rate"] == 0
+    assert body["provider"] == "none"
+    assert body["estimated"] is False
+
+
+@pytest.mark.django_db
+def test_nexus_states_come_from_settings(settings):
+    settings.SALES_TAX_NEXUS_STATES = ("GA",)
+
+    florida = APIClient().post("/api/tax/estimate/", FL_REQUEST, format="json")
+
+    assert florida.json()["tax"] == 0
+    assert florida.json()["provider"] == "none"
+
+
+def test_the_nexus_is_florida_only(settings):
+    assert tuple(settings.SALES_TAX_NEXUS_STATES) == ("FL",)
+
+
+def test_fallback_table_only_has_the_florida_state_rate():
+    from decimal import Decimal
+
+    from apps.tax.services import FALLBACK_TAX_RATES
+
+    assert FALLBACK_TAX_RATES == {"FL": Decimal("0.06")}
+
+
+@pytest.mark.django_db
+def test_florida_fallback_taxes_parts_core_and_shipping():
+    response = APIClient().post(
+        "/api/tax/estimate/",
+        {"subtotal": 100, "core": 20, "shipping": 5, "state": "FL", "zip": "33701"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    # 0.06 × (100 + 20 + 5): Florida grava el envío que el comprador no puede evitar.
+    assert response.json()["tax"] == 7.5
 
 
 @pytest.mark.django_db
@@ -153,7 +217,7 @@ def test_taxjar_success_returned_when_configured(settings, monkeypatch):
 
     response = APIClient().post(
         "/api/tax/estimate/",
-        {"subtotal": 100, "core": 20, "shipping": 5, "state": "ca", "zip": "90001"},
+        {"subtotal": 100, "core": 20, "shipping": 5, "state": "fl", "zip": "33701"},
         format="json",
     )
 
@@ -164,7 +228,8 @@ def test_taxjar_success_returned_when_configured(settings, monkeypatch):
     assert body["estimated"] is False
     assert captured["amount"] == 120.0
     assert captured["shipping"] == 5.0
-    assert captured["to_state"] == "CA"
+    assert captured["to_state"] == "FL"
+    assert captured["to_zip"] == "33701"
 
 
 @pytest.mark.django_db
@@ -201,14 +266,49 @@ def test_without_zip_taxjar_is_not_called(settings, monkeypatch):
     assert response.json()["provider"] == "fallback"
 
 
+# --- estado de destino -------------------------------------------------------
+
+
 @pytest.mark.django_db
-def test_unknown_state_falls_back_to_zero_rate():
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"subtotal": 100, "zip": "33701"},
+        {"subtotal": 100, "state": "  ", "zip": "33701"},
+        {"subtotal": 100, "address": {"zip": "33701"}},
+    ],
+)
+def test_estimate_without_a_state_is_rejected(payload):
+    # Un 0 sin estado se leería como "sin impuesto" aunque el envío vaya a FL.
+    response = APIClient().post("/api/tax/estimate/", payload, format="json")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "Shipping state is required"}
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("state", ["ZZ", "Florida", "AP", 12])
+def test_estimate_with_an_unknown_state_is_rejected(state):
     response = APIClient().post(
-        "/api/tax/estimate/", {"subtotal": 100, "state": "ZZ", "zip": "00000"}, format="json"
+        "/api/tax/estimate/", {"subtotal": 100, "state": state, "zip": "33701"}, format="json"
     )
 
+    assert response.status_code == 400
+    assert response.json() == {
+        "error": "Shipping state must be a valid 2-letter US state code"
+    }
+
+
+@pytest.mark.django_db
+def test_verified_customer_gets_the_exempt_estimate_without_a_state(monkeypatch):
+    # La exención no depende del destino: no se le pide dirección.
+    _no_taxjar(monkeypatch)
+    client = _account("U_EXEMPT_NO_STATE", tax_status="VERIFIED")
+
+    response = client.post("/api/tax/estimate/", {"subtotal": 100}, format="json")
+
     assert response.status_code == 200
-    assert response.json()["rate"] == 0
+    assert response.json() == EXEMPT
 
 
 @pytest.mark.django_db
@@ -235,3 +335,48 @@ def test_calculate_sales_tax_returns_decimal_amounts():
 
     assert result["tax"] == Decimal("2.87")
     assert result["rate"] == Decimal("0.06")
+
+
+# --- ZIP contra estado --------------------------------------------------------
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"subtotal": 100, "state": "GA", "zip": "33701"},
+        {"subtotal": 100, "state": "FL", "zip": "30301"},
+        {"subtotal": 100, "address": {"state": "ga", "zip": "33701-1234"}},
+    ],
+)
+def test_estimate_with_a_zip_from_another_state_is_rejected(monkeypatch, payload):
+    # Un ZIP de FL con estado "GA" daría 0 de impuesto a un envío a Florida.
+    _no_taxjar(monkeypatch)
+
+    response = APIClient().post("/api/tax/estimate/", payload, format="json")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "ZIP code does not match the selected state."}
+
+
+@pytest.mark.django_db
+def test_estimate_with_an_unassigned_zip_prefix_is_rejected():
+    response = APIClient().post(
+        "/api/tax/estimate/", {"subtotal": 100, "state": "FL", "zip": "00001"}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "ZIP code is not a valid US ZIP code."}
+
+
+@pytest.mark.django_db
+def test_exempt_customer_skips_the_address_checks(monkeypatch):
+    _no_taxjar(monkeypatch)
+    client = _account("U_ZIP_EXEMPT", "VERIFIED")
+
+    response = client.post(
+        "/api/tax/estimate/", {"subtotal": 100, "state": "GA", "zip": "33701"}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert response.json()["tax"] == 0

@@ -608,6 +608,10 @@ def test_database_comes_from_postgres_variables(monkeypatch, restore_base_settin
 
 def test_database_defaults_to_the_local_docker_postgres(monkeypatch, restore_base_settings):
     # Mismos valores que el servicio `db` de docker-compose, publicado en 5435.
+    # Se anula `read_env` para que un `.env` local no aporte sus `POSTGRES_*`.
+    import environ
+
+    monkeypatch.setattr(environ.Env, "read_env", staticmethod(lambda *args, **kwargs: None))
     for name in ("DB", "USER", "PASSWORD", "HOST", "PORT"):
         monkeypatch.delenv(f"POSTGRES_{name}", raising=False)
     base = _load_base(monkeypatch)

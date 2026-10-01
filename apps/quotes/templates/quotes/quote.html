@@ -5,6 +5,10 @@ interactivo), el PDF de WeasyPrint (que renderiza como medio print por
 defecto; la regla `@media print` de abajo oculta los botones de acción, así
 que no hace falta una plantilla solo para PDF) y el cuerpo del email "send"
 de admin.
+
+El logo es el SVG en línea (WeasyPrint lo dibuja y el PDF no tiene
+`base_url` para recursos externos); con `for_email` va el PNG publicado por el
+SPA, porque los clientes de correo bloquean el SVG.
 {% endcomment %}
 <!doctype html>
 <html>
@@ -14,30 +18,31 @@ de admin.
 <title>TorqueTrack Quote {{ quote.number }}</title>
 <style>
   * { box-sizing: border-box; }
-  body { margin: 0; background: #050b0d; color: #f5f7f8; font-family: Arial, sans-serif; }
+  body { margin: 0; background: #0a0a0a; color: #fafafa; font-family: Arial, sans-serif; }
   .page { max-width: 1050px; margin: auto; padding: 38px; }
-  .head { display: flex; justify-content: space-between; gap: 25px; align-items: center; border-bottom: 1px solid #25414a; padding-bottom: 25px; }
+  .head { display: flex; justify-content: space-between; gap: 25px; align-items: center; border-bottom: 1px solid #262626; padding-bottom: 25px; }
   .brand { display: flex; align-items: center; gap: 18px; }
-  .tt { width: 82px; height: 82px; border-radius: 20px; background: #42ee8a; color: #06100b; display: grid; place-items: center; font-weight: 900; font-size: 36px; }
+  .logo { display: block; width: 59px; height: 32px; }
+  .logo-sm { width: 44px; height: 24px; }
   .name { font-size: 34px; font-weight: 900; }
-  .sub { letter-spacing: 7px; color: #cbd5d9; }
-  .green { color: #42ee8a; }
+  .sub { letter-spacing: 7px; color: #d4d4d4; }
+  .accent { color: #fbbf24; }
   .hero { display: grid; grid-template-columns: 1.4fr .6fr; gap: 24px; padding: 34px 0; }
   .hero h1 { font-size: 42px; margin: 0 0 12px; }
-  .card { border: 1px solid #36515a; border-radius: 10px; background: #091318; padding: 18px; }
+  .card { border: 1px solid #404040; border-radius: 10px; background: #171717; padding: 18px; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .label { color: #42ee8a; font-weight: 800; }
-  .row { display: grid; grid-template-columns: 1.7fr .8fr .35fr .65fr .65fr .7fr; gap: 8px; padding: 13px; border-bottom: 1px solid #29414a; }
-  .row.headrow { background: #063c28; color: #42ee8a; font-weight: 800; border-radius: 8px 8px 0 0; }
+  .label { color: #fbbf24; font-weight: 800; }
+  .row { display: grid; grid-template-columns: 1.7fr .8fr .35fr .65fr .65fr .7fr; gap: 8px; padding: 13px; border-bottom: 1px solid #262626; }
+  .row.headrow { background: #262626; color: #fbbf24; font-weight: 800; border-radius: 8px 8px 0 0; }
   .totals { margin-left: auto; width: min(420px, 100%); padding-top: 18px; }
-  .totalrow { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #29414a; }
-  .grand { background: #42ee8a; color: #06100b; padding: 13px; font-size: 24px; font-weight: 900; border-radius: 8px; margin-top: 8px; }
+  .totalrow { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #262626; }
+  .grand { background: #fbbf24; color: #0a0a0a; padding: 13px; font-size: 24px; font-weight: 900; border-radius: 8px; margin-top: 8px; }
   .actions { display: flex; gap: 12px; margin: 25px 0; }
-  .btn { display: inline-block; padding: 15px 24px; border-radius: 8px; text-decoration: none; font-weight: 900; background: #42ee8a; color: #06100b; }
-  .footer { border-top: 1px solid #42ee8a; margin-top: 30px; padding-top: 22px; color: #c7d1d5; }
+  .btn { display: inline-block; padding: 15px 24px; border-radius: 8px; text-decoration: none; font-weight: 900; background: #fbbf24; color: #0a0a0a; }
+  .footer { border-top: 1px solid #f59e0b; margin-top: 30px; padding-top: 22px; color: #d4d4d4; }
   .notes { line-height: 1.6; }
   @media print {
-    body { background: #050b0d !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    body { background: #0a0a0a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .actions { display: none; }
     .page { padding: 18px; }
   }
@@ -47,17 +52,17 @@ de admin.
 <main class="page">
   <header class="head">
     <div class="brand">
-      <div class="tt">TT</div>
-      <div><div class="name">Torque<span class="green">Track</span></div><div class="sub">DIESEL PARTS</div></div>
+      {% if for_email %}<img src="{{ email_logo_url }}" width="48" height="48" alt="TorqueTrack" style="display:block;border:0">{% else %}<svg class="logo" viewBox="0 0 106 58" role="img" aria-label="TorqueTrack" xmlns="http://www.w3.org/2000/svg"><path fill="#fbbf24" d="M0 0H51V14H34.5V58H16.5V14H0Z"/><path fill="#fbbf24" d="M55 0H106V14H89.5V58H71.5V14H55Z"/></svg>{% endif %}
+      <div><div class="name">Torque<span class="accent">Track</span></div><div class="sub">DIESEL PARTS</div></div>
     </div>
-    <div><b>OEM + AFTERMARKET DIESEL COMPONENTS</b><br><span class="green"><b>Find it. Price it. Ship it fast.</b></span></div>
+    <div><b>OEM + AFTERMARKET DIESEL COMPONENTS</b><br><span class="accent"><b>Find it. Price it. Ship it fast.</b></span></div>
   </header>
 
   <section class="hero">
     <div>
       <p>Hello {{ greeting_name }},</p>
-      <h1>Thank You for Choosing <span class="green">TorqueTrack!</span></h1>
-      <p>Attached you&rsquo;ll find your quote <b class="green">{{ quote.number }}</b> for review. You can proceed with checkout, request changes, or contact us.</p>
+      <h1>Thank You for Choosing <span class="accent">TorqueTrack!</span></h1>
+      <p>Attached you&rsquo;ll find your quote <b class="accent">{{ quote.number }}</b> for review. You can proceed with checkout, request changes, or contact us.</p>
     </div>
     <div class="card">
       <div class="label">QUOTE</div>
@@ -129,13 +134,13 @@ de admin.
   <div class="actions">
     {# Enlace real: en el correo (sin JS) abre la página del SPA; en la página HTML el onclick abre el checkout. #}
     <a class="btn" style="border:0;cursor:pointer" href="{{ public_url }}" onclick="checkoutQuote(); return false;">View / Checkout Quote &rarr;</a>
-    <a class="btn" style="background:transparent;color:#42ee8a;border:1px solid #42ee8a" href="{{ pdf_url }}">Download PDF</a>
+    <a class="btn" style="background:transparent;color:#fbbf24;border:1px solid #fbbf24" href="{{ pdf_url }}">Download PDF</a>
   </div>
 
   <footer class="footer">
     <div class="brand">
-      <div class="tt" style="width:58px;height:58px;font-size:25px;border-radius:12px">TT</div>
-      <div><b>Torque<span class="green">Track</span> Diesel Parts</b><br>{% if company_email %}{{ company_email }} &bull; {% endif %}{{ company_address }}<br>{{ company_site }}</div>
+      {% if for_email %}<img src="{{ email_logo_url }}" width="40" height="40" alt="TorqueTrack" style="display:block;border:0">{% else %}<svg class="logo logo-sm" viewBox="0 0 106 58" role="img" aria-label="TorqueTrack" xmlns="http://www.w3.org/2000/svg"><path fill="#fbbf24" d="M0 0H51V14H34.5V58H16.5V14H0Z"/><path fill="#fbbf24" d="M55 0H106V14H89.5V58H71.5V14H55Z"/></svg>{% endif %}
+      <div><b>Torque<span class="accent">Track</span> Diesel Parts</b><br>{% if company_email %}{{ company_email }} &bull; {% endif %}{{ company_address }}<br>{{ company_site }}</div>
     </div>
     <p style="letter-spacing:4px;text-align:center">FIND IT. PRICE IT. SHIP IT FAST.</p>
   </footer>

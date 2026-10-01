@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from django.db import transaction
-from django.utils.html import escape
+from django.utils.html import format_html
 
 from apps.authentication.models import AccountToken, User
 from apps.authentication.services.credentials import change_password, parse_email, password_error
@@ -28,16 +28,16 @@ def request_password_reset(payload: dict) -> dict:
     user = User.objects.filter(email=email, active=True).first() if email else None
     if user is not None:
         token = issue_account_token(user, AccountToken.PASSWORD_RESET)
-        link = escape(app_url(f"/reset-password?token={token}"))
         send_account_email(
             user,
             "Reset your TorqueTrack password",
-            (
+            format_html(
                 "<p>We received a request to reset the password of your TorqueTrack "
                 "account.</p>"
-                f'<p><a href="{link}">Reset your password</a></p>'
+                '<p><a href="{}">Reset your password</a></p>'
                 "<p>This link expires in 1 hour and can be used only once. If you did "
-                "not ask for it, you can ignore this email.</p>"
+                "not ask for it, you can ignore this email.</p>",
+                app_url(f"/reset-password?token={token}"),
             ),
         )
     return dict(PASSWORD_RESET_REQUESTED)

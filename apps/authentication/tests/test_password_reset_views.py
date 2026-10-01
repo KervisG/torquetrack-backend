@@ -13,6 +13,7 @@ from apps.authentication.utils.throttling import (
     PasswordResetConfirmRateThrottle,
     PasswordResetRateThrottle,
 )
+from apps.common.emails import email_logo_url
 from tests.factories import DEFAULT_PASSWORD, create_user, session_client
 from tests.fakes import SlowResend, forbid_resend, install_resend
 
@@ -113,6 +114,7 @@ def test_request_emails_a_reset_link_and_stores_only_the_hash(resend):
     assert resend[0]["to"] == ["pat@example.com"]
     assert resend[0]["subject"] == "Reset your TorqueTrack password"
     assert "https://shop.example.com/reset-password?token=" in resend[0]["html"]
+    assert f'<img src="{email_logo_url()}"' in resend[0]["html"]
     token = _token_from(resend[0])
     stored = AccountToken.objects.get(user=user, purpose=AccountToken.PASSWORD_RESET)
     assert stored.token_hash != token

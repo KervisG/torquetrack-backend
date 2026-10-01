@@ -140,3 +140,54 @@ def test_pdf_footer_uses_the_company_settings(monkeypatch, settings):
     assert "Tampa, FL" in html
     assert "shop.example.com" in html
     assert "torquetrackdiesel.com" not in html
+
+
+LOGO_PATHS = ("M0 0H51V14H34.5V58H16.5V14H0Z", "M55 0H106V14H89.5V58H71.5V14H55Z")
+
+
+def test_quote_page_draws_the_inline_svg_logo_in_the_amber_palette():
+    # La página pública y el PDF no tienen `base_url`: el logo va en línea.
+    from apps.quotes.services.rendering import render_quote_html
+
+    html = render_quote_html({"number": "Q1"})
+
+    assert '<svg class="logo" viewBox="0 0 106 58"' in html
+    for path in LOGO_PATHS:
+        assert path in html
+    assert "#fbbf24" in html
+    assert "#42ee8a" not in html
+    assert ">TT<" not in html
+    assert "brand/email-logo.png" not in html
+
+
+def test_quote_email_variant_uses_the_hosted_png_instead_of_svg(settings):
+    # Los clientes de correo bloquean el SVG.
+    from apps.quotes.services.rendering import render_quote_html
+
+    settings.APP_URL = "https://shop.example.com"
+
+    html = render_quote_html({"number": "Q1"}, for_email=True)
+
+    assert '<img src="https://shop.example.com/brand/email-logo.png"' in html
+    assert 'alt="TorqueTrack"' in html
+    assert "<svg" not in html
+    assert "#42ee8a" not in html
+
+
+@pytest.mark.django_db
+def test_pdf_html_carries_the_inline_svg_logo(monkeypatch):
+    import sys
+    import types
+
+    from apps.quotes.services.pdf import render_quote_pdf_bytes
+    from apps.quotes.services.rendering import serialize_quote
+
+    _FakeHTML.rendered = []
+    monkeypatch.setitem(sys.modules, "weasyprint", types.SimpleNamespace(HTML=_FakeHTML))
+
+    render_quote_pdf_bytes(serialize_quote(_make_quote()))
+
+    (html,) = _FakeHTML.rendered
+    for path in LOGO_PATHS:
+        assert path in html
+    assert "<img" not in html

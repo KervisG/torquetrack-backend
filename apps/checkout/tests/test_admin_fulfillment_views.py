@@ -16,6 +16,7 @@ from django.utils import timezone
 
 from apps.authentication.utils.background import run_in_background as real_run_in_background
 from apps.checkout.models import Order
+from apps.common.emails import email_logo_url
 from tests.factories import activity_count, create_customer, create_staff_user, session_client
 from tests.fakes import SlowResend, forbid_resend, install_resend
 
@@ -459,6 +460,7 @@ def test_shipped_email_escapes_customer_data(resend):
     html = resend[0]["html"]
     assert "<script>" not in html
     assert "&lt;script&gt;x&lt;/script&gt;" in html
+    assert f'<img src="{email_logo_url()}"' in html
 
 
 @pytest.mark.django_db

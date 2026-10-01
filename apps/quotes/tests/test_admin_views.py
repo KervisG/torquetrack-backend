@@ -277,6 +277,9 @@ def test_send_links_the_spa_quote_page_and_the_api_pdf(settings, monkeypatch):
     html = resend.sent[0]["html"]
     assert 'href="https://shop.example.test/quote/tok-links"' in html
     assert 'href="https://shop.example.test/api/quote/public/tok-links/pdf/"' in html
+    # Los clientes de correo bloquean el SVG: el correo lleva el PNG publicado.
+    assert '<img src="https://shop.example.test/brand/email-logo.png"' in html
+    assert "<svg" not in html
 
 
 @pytest.mark.django_db

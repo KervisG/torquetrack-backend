@@ -10,6 +10,7 @@ from django.utils import timezone
 
 from apps.authentication.models import AccountToken, User
 from apps.authentication.utils.background import run_in_background
+from apps.common.emails import branded_email_html
 from apps.common.tokens import hash_token
 from apps.integrations.email import resend
 
@@ -129,6 +130,9 @@ def send_account_email(user: User, subject: str, html: str) -> None:
     solo cuando la cuenta existe revelaría por el tiempo de respuesta qué
     correos están registrados. Por eso el hilo recibe el correo ya armado y no
     toca la base. Quien llama ya confirmó el token, así que el enlace nunca
-    apunta a una fila revertida.
+    apunta a una fila revertida. `html` es el cuerpo armado con `format_html`;
+    el layout de marca se agrega aquí para todos los correos de cuenta.
     """
-    run_in_background(_deliver_account_email, user.pk, user.email, subject, html)
+    run_in_background(
+        _deliver_account_email, user.pk, user.email, subject, branded_email_html(html)
+    )

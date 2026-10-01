@@ -6,6 +6,7 @@ from django.conf import settings
 from django.template.loader import render_to_string
 
 from apps.catalog.services.pricing import PricingError, price_lines
+from apps.common.emails import email_logo_url
 from apps.common.links import app_url
 from apps.common.numbers import money
 from apps.quotes.models import Quote
@@ -82,9 +83,12 @@ def render_quote_html(
     public_url: str | None = None,
     pdf_url: str | None = None,
     print_mode: bool = False,
+    for_email: bool = False,
 ) -> str:
     """El `pdf_url` por defecto solo vale cuando `public_url` es la ruta HTML
-    de la API; el correo manda el suyo porque enlaza al SPA."""
+    de la API; el correo manda el suyo porque enlaza al SPA. `for_email` cambia
+    el logo SVG en línea por el PNG publicado: los clientes de correo bloquean
+    el SVG, que la página pública y el PDF sí dibujan."""
     customer = quote.get("customer") or {}
     vehicle = quote.get("vehicle") or {}
     totals = quote.get("totals") or {}
@@ -101,6 +105,8 @@ def render_quote_html(
             "public_url": public_url or "#",
             "pdf_url": pdf_url or (f"{public_url}/pdf" if public_url else "#"),
             "print_mode": print_mode,
+            "for_email": for_email,
+            "email_logo_url": email_logo_url() if for_email else "",
             "greeting_name": greeting_name,
             **_company_contact(),
         },

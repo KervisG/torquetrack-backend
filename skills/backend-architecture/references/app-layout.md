@@ -40,7 +40,7 @@ Reglas:
 
 Excepciones documentadas:
 
-- `apps/common/` no es una app de Django (sin `apps.py`, modelos, views, urls ni migraciones): es un paquete de helpers sin estado y conserva sus módulos planos (`ids.py`, `links.py`, `numbers.py`, `tokens.py`).
+- `apps/common/` no es una app de Django (sin `apps.py`, modelos, views, urls ni migraciones): es un paquete de helpers sin estado y conserva sus módulos planos (`emails.py`, `ids.py`, `links.py`, `numbers.py`, `tokens.py`).
 - `apps/integrations/exceptions.py` queda en la raíz porque es el contrato compartido de todos los adaptadores; los adaptadores viven en carpetas por capacidad (`email/`, `payments/`, `shipping/`, `tax/`, `vehicles/`).
 
 Ejemplo de una app con tres superficies (storefront, panel y webhook de Stripe):
@@ -215,6 +215,7 @@ La autenticación es `SessionAuthentication` de DRF, que drf-spectacular ya desc
 | `common/numbers.py` | `to_number(value, default=0.0)`, `money(value)`, `money_decimal(value)`, `to_cents(value)` | Única coerción numérica, único redondeo de dinero (`ROUND_HALF_UP` a centavos; un `Decimal` se redondea sin pasar por `float`) y única conversión a centavos enteros para Stripe |
 | `common/tokens.py` | `hash_token(token)` | SHA-256 de los tokens de enlace (`AccountToken`) |
 | `common/links.py` | `app_url(path)` | URL absoluta del SPA sin doble slash, con el respaldo de desarrollo en un solo lugar |
+| `common/emails.py` | `branded_email_html(body)`, `email_logo_url()` | Layout de marca de todos los correos de notificación (`authentication`, `checkout`, `quotes`); solo arma strings, sin I/O. El logo es el PNG del SPA, nunca SVG |
 | `numbering/services/document_numbers.py` | `next_document_number(key, prefix)` | La numeración la usan pedidos y cotizaciones, así que no es de `checkout`; tiene modelo, y `common` por diseño no tiene |
 
 `to_number` trata `None`, `False`, `""`, `0` y lo no numérico como "sin dato" y devuelve `default`. Un `"0"` escrito como texto sí es `0.0`; quien necesita un mínimo lo aplica (`max(1, int(to_number(qty, 1)))`, `to_number(qty, 1.0) or 1.0`).

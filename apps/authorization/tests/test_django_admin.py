@@ -35,3 +35,16 @@ def test_django_admin_rejects_users_without_full_access(factory):
 
     assert response.status_code == 302
     assert "/django-admin/login/" in response["Location"]
+
+
+@pytest.mark.django_db
+def test_django_admin_shows_the_torquetrack_branding():
+    create_staff_user("U_BRAND", full_access=True)
+    client, _ = session_client("U_BRAND")
+
+    response = client.get("/django-admin/")
+
+    content = response.content.decode()
+    assert "<title>Site administration | TorqueTrack admin</title>" in content
+    assert "TorqueTrack Diesel" in content
+    assert "Django administration" not in content

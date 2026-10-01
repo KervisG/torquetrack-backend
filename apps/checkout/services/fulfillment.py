@@ -17,6 +17,7 @@ from apps.audit.services import record_activity
 from apps.authentication.utils.background import run_in_background
 from apps.checkout.models import Carrier, FulfillmentStatus, Order, OrderPaymentStatus
 from apps.checkout.services.payments import CHARGED_PAYMENT_STATUSES, CLOSED_ORDER_STATUSES
+from apps.common.emails import branded_email_html
 from apps.integrations.email import resend
 
 logger = logging.getLogger(__name__)
@@ -193,7 +194,7 @@ def _shipped_email_html(order: Order, is_correction: bool) -> str:
     )
     url = order.tracking_url
     link = format_html('<p><a href="{}">Track your package</a></p>', url) if url else ""
-    return format_html(
+    body = format_html(
         "<h2>Order {} has shipped</h2>"
         "{}"
         "<p>Your TorqueTrack order is on its way.</p>"
@@ -207,6 +208,7 @@ def _shipped_email_html(order: Order, is_correction: bool) -> str:
         order.tracking_number,
         link,
     )
+    return branded_email_html(body)
 
 
 def _deliver_shipped_email(number: str, email: str, subject: str, html: str) -> None:

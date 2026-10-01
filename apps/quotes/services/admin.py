@@ -141,7 +141,9 @@ def send_quote_email(quote: Quote, actor_email: str) -> dict:
     url = ensure_public_token(quote)  # también guarda el token si faltaba
     public_token = (quote.data or {}).get("publicToken")
     quote_dict = serialize_quote(quote)
-    html = render_quote_html(quote_dict, public_url=url, pdf_url=public_quote_pdf_url(public_token))
+    html = render_quote_html(
+        quote_dict, public_url=url, pdf_url=public_quote_pdf_url(public_token), for_email=True
+    )
 
     sent = resend.send_email(
         to=email,

@@ -13,6 +13,7 @@ from apps.authentication.utils.throttling import (
     VerifyEmailResendRateThrottle,
 )
 from apps.checkout.models import Order
+from apps.common.emails import email_logo_url
 from apps.customers.models import Customer
 from apps.quotes.models import Quote
 from tests.factories import create_customer, create_user, session_client
@@ -112,6 +113,7 @@ def test_register_sends_a_verification_email_and_reports_unverified(resend):
     assert len(resend) == 1
     assert resend[0]["to"] == ["pat@example.com"]
     assert resend[0]["subject"] == "Verify your TorqueTrack email"
+    assert f'<img src="{email_logo_url()}"' in resend[0]["html"]
     token = _token_from(resend[0])
     stored = AccountToken.objects.get(purpose=AccountToken.EMAIL_VERIFICATION)
     assert token not in stored.token_hash
@@ -137,6 +139,7 @@ def test_register_with_an_existing_email_tells_the_owner_instead_of_verifying(re
     # No se emite ningún enlace: un tercero no puede anular los pendientes del dueño.
     assert not AccountToken.objects.exists()
     assert "Someone Else" not in resend[0]["html"]
+    assert f'<img src="{email_logo_url()}"' in resend[0]["html"]
 
 
 @pytest.mark.django_db

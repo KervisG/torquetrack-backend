@@ -8,6 +8,7 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.checkout.models import Order, Payment
+from apps.common.emails import email_logo_url
 from apps.integrations.exceptions import ProviderError
 from tests.factories import activity_count, create_staff_user, session_client
 from tests.fakes import install_resend
@@ -696,3 +697,4 @@ def test_payment_link_email_escapes_the_order_number_and_the_session_url(monkeyp
     html = resend.sent[0]["html"]
     assert "&lt;b&gt;O1&lt;/b&gt;" in html
     assert 'href="https://checkout.stripe.com/pay?a=1&amp;b=&quot;x&quot;"' in html
+    assert f'<img src="{email_logo_url()}"' in html

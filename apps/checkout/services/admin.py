@@ -26,6 +26,7 @@ from apps.checkout.services.payments import (
     start_stripe_payment,
 )
 from apps.checkout.services.refunds import order_refund_summary, serialize_refund
+from apps.common.emails import branded_email_html
 from apps.common.numbers import money, money_decimal
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
@@ -268,14 +269,16 @@ def create_admin_payment_link(order_id: str) -> dict:
         sent = resend.send_email(
             to=email,
             subject=f"TorqueTrack payment link for Order {order.number}",
-            html=format_html(
-                "<h2>Order {}</h2>"
-                "<p>Your TorqueTrack order is ready for secure payment.</p>"
-                '<p><a href="{}">Pay securely online</a></p>'
-                "<p>Total: ${}</p>",
-                order.number,
-                session["url"],
-                f"{total}",
+            html=branded_email_html(
+                format_html(
+                    "<h2>Order {}</h2>"
+                    "<p>Your TorqueTrack order is ready for secure payment.</p>"
+                    '<p><a href="{}">Pay securely online</a></p>'
+                    "<p>Total: ${}</p>",
+                    order.number,
+                    session["url"],
+                    f"{total}",
+                )
             ),
         )
         emailed = sent["sent"]

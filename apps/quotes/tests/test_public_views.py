@@ -10,6 +10,7 @@ from django.utils import timezone
 from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
+from apps.common.emails import email_logo_url
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
@@ -678,6 +679,7 @@ def test_quote_request_emails_escape_customer_and_product_data(client, settings,
     for html in (staff_html, customer_html):
         assert "<script>" not in html
         assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html
+        assert f'<img src="{email_logo_url()}"' in html
     assert "&lt;b&gt;555&lt;/b&gt;" in staff_html
     assert "&lt;b&gt;Turbo&lt;/b&gt;" in staff_html
     assert "&lt;i&gt;HX35&lt;/i&gt;" in staff_html

@@ -26,6 +26,7 @@ from apps.checkout.services import (
     next_order_number,
     start_stripe_payment,
 )
+from apps.common.emails import branded_email_html
 from apps.common.ids import random_id
 from apps.common.numbers import money
 from apps.customers.services import customer_for_user, resolve_guest_customer
@@ -169,17 +170,19 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
         staff_result = resend.send_email(
             to=sales_email,
             subject=f"New TorqueTrack Quote Request {number}",
-            html=format_html(
-                "<h2>New Quote Request {}</h2>"
-                "<p><b>{}</b><br>{}<br>{}</p>"
-                "<p>{}</p>"
-                "<p>Total before tax/shipping: ${}</p>",
-                number,
-                name,
-                email or "No email",
-                phone or "No phone",
-                items_html,
-                f"{totals['total']:.2f}",
+            html=branded_email_html(
+                format_html(
+                    "<h2>New Quote Request {}</h2>"
+                    "<p><b>{}</b><br>{}<br>{}</p>"
+                    "<p>{}</p>"
+                    "<p>Total before tax/shipping: ${}</p>",
+                    number,
+                    name,
+                    email or "No email",
+                    phone or "No phone",
+                    items_html,
+                    f"{totals['total']:.2f}",
+                )
             ),
         )
 
@@ -188,13 +191,15 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
         customer_result = resend.send_email(
             to=email,
             subject=f"TorqueTrack received your quote request {number}",
-            html=format_html(
-                "<h2>We received your quote request</h2>"
-                "<p>Thank you {}. Your reference is <b>{}</b>. A "
-                "TorqueTrack representative will contact you to confirm "
-                "fitment, pricing, shipping and tax.</p>",
-                name,
-                number,
+            html=branded_email_html(
+                format_html(
+                    "<h2>We received your quote request</h2>"
+                    "<p>Thank you {}. Your reference is <b>{}</b>. A "
+                    "TorqueTrack representative will contact you to confirm "
+                    "fitment, pricing, shipping and tax.</p>",
+                    name,
+                    number,
+                )
             ),
         )
 

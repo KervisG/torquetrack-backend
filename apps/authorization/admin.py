@@ -14,6 +14,12 @@ from django.db.models import Q
 from apps.authorization.models import Role
 from apps.authorization.permissions import STAFF_PERMISSIONS
 
+# La marca del sitio va junto a los registros: es la única configuración del
+# admin de Django y este es el único `admin.py` del proyecto.
+admin.site.site_header = "TorqueTrack Diesel"
+admin.site.site_title = "TorqueTrack admin"
+admin.site.index_title = "Site administration"
+
 
 def staff_permission_queryset():
     query = Q()

@@ -77,6 +77,10 @@ def test_beat_schedule_runs_the_maintenance_jobs_at_fixed_times():
             "task": "apps.cart.tasks.purge_carts",
             "schedule": crontab(hour=3, minute=30),
         },
+        "send-cart-recovery-emails": {
+            "task": "apps.cart.tasks.send_cart_recovery_emails",
+            "schedule": crontab(minute=15),
+        },
     }
 
 

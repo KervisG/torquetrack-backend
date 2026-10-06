@@ -2,8 +2,9 @@
 from collections import Counter
 from datetime import timedelta
 
-from django.db.models import Q
+from django.db.models import Q, TextField, Value
 from django.db.models.fields.json import KT
+from django.db.models.functions import Coalesce, NullIf, Upper
 from django.utils import timezone
 
 from apps.cart.models import Cart, CartStage, CartStatus
@@ -28,8 +29,40 @@ def classify_cart(stage, updated_at, now) -> str:
     return CartStatus.ACTIVE if now - updated_at <= CART_IDLE_WINDOW else CartStatus.ABANDONED
 
 
+# La etapa de `classify_cart` en SQL: ausente, nula o vacía cuenta como CART.
+_CART_STAGE = Upper(
+    Coalesce(
+        NullIf(KT("data__stage"), Value("", output_field=TextField())),
+        Value(CartStage.CART, output_field=TextField()),
+    )
+)
+
+
 def _listed_carts():
     return Cart.objects.filter(_HAS_ITEMS)
+
+
+def abandoned_carts(now=None):
+    """Carritos ABANDONED según `classify_cart`, resuelto en la base: con
+    items, en etapa CART y sin cambios por más de `CART_IDLE_WINDOW`. Lo usan
+    el embudo del dashboard y el correo de recuperación."""
+    now = now or timezone.now()
+    return (
+        _listed_carts()
+        .annotate(cart_stage=_CART_STAGE)
+        .filter(cart_stage=CartStage.CART, updated_at__lt=now - CART_IDLE_WINDOW)
+    )
+
+
+def count_carts_created_between(start, end) -> int:
+    """Carritos creados en [start, end) que siguen existiendo: un carrito que
+    se vació se borró y ya no cuenta."""
+    return Cart.objects.filter(created_at__gte=start, created_at__lt=end).count()
+
+
+def count_abandoned_carts_between(start, end) -> int:
+    """Carritos abandonados hoy cuya última actividad cae en [start, end)."""
+    return abandoned_carts().filter(updated_at__gte=start, updated_at__lt=end).count()
 
 
 def list_admin_carts() -> list[dict]:

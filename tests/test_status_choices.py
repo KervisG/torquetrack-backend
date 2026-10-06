@@ -150,12 +150,16 @@ def test_json_status_enums_declare_exactly_the_contract_values(enum, expected):
 
 
 def test_cart_has_no_status_column():
-    # `user` liga el carrito a la cuenta; la etapa y el estado siguen en `data`.
+    # `user` liga el carrito a la cuenta, `created_at` alimenta el embudo del
+    # dashboard y `recovery_email_sent_at` marca el correo de recuperación; la
+    # etapa y el estado siguen en `data`.
     assert {field.name for field in Cart._meta.get_fields()} == {
         "id",
         "user",
         "data",
+        "created_at",
         "updated_at",
+        "recovery_email_sent_at",
     }
 
 

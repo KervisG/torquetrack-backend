@@ -4,7 +4,7 @@ import logging
 
 from celery import shared_task
 
-from apps.cart.services import purge_empty_carts
+from apps.cart.services import purge_empty_carts, send_abandoned_cart_emails
 
 logger = logging.getLogger(__name__)
 
@@ -16,3 +16,12 @@ def purge_carts() -> int:
     deleted = purge_empty_carts()
     logger.info("Purged %s empty cart(s)", deleted)
     return deleted
+
+
+@shared_task(name="apps.cart.tasks.send_cart_recovery_emails")
+def send_cart_recovery_emails() -> int:
+    # Idempotente: la marca por carrito impide un segundo correo si la tarea
+    # se reintenta tras la caída del worker.
+    sent = send_abandoned_cart_emails()
+    logger.info("Sent %s cart recovery email(s)", sent)
+    return sent

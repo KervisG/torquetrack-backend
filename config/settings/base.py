@@ -162,6 +162,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.cart.tasks.purge_carts",
         "schedule": crontab(hour=3, minute=30),
     },
+    # Correo de carrito abandonado, una vez por carrito (`recovery_email_sent_at`).
+    "send-cart-recovery-emails": {
+        "task": "apps.cart.tasks.send_cart_recovery_emails",
+        "schedule": crontab(minute=15),
+    },
 }
 
 # Producción les agrega el prefijo `__Host-` a los nombres de las cookies.

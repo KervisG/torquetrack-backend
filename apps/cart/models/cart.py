@@ -37,7 +37,13 @@ class Cart(models.Model):
         related_name="carts",
     )
     data = models.JSONField(default=dict)
+    # Alta de la fila; el embudo de carritos del dashboard cuenta por esta fecha.
+    created_at = models.DateTimeField(default=timezone.now, db_default=Now())
     updated_at = models.DateTimeField(default=timezone.now, db_default=Now())
+    # Marca del correo de recuperación de carrito abandonado: sale una sola vez
+    # por carrito. Es columna y no clave de `data` porque cada `PUT` del
+    # carrito reescribe `data` entero y la marca se perdería.
+    recovery_email_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         db_table = "carts"

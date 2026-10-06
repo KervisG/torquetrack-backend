@@ -141,11 +141,11 @@ apps/authorization/             # quién puede qué; solo la consume el panel
 | `audit` | `views.py` (panel) | `models/activity_log.py`; `services/recording.py` (`record_activity`), `services/listing.py` (`list_activity_page`, `PAYMENT_ID_KEYS`) |
 | `authentication` | `views.py` (storefront) | `models/`, `services/`, `utils/`, `docs/` |
 | `authorization` | `admin.py`, `views.py` (panel) | `models/`, `permissions/`, `services/`, `management/commands/`, `docs/` |
-| `cart` | `tasks.py` (`purge_carts`, diaria 03:30 UTC) | `models/cart.py`; `services/storefront.py` (`get_cart`, `replace_cart`, `merge_session_cart`, `current_cart_id`, `CART_SESSION_KEY`), `services/admin.py` (listado, estado, contadores y purga); `views/storefront.py`, `views/admin.py`; `docs/`; `management/commands/purge_carts.py`; `apps.py` conecta `user_logged_in` |
-| `catalog` | — | `models/product.py`, `models/application.py`; `serializers/storefront.py`; `services/admin.py`, `services/pricing.py` (`price_lines`, `build_totals`, `serialize_totals`); `views/storefront.py`, `views/admin.py`; `management/commands/import_catalog.py`; `data/` |
+| `cart` | `tasks.py` (`purge_carts`, diaria 03:30 UTC; `send_cart_recovery_emails`, cada hora) | `models/cart.py`; `services/storefront.py` (`get_cart`, `replace_cart`, `merge_session_cart`, `current_cart_id`, `CART_SESSION_KEY`), `services/admin.py` (listado, estado, contadores, `abandoned_carts` y purga), `services/recovery.py` (correo de carrito abandonado); `views/storefront.py`, `views/admin.py`; `docs/`; `management/commands/purge_carts.py`; `apps.py` conecta `user_logged_in` |
+| `catalog` | — | `models/product.py` (`slug` SEO único, generado en `save()` al crear y nunca cambiado al editar), `models/application.py`; `serializers/storefront.py`; `services/admin.py`, `services/pricing.py` (`price_lines`, `build_totals`, `serialize_totals`), `services/sitemap.py`; `views/storefront.py` (detalle por id o slug), `views/admin.py`, `views/sitemap.py` (`GET /api/sitemap.xml`, documento para buscadores); `management/commands/import_catalog.py`; `data/` |
 | `checkout` | — | `models/order.py`, `models/payment.py`, `models/refund.py`; `services/payments.py`, `services/storefront.py`, `services/webhooks.py`, `services/refunds.py`, `services/fulfillment.py` (envío, guía y correo "has shipped"), `services/admin.py`; `views/storefront.py`, `views/admin.py`, `views/webhooks.py`; `docs/` (solo `POST /api/admin/orders/<id>/refunds/` y `.../fulfillment/`) |
 | `customers` | — | `models/customer.py`; `services/storefront.py` (perfil de la sesión, invitados, alta, verificación, activación y cuenta), `services/admin.py`; `views/storefront.py`, `views/admin.py` |
-| `dashboard` | `views.py` (panel) | `services/counts.py` |
+| `dashboard` | `views.py` (panel) | `services/counts.py`, `services/analytics.py` |
 | `fitment` | `views.py` (storefront) | `services/compatibility.py` |
 | `integrations` | `exceptions.py` (excepción documentada) | un paquete por capacidad con un módulo por proveedor |
 | `numbering` | — (sin endpoints ni `urls.py`) | `models/document_sequence.py`, `services/document_numbers.py` |
@@ -330,7 +330,7 @@ def get_shipping_rates(payload: dict) -> tuple[dict, int]:
 
 `apps/authorization/services/` (`users.py` y `roles.py`) usa una forma más vieja que devuelve `{"error": ..., "status": ...}` dentro del dict del resultado. No tocarla, pero no propagarla a código nuevo.
 
-La view nunca desarma el resultado a mano: `service_response(result, success_status=...)` de `config/responses.py` traduce los dos contratos (tupla, o dict con `error`/`status`) a `Response`. Un dict de error pierde toda clave que no sea `error`.
+La view nunca desarma el resultado a mano: `service_response(result, success_status=...)` de `config/responses.py` traduce los dos contratos (tupla, o dict con `error`/`status`) a `Response`. Un dict de error pierde toda clave que no sea `error` o `field`. Un error de un campo del input se arma con `error_payload(message, field)` de `apps/common/errors.py`, que agrega `field` en snake_case (`{"error": ..., "field": "zip"}`); sin campo, la clave no aparece.
 
 Los services devuelven `None` en lugar de lanzar excepción cuando "no encontrado" es un resultado esperado que la view tiene que traducir. Por ejemplo `authenticate_user()` (que llama a `django.contrib.auth.authenticate()`) devuelve `None` tanto para usuario inexistente como para password incorrecto o cuenta inactiva, así la view responde un único 401 genérico.
 

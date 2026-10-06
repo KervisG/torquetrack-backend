@@ -7,6 +7,7 @@ from apps.catalog.models import Product
 from apps.checkout.models import Order
 from apps.customers.models import Customer
 from tests.factories import (
+    CHECKOUT_CONTACT,
     create_customer,
     create_staff_user,
     create_user,
@@ -69,7 +70,7 @@ def _checkout(client, customer):
         {
             "items": [{"id": PRODUCT_ID, "qty": 1}],
             "vehicle": VEHICLE,
-            "customer": {"state": "FL", "zip": "33701", **customer},
+            "customer": {**CHECKOUT_CONTACT, "state": "FL", "zip": "33701", **customer},
             "shipping": {"shipmentId": "shp_checkout", "rateId": "rate_ground"},
         },
         format="json",
@@ -117,7 +118,7 @@ def test_signed_in_checkout_still_requires_the_shipping_state():
     response = _checkout(client, {"email": "pat@example.com", "state": ""})
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Shipping state is required"}
+    assert response.json() == {"error": "Shipping state is required", "field": "state"}
     assert not Order.objects.exists()
 
 
@@ -149,7 +150,7 @@ def test_signed_in_checkout_never_overwrites_the_profile():
 def test_signed_in_checkout_works_without_body_email():
     client = _account()
 
-    response = _checkout(client, {"state": "FL", "zip": "33701"})
+    response = _checkout(client, {"email": None})
 
     assert response.status_code == 200
     order = Order.objects.get(pk=response.json()["orderId"])

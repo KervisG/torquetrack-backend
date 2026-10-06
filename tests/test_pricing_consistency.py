@@ -18,7 +18,7 @@ from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
 from apps.common.numbers import to_cents
 from apps.quotes.models import Quote
-from tests.factories import create_staff_user, session_client
+from tests.factories import CHECKOUT_CONTACT, create_staff_user, session_client
 from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
@@ -72,7 +72,7 @@ def _checkout(monkeypatch, settings, qty):
         {
             "items": [{"id": PRODUCT_ID, "qty": qty}],
             "vehicle": VEHICLE,
-            "customer": {"state": "FL", "zip": "33701"},
+            "customer": {**CHECKOUT_CONTACT, "state": "FL", "zip": "33701"},
             "shipping": selection,
         },
         format="json",
@@ -208,7 +208,10 @@ def test_panel_keeps_its_whole_number_rule_without_the_storefront_cap():
     accepted = _panel_quote(client, [{"title": "Plug", "quantity": 250, "unitPrice": 5}])
 
     assert rejected.status_code == 400
-    assert rejected.json() == {"error": "Item quantity must be a whole number of at least 1"}
+    assert rejected.json() == {
+        "error": "Item quantity must be a whole number of at least 1",
+        "field": "quantity",
+    }
     assert accepted.status_code == 200
     assert accepted.json()["quote"]["totals"]["subtotal"] == 1250.0
 
@@ -233,5 +236,8 @@ def test_panel_rejects_a_negative_custom_price():
     response = _panel_quote(_staff_client(), [{"title": "Credit", "quantity": 1, "unitPrice": -50}])
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Item prices must be amounts of 0 or more"}
+    assert response.json() == {
+        "error": "Item prices must be amounts of 0 or more",
+        "field": "unit_price",
+    }
     assert not Quote.objects.exists()

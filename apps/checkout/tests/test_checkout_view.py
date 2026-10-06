@@ -9,7 +9,7 @@ from apps.catalog.models import Product
 from apps.checkout.models import Order, OrderStatus, Payment
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
-from tests.factories import create_customer, guest_cart_client
+from tests.factories import CHECKOUT_CONTACT, create_customer, guest_cart_client
 from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
@@ -65,10 +65,12 @@ def shipping(monkeypatch, settings):
 
 
 def _body(shipping, **overrides):
+    """Un `customer` del override se suma al contacto válido (`CHECKOUT_CONTACT`)."""
+    customer = overrides.pop("customer", {"state": "FL", "zip": "33701"})
     body = {
         "items": [{"id": PRODUCT_ID, "qty": 1}],
         "vehicle": VEHICLE,
-        "customer": {"state": "FL", "zip": "33701"},
+        "customer": {**CHECKOUT_CONTACT, **customer} if isinstance(customer, dict) else customer,
         "shipping": shipping,
     }
     body.update(overrides)
@@ -94,7 +96,7 @@ def test_returns_400_when_cart_is_empty():
     response = _post({"items": []})
 
     assert response.status_code == 400
-    assert response.json()["error"] == "Cart is empty"
+    assert response.json() == {"error": "Cart is empty"}
 
 
 @pytest.mark.django_db
@@ -200,6 +202,7 @@ def test_returns_409_when_fitment_check_fails(monkeypatch, shipping):
 
     assert response.status_code == 409
     assert "VIN fitment check failed" in response.json()["error"]
+    assert response.json()["field"] == "vehicle"
     assert not Order.objects.exists()
 
 
@@ -227,7 +230,7 @@ def test_returns_400_when_the_submitted_vin_is_malformed(monkeypatch, shipping):
     response = _post(_body(shipping, vehicle={**VEHICLE, "vin": "1GCHK3"}))
 
     assert response.status_code == 400
-    assert response.json() == {"error": "VIN must contain 17 valid characters"}
+    assert response.json() == {"error": "VIN must contain 17 valid characters", "field": "vin"}
     assert not Order.objects.exists()
 
 
@@ -276,7 +279,10 @@ def test_returns_400_without_a_shipping_selection(shipping_body, monkeypatch):
     response = _post(_body(shipping_body))
 
     assert response.status_code == 400
-    assert response.json()["error"] == "Select a shipping method before payment."
+    assert response.json() == {
+        "error": "Select a shipping method before payment.",
+        "field": "shipping",
+    }
     assert not Order.objects.exists()
 
 
@@ -354,6 +360,60 @@ def _forbid_stripe(monkeypatch):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
+    ("customer", "error", "field"),
+    [
+        ({"email": None}, "Valid email required", "email"),
+        ({"email": "  "}, "Valid email required", "email"),
+        ({"email": "not-an-email"}, "Valid email required", "email"),
+        ({"email": "buyer@example"}, "Valid email required", "email"),
+        ({"phone": "555-0100"}, "Phone must have 10 to 15 digits", "phone"),
+        ({"phone": "+1 (941) 555-0100 ext 12345"}, "Phone must have 10 to 15 digits", "phone"),
+        ({"phone": "call me"}, "Phone must have 10 to 15 digits", "phone"),
+        ({"address1": None}, "Street address required", "address1"),
+        ({"address1": "   "}, "Street address required", "address1"),
+        ({"city": ""}, "City required", "city"),
+        ({"city": 42}, "City required", "city"),
+    ],
+)
+def test_returns_400_for_invalid_contact_fields(customer, error, field, monkeypatch, shipping):
+    # Mismas reglas y mensajes que `src/lib/validators/checkout-customer.ts`.
+    _insert_product()
+    _forbid_stripe(monkeypatch)
+
+    response = _post(_body(shipping, customer={"state": "FL", "zip": "33701", **customer}))
+
+    assert response.status_code == 400
+    assert response.json() == {"error": error, "field": field}
+    assert not Order.objects.exists()
+
+
+@pytest.mark.django_db
+def test_contact_fields_are_trimmed_and_a_formatted_phone_is_accepted(monkeypatch, shipping):
+    _insert_product()
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+    customer = {
+        "email": " Buyer@Example.com ",
+        "phone": "+1 (941) 555-0100",
+        "address1": " 1 Main St ",
+        "city": " Sarasota ",
+        "state": "FL",
+        "zip": "33701",
+    }
+
+    response = _post(_body(shipping, customer=customer))
+
+    assert response.status_code == 200, response.content
+    saved = Order.objects.get(pk=response.json()["orderId"]).data["customer"]
+    assert (saved["email"], saved["address1"], saved["city"]) == (
+        "Buyer@Example.com",
+        "1 Main St",
+        "Sarasota",
+    )
+    assert saved["phone"] == "+1 (941) 555-0100"
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
     "customer",
     [
         {"zip": "33701"},
@@ -370,7 +430,7 @@ def test_returns_400_when_the_shipping_state_is_missing(customer, monkeypatch, s
     response = _post(_body(shipping, customer=customer))
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Shipping state is required"}
+    assert response.json() == {"error": "Shipping state is required", "field": "state"}
     assert not Order.objects.exists()
 
 
@@ -386,7 +446,8 @@ def test_returns_400_when_the_shipping_state_is_not_a_us_state_we_ship_to(
 
     assert response.status_code == 400
     assert response.json() == {
-        "error": "Shipping state must be a valid 2-letter US state code"
+        "error": "Shipping state must be a valid 2-letter US state code",
+        "field": "state",
     }
     assert not Order.objects.exists()
 
@@ -402,7 +463,7 @@ def test_returns_400_when_the_shipping_zip_is_missing_or_malformed(
     response = _post(_body(shipping, customer={"state": "FL", "zip": zip_code}))
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Shipping ZIP must be 5 digits or ZIP+4"}
+    assert response.json() == {"error": "Shipping ZIP must be 5 digits or ZIP+4", "field": "zip"}
     assert not Order.objects.exists()
 
 
@@ -422,7 +483,10 @@ def test_returns_400_when_the_zip_belongs_to_another_state(
     response = _post(_body(shipping, customer={"state": state, "zip": zip_code}))
 
     assert response.status_code == 400
-    assert response.json() == {"error": "ZIP code does not match the selected state."}
+    assert response.json() == {
+        "error": "ZIP code does not match the selected state.",
+        "field": "zip",
+    }
     assert not Order.objects.exists()
 
 
@@ -437,7 +501,7 @@ def test_returns_400_when_the_zip_prefix_is_not_a_us_zip_we_ship_to(
     response = _post(_body(shipping, customer={"state": "FL", "zip": zip_code}))
 
     assert response.status_code == 400
-    assert response.json() == {"error": "ZIP code is not a valid US ZIP code."}
+    assert response.json() == {"error": "ZIP code is not a valid US ZIP code.", "field": "zip"}
     assert not Order.objects.exists()
 
 

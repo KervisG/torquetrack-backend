@@ -12,7 +12,7 @@ from apps.checkout.models import Order, Payment
 from apps.checkout.services.payments import start_stripe_payment
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
-from tests.factories import create_staff_user, session_client
+from tests.factories import CHECKOUT_CONTACT, create_staff_user, session_client
 from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
@@ -123,7 +123,7 @@ def test_every_payment_flow_goes_through_start_stripe_payment(monkeypatch, setti
         {
             "items": [{"id": "p1", "qty": 1}],
             "vehicle": {"make": "Ford"},
-            "customer": {"state": "FL", "zip": "33701"},
+            "customer": {**CHECKOUT_CONTACT, "state": "FL", "zip": "33701"},
             "shipping": selection,
         },
         format="json",

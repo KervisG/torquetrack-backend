@@ -15,6 +15,9 @@ from apps.cart.services import CART_SESSION_KEY
 from apps.customers.models import Customer
 
 DEFAULT_PASSWORD = "diesel-pass-123"
+# Contacto mínimo que `POST /api/checkout/` exige (correo, calle y ciudad); los
+# tests de checkout le suman estado y ZIP.
+CHECKOUT_CONTACT = {"email": "buyer@example.com", "address1": "1 Main St", "city": "Sarasota"}
 
 
 def create_role(slug, *, permissions=(), full_access=False, name=None) -> Role:

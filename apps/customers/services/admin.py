@@ -6,6 +6,7 @@ from django.utils import timezone
 
 from apps.audit.services import record_activity
 from apps.authentication.services import invited_emails, issue_activation_token
+from apps.common.errors import error_payload
 from apps.common.ids import random_id
 from apps.common.links import app_url
 from apps.customers.models import Customer, PortalStatus, TaxStatus
@@ -55,7 +56,7 @@ def list_admin_customers() -> list[dict]:
     return [_serialize_customer_masked(customer, invited) for customer in customers]
 
 
-def upsert_admin_customer(payload: dict) -> dict:
+def upsert_admin_customer(payload: dict, actor_email: str) -> dict:
     """Solo guarda en `data` los campos de perfil: el estado fiscal, el
     certificado y el portal tienen su propio flujo."""
     patch, error = _profile_patch(payload)
@@ -77,7 +78,9 @@ def upsert_admin_customer(payload: dict) -> dict:
         if customer is None:
             return {"error": "Customer not found", "status": 404}
         if email and Customer.objects.filter(email__iexact=email).exclude(pk=customer_id).exists():
-            return {"error": "That email already belongs to another customer.", "status": 409}
+            return error_payload(
+                "That email already belongs to another customer.", "email", status=409
+            )
 
         customer.email = email or None
         customer.data = {**(customer.data or {}), **patch}
@@ -91,19 +94,37 @@ def upsert_admin_customer(payload: dict) -> dict:
             updated_at=timezone.now(),
         )
 
+    # Reusar un cliente por email es una edición, no un alta.
+    record_activity(
+        actor=actor_email,
+        action="CUSTOMER_UPDATED" if customer_id else "CUSTOMER_CREATED",
+        entity_type="CUSTOMER",
+        entity_id=customer.pk,
+        data={"email": customer.email, "fields": sorted(patch)},
+    )
     return {
         "customer": _serialize_customer_masked(customer, invited_emails([customer.email])),
         "reusedExistingCustomer": reused,
     }
 
 
-def delete_admin_customer(customer_id: str) -> dict:
+def delete_admin_customer(customer_id: str, actor_email: str) -> dict:
     if not customer_id:
         return {"error": "Customer required", "status": 400}
 
-    deleted, _ = Customer.objects.filter(pk=customer_id).delete()
-    if not deleted:
+    customer = Customer.objects.filter(pk=customer_id).first()
+    if customer is None:
         return {"error": "Customer not found", "status": 404}
+    # El email se toma antes de borrar: la bitácora sigue diciendo de quién era.
+    email = customer.email
+    customer.delete()
+    record_activity(
+        actor=actor_email,
+        action="CUSTOMER_DELETED",
+        entity_type="CUSTOMER",
+        entity_id=customer_id,
+        data={"email": email},
+    )
     return {"ok": True, "deletedCustomerId": customer_id}
 
 
@@ -134,7 +155,7 @@ def get_customer_tax_exemption(customer_id: str) -> dict:
 def update_customer_tax_status(customer_id: str, payload: dict, reviewer_email: str) -> dict:
     status = str(payload.get("status") or "").strip().upper()
     if status not in TaxStatus.values:
-        return {"error": "Invalid tax status", "status": 400}
+        return error_payload("Invalid tax status", "status", status=400)
 
     customer = Customer.objects.filter(pk=customer_id).first()
     if customer is None:

@@ -323,6 +323,13 @@ def upsert_admin_quote(payload: dict, actor_email: str, *, can_override_tax: boo
         )
         updated = False
 
+    record_activity(
+        actor=actor_email,
+        action="QUOTE_UPDATED" if updated else "QUOTE_CREATED",
+        entity_type="QUOTE",
+        entity_id=quote_id,
+        data={"quoteNumber": number, "status": status, "total": totals["total"]},
+    )
     manual = tax.fields.get("taxOverride")
     if override_changed(previous, manual):
         record_activity(

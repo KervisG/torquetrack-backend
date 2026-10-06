@@ -122,7 +122,10 @@ def test_create_customer_rejects_an_invalid_state_and_normalizes_a_valid_one():
     )
 
     assert rejected.status_code == 400
-    assert rejected.json() == {"error": "State must be a valid 2-letter US state code"}
+    assert rejected.json() == {
+        "error": "State must be a valid 2-letter US state code",
+        "field": "state",
+    }
     assert accepted.status_code == 200
     assert Customer.objects.get(email="state@example.com").data["state"] == "FL"
 
@@ -139,7 +142,10 @@ def test_create_customer_rejects_a_zip_from_another_state():
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "ZIP code does not match the selected state."}
+    assert response.json() == {
+        "error": "ZIP code does not match the selected state.",
+        "field": "zip",
+    }
     assert not Customer.objects.filter(email="zip@example.com").exists()
 
 
@@ -190,6 +196,10 @@ def test_update_returns_409_when_email_belongs_to_another_customer():
     )
 
     assert response.status_code == 409
+    assert response.json() == {
+        "error": "That email already belongs to another customer.",
+        "field": "email",
+    }
 
 
 @pytest.mark.django_db
@@ -261,6 +271,7 @@ def test_upsert_rejects_non_string_profile_fields():
     )
 
     assert response.status_code == 400
+    assert response.json() == {"error": "name must be a string", "field": "name"}
     assert not Customer.objects.exists()
 
 
@@ -447,6 +458,7 @@ def test_tax_status_rejects_invalid_status():
     )
 
     assert response.status_code == 400
+    assert response.json() == {"error": "Invalid tax status", "field": "status"}
 
 
 @pytest.mark.django_db

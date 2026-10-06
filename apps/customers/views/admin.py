@@ -33,7 +33,7 @@ class AdminCustomerListCreateView(APIView):
 
     def post(self, request):
         body = request.data if isinstance(request.data, dict) else {}
-        result = upsert_admin_customer(body)
+        result = upsert_admin_customer(body, request.user.email)
         return service_response(result)
 
 
@@ -42,7 +42,7 @@ class AdminCustomerDeleteView(APIView):
     required_permission = "customers.delete"
 
     def delete(self, request, customer_id):
-        result = delete_admin_customer(customer_id)
+        result = delete_admin_customer(customer_id, request.user.email)
         return service_response(result)
 
 

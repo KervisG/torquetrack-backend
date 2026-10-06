@@ -29,7 +29,11 @@ class AdminOrdersListView(APIView):
 
     def get(self, request):
         can_view_ids = has_role_permission(request.user, "payments.transaction_id")
-        return Response(list_admin_orders(can_view_transaction_ids=can_view_ids))
+        return service_response(
+            list_admin_orders(
+                can_view_transaction_ids=can_view_ids, date=request.query_params.get("date")
+            )
+        )
 
 
 class AdminOrderDetailView(APIView):

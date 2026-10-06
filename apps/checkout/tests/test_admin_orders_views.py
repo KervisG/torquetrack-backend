@@ -1,5 +1,6 @@
 
 import logging
+from datetime import UTC, datetime
 
 import pytest
 from django.db import connection
@@ -72,6 +73,37 @@ def test_list_returns_orders_with_expected_shape():
     assert body[0]["number"] == "O20001"
     assert body[0]["paymentStatus"] == "UNPAID"
     assert body[0]["customer"]["email"] == "no-fk@example.com"
+
+
+@pytest.mark.django_db
+def test_list_date_today_keeps_only_orders_placed_on_the_florida_day(monkeypatch):
+    # 23:30 EDT del 5 de octubre = 03:30 UTC del 6: en Florida sigue siendo el 5.
+    _insert_user("usr_list_today", permissions=["orders.view"])
+    client = _admin_client("usr_list_today")
+    now = datetime(2026, 10, 6, 3, 30, tzinfo=UTC)
+    monkeypatch.setattr(timezone, "now", lambda: now)
+    _make_order("ord_late", "O20001", created_at=now)
+    _make_order("ord_morning", "O20002", created_at=datetime(2026, 10, 5, 5, tzinfo=UTC))
+    # 23:00 EDT del 4 de octubre: ayer en Florida aunque en UTC ya sea el 5.
+    _make_order("ord_yesterday", "O20003", created_at=datetime(2026, 10, 5, 3, tzinfo=UTC))
+
+    today = client.get("/api/admin/orders/?date=today")
+    every = client.get("/api/admin/orders/")
+
+    assert today.status_code == 200
+    assert [row["number"] for row in today.json()] == ["O20002", "O20001"]
+    assert len(every.json()) == 3
+
+
+@pytest.mark.django_db
+def test_list_rejects_an_unknown_date_filter():
+    _insert_user("usr_list_bad_date", permissions=["orders.view"])
+    client = _admin_client("usr_list_bad_date")
+
+    response = client.get("/api/admin/orders/?date=yesterday")
+
+    assert response.status_code == 400
+    assert response.json() == {"error": "date must be today", "field": "date"}
 
 
 @pytest.mark.django_db

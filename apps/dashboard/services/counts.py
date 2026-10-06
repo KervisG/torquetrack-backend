@@ -2,18 +2,17 @@
 sus apps dueñas y nunca escribe."""
 from __future__ import annotations
 
-from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
 from django.db.models import Count, DecimalField, Q, Sum, Value
-from django.db.models.fields.json import KT
+from django.db.models.fields.json import KeyTextTransform, KeyTransform
 from django.db.models.functions import Cast, Coalesce
-from django.utils import timezone
 
 from apps.cart.models import CartStatus
 from apps.cart.services import count_carts_by_status
 from apps.checkout.models import Order, Refund, RefundStatus
 from apps.checkout.services import CHARGED_PAYMENT_STATUSES
+from apps.common.business_day import store_today_bounds
 from apps.common.numbers import money
 from apps.quotes.models import Quote, QuoteStatus
 from apps.quotes.services import unexpired_quotes_q
@@ -21,14 +20,27 @@ from apps.quotes.services import unexpired_quotes_q
 _NUMERIC = DecimalField(max_digits=20, decimal_places=6)
 
 
-def _order_total(key: str):
+def _order_total(key: str, data_path: str = "data"):
     """`data.totals.<key>` del pedido como numeric (no float), para no
-    arrastrar error de coma flotante; una clave ausente suma 0."""
-    return Coalesce(Cast(KT(f"data__totals__{key}"), _NUMERIC), Value(Decimal(0), _NUMERIC))
+    arrastrar error de coma flotante; una clave ausente suma 0. `data_path`
+    permite leerlo desde otra tabla (`order__data` desde `Payment`)."""
+    # `KeyTextTransform` sobre `KeyTransform` y no `KT(...)`: `KT` toma el
+    # primer segmento como campo y no sabe cruzar la relación de `order__data`.
+    amount = KeyTextTransform(key, KeyTransform("totals", data_path))
+    return Coalesce(Cast(amount, _NUMERIC), Value(Decimal(0), _NUMERIC))
 
 
-# Lo vendido sin impuesto: el impuesto se cobra por cuenta del estado.
-_NET_OF_TAX = _order_total("subtotal") + _order_total("core") + _order_total("shipping")
+def net_of_tax(data_path: str = "data"):
+    """Lo vendido sin impuesto (subtotal + core + envío): el impuesto se cobra
+    por cuenta del estado. Única definición, compartida con `analytics.py`."""
+    return (
+        _order_total("subtotal", data_path)
+        + _order_total("core", data_path)
+        + _order_total("shipping", data_path)
+    )
+
+
+_NET_OF_TAX = net_of_tax()
 
 
 def net_sales_between(start, end) -> Decimal:
@@ -56,10 +68,9 @@ def net_sales_between(start, end) -> Decimal:
 
 
 def get_dashboard_counts() -> dict:
-    now = timezone.now()
-    # "Hoy" es el día calendario en UTC, sin importar la zona horaria del
-    # servidor ni la del usuario.
-    today_start = datetime.combine(now.astimezone(UTC).date(), time.min, UTC)
+    # "Hoy" es el día calendario de la tienda (`settings.STORE_TIME_ZONE`),
+    # sin importar la zona del servidor ni la del usuario.
+    today_start, today_end = store_today_bounds()
 
     # Una cotización vencida que todavía no pasó por `expire_quotes` no cuenta.
     quotes = Quote.objects.filter(unexpired_quotes_q()).aggregate(
@@ -67,7 +78,7 @@ def get_dashboard_counts() -> dict:
         building=Count("pk", filter=Q(status=QuoteStatus.BUILDING)),
     )
     carts = count_carts_by_status()
-    sales_today = net_sales_between(today_start, today_start + timedelta(days=1))
+    sales_today = net_sales_between(today_start, today_end)
 
     return {
         "counts": {

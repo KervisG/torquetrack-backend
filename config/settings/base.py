@@ -117,6 +117,10 @@ LANGUAGE_CODE = "en-us"
 TIME_ZONE = "UTC"
 USE_I18N = True
 USE_TZ = True
+# Zona del día de negocio (la tienda está en Florida): dónde se corta "hoy" en
+# las métricas del panel y el filtro de pedidos (`apps/common/business_day.py`).
+# `TIME_ZONE` queda en UTC para Celery y los timestamps.
+STORE_TIME_ZONE = env("STORE_TIME_ZONE", default="") or "America/New_York"
 
 STATIC_URL = "static/"
 # `collectstatic` copia acá los estáticos al construir la imagen.

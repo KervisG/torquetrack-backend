@@ -164,8 +164,21 @@ class AdminOrdersListViewExtension(OpenApiViewExtension):
                     "Requires `orders.view`. Stripe ids appear only with "
                     "`payments.transaction_id`."
                 ),
+                parameters=[
+                    OpenApiParameter(
+                        "date",
+                        str,
+                        OpenApiParameter.QUERY,
+                        enum=["today"],
+                        description=(
+                            "`today` keeps only orders created today in the store time "
+                            "zone (`STORE_TIME_ZONE`), the same day as `salesToday`."
+                        ),
+                    )
+                ],
                 responses={
                     200: OpenApiResponse(OrderSummarySerializer(many=True)),
+                    400: OpenApiResponse(ErrorResponseSerializer),
                     401: OpenApiResponse(ErrorResponseSerializer),
                     403: OpenApiResponse(ErrorResponseSerializer),
                 },

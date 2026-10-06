@@ -26,7 +26,9 @@ from apps.checkout.services.payments import (
     start_stripe_payment,
 )
 from apps.checkout.services.refunds import order_refund_summary, serialize_refund
+from apps.common.business_day import store_today_bounds
 from apps.common.emails import branded_email_html
+from apps.common.errors import error_payload
 from apps.common.numbers import money, money_decimal
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
@@ -105,7 +107,17 @@ def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict
     return row
 
 
-def list_admin_orders(can_view_transaction_ids: bool = False) -> list[dict]:
+ORDER_DATE_FILTERS = ("today",)
+INVALID_ORDER_DATE_FILTER = "date must be today"
+
+
+def list_admin_orders(
+    can_view_transaction_ids: bool = False, date: str | None = None
+) -> tuple[list[dict], int] | dict:
+    """Todos los pedidos, o con `date="today"` solo los creados hoy en la zona
+    de la tienda (`settings.STORE_TIME_ZONE`), el mismo día de "Sales today"."""
+    if date and date not in ORDER_DATE_FILTERS:
+        return error_payload(INVALID_ORDER_DATE_FILTER, "date", status=400)
     orders = (
         Order.objects.select_related("customer")
         .prefetch_related(
@@ -118,7 +130,10 @@ def list_admin_orders(can_view_transaction_ids: bool = False) -> list[dict]:
         )
         .order_by("created_at")
     )
-    return [_serialize_order(order, can_view_transaction_ids) for order in orders]
+    if date == "today":
+        start, end = store_today_bounds()
+        orders = orders.filter(created_at__gte=start, created_at__lt=end)
+    return [_serialize_order(order, can_view_transaction_ids) for order in orders], 200
 
 
 def _workflow_patch(workflow: dict, actor_email: str) -> dict:

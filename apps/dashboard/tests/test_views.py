@@ -2,10 +2,13 @@
 salen de la misma clasificación que `GET /api/admin/carts/`. Sin proveedores
 que mockear.
 
-`salesToday` son las ventas netas del día (UTC): subtotal + core + envío de
+`salesToday` son las ventas netas del día de la tienda
+(`settings.STORE_TIME_ZONE`, Florida; no UTC): subtotal + core + envío de
 los pedidos con un pago cobrado HOY (`Payment.paid_at`, no el `created_at` del
-pedido), sin impuesto, menos los reembolsos `SUCCEEDED` emitidos hoy.
+pedido), sin impuesto, menos los reembolsos `SUCCEEDED` emitidos hoy. El
+borde del día se prueba fijando `django.utils.timezone.now` a las 23:30 ET.
 """
+from datetime import UTC, datetime
 from decimal import Decimal
 
 import pytest
@@ -205,6 +208,22 @@ def test_dashboard_sales_today_counts_refunded_payments_as_charged():
     _refund("REF_FULL", payment, "60.00")
 
     assert _sales_today() == 0.0
+
+
+@pytest.mark.django_db
+def test_dashboard_sales_today_is_the_florida_day_not_the_utc_day(monkeypatch):
+    # 23:30 EDT del 5 de octubre = 03:30 UTC del 6: en Florida sigue siendo el 5.
+    client = _admin_client("usr_dash_tz", ["dashboard.view"])
+    now = datetime(2026, 10, 6, 3, 30, tzinfo=UTC)
+    monkeypatch.setattr(timezone, "now", lambda: now)
+    _paid_order("OID_LATE", {"subtotal": 10.0}, paid_at=now)
+    _paid_order("OID_MORNING", {"subtotal": 20.0}, paid_at=datetime(2026, 10, 5, 5, tzinfo=UTC))
+    # 23:00 EDT del 4 de octubre: ayer en Florida aunque en UTC ya sea el 5.
+    _paid_order("OID_YESTERDAY", {"subtotal": 400.0}, paid_at=datetime(2026, 10, 5, 3, tzinfo=UTC))
+
+    response = client.get("/api/admin/dashboard/")
+
+    assert response.json()["counts"]["salesToday"] == 30.0
 
 
 @pytest.mark.django_db

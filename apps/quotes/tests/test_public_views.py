@@ -98,7 +98,7 @@ def test_quote_request_requires_name(client):
     )
 
     assert response.status_code == 400
-    assert response.json()["error"] == "Name or company is required"
+    assert response.json() == {"error": "Name or company is required", "field": "name"}
 
 
 @pytest.mark.django_db

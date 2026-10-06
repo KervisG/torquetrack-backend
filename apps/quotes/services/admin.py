@@ -15,6 +15,7 @@ from apps.catalog.services.pricing import (
 )
 from apps.checkout.models import Order, OrderPaymentStatus, OrderStatus
 from apps.checkout.services import next_order_number
+from apps.common.errors import error_payload
 from apps.common.ids import random_id
 from apps.common.numbers import money
 from apps.customers.services import find_staff_customer
@@ -242,12 +243,12 @@ def upsert_admin_quote(payload: dict, actor_email: str, *, can_override_tax: boo
     try:
         items, priced = _price_quote(payload)
     except InvalidQuantity:
-        return {"error": INVALID_QUANTITY, "status": 400}
+        return error_payload(INVALID_QUANTITY, "quantity", status=400)
     except InvalidPrice:
-        return {"error": INVALID_PRICE, "status": 400}
+        return error_payload(INVALID_PRICE, "unitPrice", status=400)
     status = str(payload.get("status") or QuoteStatus.ACTIVE).upper()
     if status not in QuoteStatus.values:
-        return {"error": "Invalid quote status", "status": 400}
+        return error_payload("Invalid quote status", "status", status=400)
 
     now = timezone.now()
     override = payload.get("taxOverride")
@@ -265,7 +266,7 @@ def upsert_admin_quote(payload: dict, actor_email: str, *, can_override_tax: boo
             now=now,
         )
     except QuoteTaxError as exc:
-        return {"error": exc.message, "status": exc.status}
+        return error_payload(exc.message, exc.field, status=exc.status)
     totals = serialize_totals(
         build_totals(priced.subtotal, priced.core, payload.get("shipping"), tax.amount)
     )

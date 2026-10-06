@@ -18,8 +18,18 @@ from rest_framework import serializers
 # `config.exceptions.api_exception_handler` para los errores de DRF (CSRF,
 # throttle, JSON mal formado, 405, 415). Un error de validación por campo de un
 # serializer de DRF agregaría `fields`; hoy ninguna view pública lo produce.
+# `field` lo agrega `apps.common.errors.error_payload` cuando el error es de un
+# campo del body; sin campo, la clave no aparece.
 class ErrorResponseSerializer(serializers.Serializer):
     error = serializers.CharField(help_text="Literal English error message.")
+    field = serializers.CharField(
+        required=False,
+        help_text=(
+            "snake_case name of the input field the error is about (for example `zip`, "
+            "`state`, `price`, `shipping_zip`). Omitted when the error is not about a "
+            "single field."
+        ),
+    )
 
 
 class OkResponseSerializer(serializers.Serializer):

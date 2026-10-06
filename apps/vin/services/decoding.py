@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import re
 
+from apps.common.errors import error_payload
 from apps.integrations.exceptions import ProviderError, ProviderUnavailable
 from apps.integrations.vehicles import nhtsa
 
@@ -14,7 +15,7 @@ VIN_FORMAT_ERROR = "VIN must contain 17 valid characters"
 def decode_vehicle(raw_vin: str | None) -> tuple[dict, int]:
     vin = (raw_vin or "").strip().upper()
     if not VIN_PATTERN.match(vin):
-        return {"error": VIN_FORMAT_ERROR}, 400
+        return error_payload(VIN_FORMAT_ERROR, "vin"), 400
 
     try:
         result = nhtsa.decode_vin(vin)

@@ -8,8 +8,12 @@ Los mensajes de `{"error": ...}` son los literales de `views.py` y
 from drf_spectacular.utils import OpenApiExample
 
 
-def error_example(name: str, message: str) -> OpenApiExample:
-    return OpenApiExample(name, value={"error": message})
+def error_example(name: str, message: str, field: str | None = None) -> OpenApiExample:
+    """`field` es el campo del body que el error señala (ver `apps.common.errors`)."""
+    value = {"error": message}
+    if field:
+        value["field"] = field
+    return OpenApiExample(name, value=value)
 
 
 # --- errores de DRF ---------------------------------------------------------------

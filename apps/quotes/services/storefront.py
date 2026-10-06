@@ -27,6 +27,7 @@ from apps.checkout.services import (
     start_stripe_payment,
 )
 from apps.common.emails import branded_email_html
+from apps.common.errors import error_payload
 from apps.common.ids import random_id
 from apps.common.numbers import money
 from apps.customers.services import customer_for_user, resolve_guest_customer
@@ -82,7 +83,7 @@ def create_quote_from_request(payload: dict, user=None, cart_id=None) -> dict:
     if profile is not None:
         email = profile.email or user.email
     if not name:
-        return {"error": "Name or company is required", "status": 400}
+        return error_payload("Name or company is required", "name", status=400)
 
     raw_items = payload.get("items")
     if not isinstance(raw_items, list) or not raw_items:

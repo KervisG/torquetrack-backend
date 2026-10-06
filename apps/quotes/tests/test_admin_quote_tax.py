@@ -291,7 +291,7 @@ def test_tax_override_is_validated(forbid_taxjar, override, message):
     response = client.post("/api/admin/quotes/", _body(taxOverride=override), format="json")
 
     assert response.status_code == 400
-    assert response.json() == {"error": message}
+    assert response.json() == {"error": message, "field": "tax_override"}
     assert not Quote.objects.exists()
 
 
@@ -307,7 +307,10 @@ def test_an_exempt_customer_cannot_get_a_tax_override(forbid_taxjar):
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Tax-exempt customers cannot have a tax override"}
+    assert response.json() == {
+        "error": "Tax-exempt customers cannot have a tax override",
+        "field": "tax_override",
+    }
 
 
 # --- exención y dirección ----------------------------------------------------
@@ -331,50 +334,70 @@ def test_exempt_customer_gets_zero_tax_without_an_address(forbid_taxjar):
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    "address",
-    [None, {}, {"state": "FL", "zip": ""}, {"state": "", "zip": "33701"}],
+    ("address", "field"),
+    [
+        (None, "shipping_state"),
+        ({}, "shipping_state"),
+        ({"state": "FL", "zip": ""}, "shipping_zip"),
+        ({"state": "", "zip": "33701"}, "shipping_state"),
+    ],
 )
-def test_a_non_exempt_quote_without_state_and_zip_is_rejected(forbid_taxjar, address):
+def test_a_non_exempt_quote_without_state_and_zip_is_rejected(forbid_taxjar, address, field):
     client = _staff("usr_tax_no_address")
 
     response = client.post("/api/admin/quotes/", _body(shippingAddress=address), format="json")
 
     assert response.status_code == 400
-    assert response.json() == ADDRESS_REQUIRED
+    assert response.json() == {**ADDRESS_REQUIRED, "field": field}
     assert not Quote.objects.exists()
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize(
-    ("address", "message"),
+    ("address", "message", "field"),
     [
-        ("FL 33701", "Shipping address must be an object with text fields"),
-        ({**FL_ADDRESS, "zip": 33701}, "Shipping address must be an object with text fields"),
+        ("FL 33701", "Shipping address must be an object with text fields", "shipping_address"),
+        (
+            {**FL_ADDRESS, "zip": 33701},
+            "Shipping address must be an object with text fields",
+            "shipping_zip",
+        ),
         (
             {**FL_ADDRESS, "state": "Florida"},
             "Shipping state must be a valid 2-letter US state code",
+            "shipping_state",
         ),
         (
             {**FL_ADDRESS, "state": "ZZ"},
             "Shipping state must be a valid 2-letter US state code",
+            "shipping_state",
         ),
-        ({**FL_ADDRESS, "zip": "3370"}, "Shipping ZIP must be 5 digits or ZIP+4"),
-        ({**FL_ADDRESS, "state": "GA"}, "ZIP code does not match the selected state."),
-        ({**FL_ADDRESS, "zip": "30301"}, "ZIP code does not match the selected state."),
-        ({**FL_ADDRESS, "zip": "00001"}, "ZIP code is not a valid US ZIP code."),
+        ({**FL_ADDRESS, "zip": "3370"}, "Shipping ZIP must be 5 digits or ZIP+4", "shipping_zip"),
+        (
+            {**FL_ADDRESS, "state": "GA"},
+            "ZIP code does not match the selected state.",
+            "shipping_zip",
+        ),
+        (
+            {**FL_ADDRESS, "zip": "30301"},
+            "ZIP code does not match the selected state.",
+            "shipping_zip",
+        ),
+        ({**FL_ADDRESS, "zip": "00001"}, "ZIP code is not a valid US ZIP code.", "shipping_zip"),
         (
             {**FL_ADDRESS, "city": "x" * 201},
             "Shipping address fields must be 200 characters or fewer",
+            "shipping_city",
         ),
     ],
 )
-def test_the_shipping_address_is_validated(forbid_taxjar, address, message):
+def test_the_shipping_address_is_validated(forbid_taxjar, address, message, field):
     client = _staff("usr_tax_bad_address")
 
     response = client.post("/api/admin/quotes/", _body(shippingAddress=address), format="json")
 
     assert response.status_code == 400
-    assert response.json() == {"error": message}
+    assert response.json() == {"error": message, "field": field}
 
 
 @pytest.mark.django_db

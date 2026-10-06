@@ -49,3 +49,16 @@ def test_an_ok_dict_can_declare_its_success_status():
     response = service_response({"ok": True}, success_status=201)
 
     assert response.status_code == 201
+
+
+def test_an_error_dict_keeps_the_field_of_the_input_it_is_about():
+    response = service_response({"error": "Invalid", "field": "zip", "status": 400, "extra": 1})
+
+    assert response.status_code == 400
+    assert response.data == {"error": "Invalid", "field": "zip"}
+
+
+def test_an_error_tuple_keeps_its_field():
+    response = service_response(({"error": "Invalid", "field": "state"}, 400))
+
+    assert response.data == {"error": "Invalid", "field": "state"}

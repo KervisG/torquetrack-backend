@@ -158,7 +158,10 @@ def test_patch_account_rejects_a_state_we_do_not_ship_to(state):
     response = client.patch("/api/account/", {"state": state, "city": "Tampa"}, format="json")
 
     assert response.status_code == 400
-    assert response.json() == {"error": "State must be a valid 2-letter US state code"}
+    assert response.json() == {
+        "error": "State must be a valid 2-letter US state code",
+        "field": "state",
+    }
     assert "state" not in Customer.objects.get(pk="C_PAT").data
     assert "city" not in Customer.objects.get(pk="C_PAT").data
 
@@ -336,7 +339,10 @@ def test_patch_account_rejects_a_zip_from_another_state(state, zip_code):
     response = client.patch("/api/account/", {"state": state, "zip": zip_code}, format="json")
 
     assert response.status_code == 400
-    assert response.json() == {"error": "ZIP code does not match the selected state."}
+    assert response.json() == {
+        "error": "ZIP code does not match the selected state.",
+        "field": "zip",
+    }
     assert "zip" not in Customer.objects.get(pk="C_PAT").data
 
 

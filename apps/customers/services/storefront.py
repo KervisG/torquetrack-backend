@@ -24,6 +24,7 @@ from apps.authentication.services import (
     send_existing_account_email,
     send_verification_email,
 )
+from apps.common.errors import error_payload
 from apps.common.ids import random_id
 from apps.common.us_addresses import normalize_state_code, shipping_zip_error
 from apps.customers.models import Customer, TaxStatus
@@ -285,20 +286,20 @@ def _profile_patch(payload: dict) -> tuple[dict, dict | None]:
         if value is None:
             value = ""
         if not isinstance(value, str):
-            return {}, {"error": f"{field} must be a string", "status": 400}
+            return {}, error_payload(f"{field} must be a string", field, status=400)
         patch[field] = value.strip()[:200]
     # El estado del perfil precarga el checkout, que solo acepta un código de
     # la lista; vacío se permite porque la dirección del perfil es opcional.
     if patch.get("state"):
         patch["state"] = normalize_state_code(patch["state"])
         if not patch["state"]:
-            return {}, {"error": INVALID_PROFILE_STATE, "status": 400}
+            return {}, error_payload(INVALID_PROFILE_STATE, "state", status=400)
     # Solo se cruzan si vienen los dos: un PATCH parcial no se valida contra
     # lo guardado, y el checkout vuelve a validar el par igual.
     if patch.get("state") and patch.get("zip"):
         zip_error = shipping_zip_error(patch["zip"], patch["state"])
         if zip_error:
-            return {}, {"error": zip_error, "status": 400}
+            return {}, error_payload(zip_error, "zip", status=400)
     return patch, None
 
 

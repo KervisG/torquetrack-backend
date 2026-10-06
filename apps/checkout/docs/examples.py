@@ -98,8 +98,10 @@ FULFILLMENT_SAME_TRACKING = error_example(
 )
 
 
-SHIPPING_STATE_MISSING = error_example("Shipping state missing", SHIPPING_STATE_REQUIRED)
-SHIPPING_STATE_INVALID = error_example("Shipping state invalid", INVALID_SHIPPING_STATE)
-SHIPPING_ZIP_INVALID = error_example("Shipping ZIP invalid", INVALID_SHIPPING_ZIP)
-SHIPPING_ZIP_UNKNOWN = error_example("Shipping ZIP unassigned", UNKNOWN_SHIPPING_ZIP)
-SHIPPING_ZIP_MISMATCH = error_example("ZIP from another state", ZIP_STATE_MISMATCH)
+SHIPPING_STATE_MISSING = error_example(
+    "Shipping state missing", SHIPPING_STATE_REQUIRED, "state"
+)
+SHIPPING_STATE_INVALID = error_example("Shipping state invalid", INVALID_SHIPPING_STATE, "state")
+SHIPPING_ZIP_INVALID = error_example("Shipping ZIP invalid", INVALID_SHIPPING_ZIP, "zip")
+SHIPPING_ZIP_UNKNOWN = error_example("Shipping ZIP unassigned", UNKNOWN_SHIPPING_ZIP, "zip")
+SHIPPING_ZIP_MISMATCH = error_example("ZIP from another state", ZIP_STATE_MISMATCH, "zip")

@@ -52,6 +52,7 @@ def test_vin_decode_requires_quotes_create_and_rejects_a_short_vin():
 
     assert response.status_code == 400
     assert "17" in response.json()["error"]
+    assert response.json()["field"] == "vin"
 
 
 @pytest.mark.django_db

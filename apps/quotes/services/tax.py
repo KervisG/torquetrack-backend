@@ -39,6 +39,8 @@ EXEMPT_TAX_OVERRIDE = "Tax-exempt customers cannot have a tax override"
 SHIPPING_ADDRESS_FIELDS = ("address1", "city", "state", "zip")
 MAX_ADDRESS_FIELD_LENGTH = 200
 MAX_OVERRIDE_REASON_LENGTH = 500
+# `field` de los rechazos del override: el editor lo muestra en un solo bloque.
+TAX_OVERRIDE_FIELD = "tax_override"
 
 # Claves de `Quote.data` que escribe este módulo. El body no puede traerlas:
 # se descartan y se vuelven a escribir con lo que decidió el servidor.
@@ -56,12 +58,15 @@ QUOTE_TAX_KEYS = (
 
 
 class QuoteTaxError(Exception):
-    """Rechazo con el mensaje para el panel; la view lo traduce a `{"error"}`."""
+    """Rechazo con el mensaje para el panel; `upsert_admin_quote` lo traduce a
+    `{"error", "field"}`. `field` es el input del editor que hay que corregir
+    (snake_case), o `None` si el rechazo no es de un campo."""
 
-    def __init__(self, message: str, status: int = 400):
+    def __init__(self, message: str, status: int = 400, field: str | None = None):
         super().__init__(message)
         self.message = message
         self.status = status
+        self.field = field
 
 
 @dataclass(frozen=True)
@@ -77,36 +82,36 @@ def parse_shipping_address(raw) -> dict:
     if raw is None:
         raw = {}
     if not isinstance(raw, dict):
-        raise QuoteTaxError(INVALID_SHIPPING_ADDRESS)
+        raise QuoteTaxError(INVALID_SHIPPING_ADDRESS, field="shipping_address")
     address = {}
     for field in SHIPPING_ADDRESS_FIELDS:
         value = raw.get(field)
         if value is None:
             value = ""
         if not isinstance(value, str):
-            raise QuoteTaxError(INVALID_SHIPPING_ADDRESS)
+            raise QuoteTaxError(INVALID_SHIPPING_ADDRESS, field=f"shipping_{field}")
         value = value.strip()
         if len(value) > MAX_ADDRESS_FIELD_LENGTH:
-            raise QuoteTaxError(SHIPPING_FIELD_TOO_LONG)
+            raise QuoteTaxError(SHIPPING_FIELD_TOO_LONG, field=f"shipping_{field}")
         address[field] = value
     # Vacío se permite aquí: `resolve_quote_tax` decide si hace falta (un
     # cliente exento o un borrador sin montos no la necesitan).
     if address["state"]:
         address["state"] = normalize_state_code(address["state"]) or ""
         if not address["state"]:
-            raise QuoteTaxError(INVALID_SHIPPING_STATE)
+            raise QuoteTaxError(INVALID_SHIPPING_STATE, field="shipping_state")
     if address["zip"] and not is_valid_zip(address["zip"]):
-        raise QuoteTaxError(INVALID_SHIPPING_ZIP)
+        raise QuoteTaxError(INVALID_SHIPPING_ZIP, field="shipping_zip")
     if address["state"] and address["zip"]:
         zip_error = shipping_zip_error(address["zip"], address["state"])
         if zip_error:
-            raise QuoteTaxError(zip_error)
+            raise QuoteTaxError(zip_error, field="shipping_zip")
     return address
 
 
 def _parse_override(raw) -> tuple[Decimal, str]:
     if not isinstance(raw, dict):
-        raise QuoteTaxError(INVALID_TAX_OVERRIDE)
+        raise QuoteTaxError(INVALID_TAX_OVERRIDE, field=TAX_OVERRIDE_FIELD)
     amount = raw.get("amount")
     # `bool` es subclase de `int`: `true` no es un monto.
     if (
@@ -115,13 +120,13 @@ def _parse_override(raw) -> tuple[Decimal, str]:
         or not math.isfinite(amount)
         or amount < 0
     ):
-        raise QuoteTaxError(INVALID_TAX_OVERRIDE_AMOUNT)
+        raise QuoteTaxError(INVALID_TAX_OVERRIDE_AMOUNT, field=TAX_OVERRIDE_FIELD)
     reason = raw.get("reason")
     reason = reason.strip() if isinstance(reason, str) else ""
     if not reason:
-        raise QuoteTaxError(TAX_OVERRIDE_REASON_REQUIRED)
+        raise QuoteTaxError(TAX_OVERRIDE_REASON_REQUIRED, field=TAX_OVERRIDE_FIELD)
     if len(reason) > MAX_OVERRIDE_REASON_LENGTH:
-        raise QuoteTaxError(TAX_OVERRIDE_REASON_TOO_LONG)
+        raise QuoteTaxError(TAX_OVERRIDE_REASON_TOO_LONG, field=TAX_OVERRIDE_FIELD)
     return money_decimal(amount), reason
 
 
@@ -145,7 +150,7 @@ def resolve_quote_tax(
         if not can_override:
             raise QuoteTaxError(TAX_OVERRIDE_FORBIDDEN, status=403)
         if exempt:
-            raise QuoteTaxError(EXEMPT_TAX_OVERRIDE)
+            raise QuoteTaxError(EXEMPT_TAX_OVERRIDE, field=TAX_OVERRIDE_FIELD)
         amount, reason = _parse_override(override)
         return QuoteTax(
             amount,
@@ -168,7 +173,8 @@ def resolve_quote_tax(
     if not exempt and not has_address:
         taxable = money_decimal(subtotal) + money_decimal(core) + money_decimal(shipping)
         if taxable > 0:
-            raise QuoteTaxError(TAX_ADDRESS_REQUIRED)
+            missing = "shipping_state" if not address["state"] else "shipping_zip"
+            raise QuoteTaxError(TAX_ADDRESS_REQUIRED, field=missing)
         # Un borrador sin montos no tiene nada que gravar: se guarda sin
         # dirección y sin llamar a TaxJar.
         return QuoteTax(

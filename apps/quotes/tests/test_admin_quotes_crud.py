@@ -326,7 +326,7 @@ def test_create_rejects_an_unknown_status():
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Invalid quote status"}
+    assert response.json() == {"error": "Invalid quote status", "field": "status"}
     assert not Quote.objects.exists()
 
 
@@ -342,5 +342,8 @@ def test_create_rejects_a_line_quantity_that_is_not_a_whole_number(quantity):
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "Item quantity must be a whole number of at least 1"}
+    assert response.json() == {
+        "error": "Item quantity must be a whole number of at least 1",
+        "field": "quantity",
+    }
     assert not Quote.objects.exists()

@@ -14,6 +14,7 @@ DOMAIN_TABLES = {
     "customers",
     "products",
     "applications",
+    "product_fitments",
     "carts",
     "quotes",
     "orders",

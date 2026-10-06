@@ -133,3 +133,56 @@ def test_application_detail_returns_full_data():
 
     assert response.status_code == 200
     assert response.json()["make"] == "Ford"
+
+
+# --- slug -------------------------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_product_list_and_detail_expose_the_slug():
+    _insert_product("gm-65-injection-pump-dorman-502550", REAL_PRODUCT_SHAPE, active=True)
+
+    listed = APIClient().get("/api/products/").json()[0]
+    detail = APIClient().get("/api/products/gm-65-injection-pump-dorman-502550/").json()
+
+    assert listed["slug"] == "65l-turbo-diesel-fuel-injection-pump-502-550"
+    assert detail["slug"] == listed["slug"]
+
+
+@pytest.mark.django_db
+def test_product_detail_resolves_by_slug():
+    _insert_product("gm-65-injection-pump-dorman-502550", REAL_PRODUCT_SHAPE, active=True)
+
+    response = APIClient().get("/api/products/65l-turbo-diesel-fuel-injection-pump-502-550/")
+
+    assert response.status_code == 200
+    assert response.json()["id"] == "gm-65-injection-pump-dorman-502550"
+
+
+@pytest.mark.django_db
+def test_product_detail_by_slug_404_for_inactive_product():
+    _insert_product("discontinued-part", {"title": "Old Pump", "partNumber": "OP1"}, active=False)
+
+    response = APIClient().get("/api/products/old-pump-op1/")
+
+    assert response.status_code == 404
+    assert "error" in response.json()
+
+
+@pytest.mark.django_db
+def test_product_detail_prefers_the_id_over_another_products_slug():
+    # El id siempre gana: un slug que coincide con el id de otro producto no
+    # puede secuestrar la URL vieja por id.
+    _insert_product("pump-a", {"title": "Pump", "partNumber": "B"}, active=True)
+    Product.objects.create(id="other", data={"title": "Other"}, active=True, slug="pump-a")
+
+    response = APIClient().get("/api/products/pump-a/")
+
+    assert response.json()["title"] == "Pump"
+
+
+@pytest.mark.django_db
+def test_product_payload_slug_comes_from_the_column_not_from_data():
+    _insert_product("p1", {"title": "Pump", "partNumber": "A", "slug": "spoofed"}, active=True)
+
+    assert APIClient().get("/api/products/p1/").json()["slug"] == "pump-a"

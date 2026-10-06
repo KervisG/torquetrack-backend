@@ -24,10 +24,20 @@ class ProductPublicSerializer(serializers.Serializer):
         data = dict(instance.data)
         for field in RESTRICTED_PRODUCT_FIELDS:
             data.pop(field, None)
+        # El slug sale de la columna: un `slug` dentro de `data` nunca lo pisa.
+        data["slug"] = instance.slug
+        # `applicationIds` sale de `ProductFitment`, nunca de `data`: sin filas
+        # la clave no va y el SPA cae al texto, igual que el checkout. La view
+        # hace `prefetch_related("applications")`.
+        data.pop("applicationIds", None)
+        codes = sorted(application.code for application in instance.applications.all())
+        if codes:
+            data["applicationIds"] = codes
         return data
 
 
 class ApplicationPublicSerializer(serializers.Serializer):
 
     def to_representation(self, instance):
-        return dict(instance.data)
+        # El id público es `code`, el mismo que lista `applicationIds`.
+        return {**instance.data, "id": instance.code}

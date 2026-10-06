@@ -9,6 +9,7 @@ import pytest
 from django.utils import timezone
 
 from apps.catalog.models import Product
+from apps.common.business_day import store_today
 from tests.factories import create_staff_user, session_client
 
 
@@ -88,7 +89,7 @@ def test_put_creates_product_forcing_id_from_url():
 
     response = client.put(
         "/api/admin/products/prod_new/",
-        {"id": "ignored-client-id", "title": "New Part", "price": 99.5},
+        {"id": "ignored-client-id", "title": "New Part", "partNumber": "NP-1", "price": 99.5},
         format="json",
     )
 
@@ -108,7 +109,7 @@ def test_put_reads_nested_product_key_when_present():
 
     response = client.put(
         "/api/admin/products/prod_nested/",
-        {"product": {"title": "Nested Part", "price": 25}},
+        {"product": {"title": "Nested Part", "partNumber": "NP-2", "price": 25}},
         format="json",
     )
 
@@ -129,7 +130,9 @@ def test_put_keeps_a_deactivated_product_inactive():
     client = _admin_client("usr_put3")
 
     response = client.put(
-        "/api/admin/products/prod_existing/", {"title": "Updated"}, format="json"
+        "/api/admin/products/prod_existing/",
+        {"title": "Updated", "partNumber": "UP-1"},
+        format="json",
     )
 
     assert response.status_code == 200
@@ -145,7 +148,9 @@ def test_put_with_explicit_active_reactivates_the_product():
     client = _admin_client("usr_put4")
 
     response = client.put(
-        "/api/admin/products/prod_off/", {"title": "Back", "active": True}, format="json"
+        "/api/admin/products/prod_off/",
+        {"title": "Back", "partNumber": "BK-1", "active": True},
+        format="json",
     )
 
     assert response.status_code == 200
@@ -162,6 +167,7 @@ def test_put_rejects_a_non_boolean_active():
     response = client.put("/api/admin/products/prod_x/", {"active": "yes"}, format="json")
 
     assert response.status_code == 400
+    assert response.json() == {"error": "active must be a boolean", "field": "active"}
     assert not Product.objects.exists()
 
 
@@ -180,7 +186,7 @@ def test_put_rejects_a_product_without_a_positive_price(price):
     )
 
     assert response.status_code == 400
-    assert response.json() == {"error": "price must be greater than 0"}
+    assert response.json() == {"error": "price must be greater than 0", "field": "price"}
     assert not Product.objects.exists()
 
 
@@ -192,7 +198,9 @@ def test_put_on_a_stored_product_without_price_requires_setting_one():
 
     rejected = client.put("/api/admin/products/prod_legacy/", {"title": "Pump"}, format="json")
     accepted = client.put(
-        "/api/admin/products/prod_legacy/", {"title": "Pump", "price": 80}, format="json"
+        "/api/admin/products/prod_legacy/",
+        {"title": "Pump", "partNumber": "PM-1", "price": 80},
+        format="json",
     )
 
     assert rejected.status_code == 400
@@ -204,6 +212,7 @@ def test_put_on_a_stored_product_without_price_requires_setting_one():
 STORED = {
     "id": "prod_priced",
     "title": "Injector",
+    "partNumber": "INJ-1",
     "price": 100.0,
     "coreCharge": 20.0,
     "purchaseCost": 60.0,
@@ -216,6 +225,7 @@ def _insert_priced():
 
 
 def _put(client, body):
+    body = {"partNumber": STORED["partNumber"], **body}
     return client.put("/api/admin/products/prod_priced/", body, format="json")
 
 
@@ -328,7 +338,7 @@ def test_put_without_costs_view_keeps_hidden_internal_fields():
 
     response = _admin_client("usr_keep").put(
         "/api/admin/products/prod_keep/",
-        {"title": "Pump rebuilt"},
+        {"title": "Pump rebuilt", "partNumber": "PM-2"},
         format="json",
     )
 
@@ -344,3 +354,143 @@ def test_cost_fields_are_hidden_from_the_storefront():
     from apps.catalog.services.admin import COST_FIELDS
 
     assert set(COST_FIELDS) <= set(RESTRICTED_PRODUCT_FIELDS)
+
+
+# --- slug ---------------------------------------------------------------------
+# Se genera al crear y no cambia al editar: las URLs públicas quedan estables.
+
+
+@pytest.mark.django_db
+def test_put_create_generates_the_slug_and_returns_it():
+    _insert_user("usr_slug", permissions=["products.edit", "pricing.edit"])
+    client = _admin_client("usr_slug")
+
+    response = client.put(
+        "/api/admin/products/prod_slug/",
+        {"title": "Bosch CP3 Injection Pump", "partNumber": "0445020150", "price": 10},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["product"]["slug"] == "bosch-cp3-injection-pump-0445020150"
+    assert Product.objects.get(pk="prod_slug").slug == "bosch-cp3-injection-pump-0445020150"
+
+
+@pytest.mark.django_db
+def test_put_edit_keeps_the_slug_and_ignores_a_slug_in_the_body():
+    _insert_user("usr_slug_edit", permissions=["products.edit", "pricing.edit"])
+    client = _admin_client("usr_slug_edit")
+    Product.objects.create(id="prod_s", data={"title": "Old", "partNumber": "X", "price": 5})
+
+    response = client.put(
+        "/api/admin/products/prod_s/",
+        {"title": "Renamed", "partNumber": "X", "price": 5, "slug": "hijack"},
+        format="json",
+    )
+
+    assert response.status_code == 200
+    assert response.json()["product"]["slug"] == "old-x"
+    product = Product.objects.get(pk="prod_s")
+    assert product.slug == "old-x"
+    assert "slug" not in product.data
+
+
+@pytest.mark.django_db
+def test_list_includes_the_slug():
+    _insert_user("usr_slug_list", permissions=["products.view"])
+    Product.objects.create(id="prod_l", data={"title": "Turbo", "partNumber": "T1"})
+
+    row = _admin_client("usr_slug_list").get("/api/admin/products/").json()[0]
+
+    assert row["slug"] == "turbo-t1"
+
+
+# --- validación de campos ----------------------------------------------------
+# Mismas reglas y mensajes que `src/lib/validators/admin-product.ts` del SPA.
+
+VALID_PRODUCT = {"title": "CP3 Pump", "partNumber": "0445020150", "price": 100}
+
+
+def _put_product(user_id, body):
+    _insert_user(user_id, permissions=["products.edit", "pricing.edit"])
+    return _admin_client(user_id).put("/api/admin/products/prod_v/", body, format="json")
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    ("overrides", "error", "field"),
+    [
+        ({"title": None}, "Title is required", "title"),
+        ({"title": "   "}, "Title is required", "title"),
+        ({"partNumber": ""}, "Part number is required", "part_number"),
+        ({"partNumber": " \t"}, "Part number is required", "part_number"),
+        ({"yearFrom": 98}, "Enter a 4-digit year", "year_from"),
+        ({"yearTo": "20a1"}, "Enter a 4-digit year", "year_to"),
+        ({"yearFrom": True}, "Enter a 4-digit year", "year_from"),
+        ({"yearFrom": 2004.5}, "Enter a 4-digit year", "year_from"),
+        ({"yearFrom": 1899}, "Enter a year between 1900 and {max_year}", "year_from"),
+        ({"yearTo": "{too_late}"}, "Enter a year between 1900 and {max_year}", "year_to"),
+        (
+            {"yearFrom": 2010, "yearTo": 2004},
+            "Year to must be the same as or after year from",
+            "year_to",
+        ),
+    ],
+)
+def test_put_rejects_invalid_product_fields(overrides, error, field):
+    max_year = store_today().year + 2
+    overrides = {
+        key: value.format(too_late=max_year + 1) if isinstance(value, str) else value
+        for key, value in overrides.items()
+    }
+    merged = {**VALID_PRODUCT, **overrides}
+    body = {key: value for key, value in merged.items() if value is not None}
+
+    response = _put_product("usr_put_invalid", body)
+
+    assert response.status_code == 400
+    assert response.json() == {"error": error.format(max_year=max_year), "field": field}
+    assert not Product.objects.filter(pk="prod_v").exists()
+
+
+@pytest.mark.django_db
+def test_put_accepts_years_as_numbers_or_digit_strings_and_stores_numbers():
+    max_year = store_today().year + 2
+
+    response = _put_product(
+        "usr_put_years", {**VALID_PRODUCT, "yearFrom": "1994", "yearTo": max_year}
+    )
+
+    assert response.status_code == 200, response.content
+    data = Product.objects.get(pk="prod_v").data
+    assert (data["yearFrom"], data["yearTo"]) == (1994, max_year)
+
+
+@pytest.mark.django_db
+def test_put_treats_empty_years_as_no_year_and_trims_title_and_part_number():
+    response = _put_product(
+        "usr_put_trim",
+        {
+            "title": "  CP3 Pump ",
+            "partNumber": " 0445020150 ",
+            "price": 100,
+            "yearFrom": "",
+            "yearTo": None,
+        },
+    )
+
+    assert response.status_code == 200, response.content
+    data = Product.objects.get(pk="prod_v").data
+    assert (data["title"], data["partNumber"]) == ("CP3 Pump", "0445020150")
+    assert "yearFrom" not in data and "yearTo" not in data
+
+
+@pytest.mark.django_db
+def test_put_allows_a_part_number_already_used_by_another_product():
+    # El catálogo de origen repite números de parte (un mismo núcleo para dos
+    # aplicaciones): no hay unicidad que exigir.
+    Product.objects.create(id="prod_other", data={"title": "Other", "partNumber": "0445020150"})
+
+    response = _put_product("usr_put_dup", VALID_PRODUCT)
+
+    assert response.status_code == 200

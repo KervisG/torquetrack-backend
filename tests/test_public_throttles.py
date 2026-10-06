@@ -134,6 +134,8 @@ UNTHROTTLED_PUBLIC_VIEWS = {
     # Lecturas baratas del catálogo que el SPA pide en cada pantalla.
     "apps.catalog.views.storefront.ProductPublicViewSet",
     "apps.catalog.views.storefront.ApplicationPublicViewSet",
+    # Sitemap para buscadores: una lectura del catálogo, sin proveedor.
+    "apps.catalog.views.sitemap.SitemapView",
     # Carrito: una fila por sesión, el SPA lo sincroniza en cada cambio.
     "apps.cart.views.storefront.CartView",
     # Sesión y logout: sin proveedor ni trabajo pesado.

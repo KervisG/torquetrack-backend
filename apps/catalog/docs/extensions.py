@@ -16,8 +16,28 @@ class ProductPublicViewSetExtension(OpenApiViewExtension):
 
     def view_replacement(self):
         @extend_schema_view(
-            list=extend_schema(operation_id="catalog_products_list", tags=["catalog"]),
-            retrieve=extend_schema(operation_id="catalog_product_retrieve", tags=["catalog"]),
+            list=extend_schema(
+                operation_id="catalog_products_list",
+                tags=["catalog"],
+                responses={200: OpenApiResponse(CatalogRecordSerializer(many=True))},
+            ),
+            retrieve=extend_schema(
+                operation_id="catalog_product_retrieve",
+                tags=["catalog"],
+                description=(
+                    "Active product by `id` or by `slug` (`/api/products/<id-or-slug>/`). "
+                    "The id is matched first so old id URLs keep working."
+                ),
+                parameters=[
+                    OpenApiParameter(
+                        "id", str, OpenApiParameter.PATH, description="Product id or slug."
+                    )
+                ],
+                responses={
+                    200: OpenApiResponse(CatalogRecordSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            ),
         )
         class ProductPublicViewSet(self.target_class):
             pass
@@ -59,6 +79,31 @@ class AdminProductListViewExtension(OpenApiViewExtension):
                 return super().get(request)
 
         return AdminProductListView
+
+
+class AdminApplicationListViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminApplicationListView"
+
+    def view_replacement(self):
+        class AdminApplicationListView(self.target_class):
+            @extend_schema(
+                operation_id="admin_applications_list",
+                tags=["admin: products"],
+                summary="List vehicle applications",
+                description=(
+                    "Requires `products.view`. Options for a product's compatible vehicles; "
+                    "`id` is the application code used in `applicationIds`."
+                ),
+                responses={
+                    200: OpenApiResponse(CatalogRecordSerializer(many=True)),
+                    401: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def get(self, request):
+                return super().get(request)
+
+        return AdminApplicationListView
 
 
 class AdminProductDetailViewExtension(OpenApiViewExtension):
@@ -104,3 +149,25 @@ class AdminProductDetailViewExtension(OpenApiViewExtension):
                 return super().delete(request, product_id)
 
         return AdminProductDetailView
+
+
+class SitemapViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.sitemap.SitemapView"
+
+    def view_replacement(self):
+        class SitemapView(self.target_class):
+            @extend_schema(
+                operation_id="catalog_sitemap",
+                tags=["catalog"],
+                summary="Storefront sitemap",
+                description=(
+                    "Public, no throttle. sitemaps.org XML with the storefront home, quote "
+                    "and policy pages and every active product as `{APP_URL}/product/<slug>` "
+                    "with `lastmod`. URLs point at the SPA (`APP_URL`), not at the API host."
+                ),
+                responses={(200, "application/xml"): OpenApiResponse(str)},
+            )
+            def get(self, request):
+                return super().get(request)
+
+        return SitemapView

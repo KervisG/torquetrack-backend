@@ -32,6 +32,9 @@ EXPECTED_ON_DELETE = {
     ("django_admin_log", "user_id"): "c",
     # `PROTECT` en el ORM: la base también rechaza borrar un Role en uso.
     ("users", "role_id"): "a",
+    # Una fila de fitment no tiene sentido sin su producto o su aplicación.
+    ("product_fitments", "product_id"): "c",
+    ("product_fitments", "application_id"): "c",
 }
 
 

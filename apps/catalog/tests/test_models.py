@@ -74,3 +74,66 @@ def test_reads_application_with_multi_model_shape():
     assert application.data["id"] == "ford-73-powerstroke-1994-1997"
     assert application.data["models"] == ["F-250", "F-350"]
     assert application.data["make"] == "Ford"
+
+
+# --- slug SEO -------------------------------------------------------------
+# El slug se genera una sola vez, al crear el producto, desde el título y el
+# número de parte: la URL pública (`/product/<slug>`) no cambia al editar.
+
+
+@pytest.mark.django_db
+def test_product_gets_a_slug_from_title_and_part_number_on_create():
+    product = Product.objects.create(
+        id="p1", data={"title": "Bosch CP3 Injection Pump", "partNumber": "0445020150"}
+    )
+
+    assert product.slug == "bosch-cp3-injection-pump-0445020150"
+    assert Product.objects.get(pk="p1").slug == "bosch-cp3-injection-pump-0445020150"
+
+
+@pytest.mark.django_db
+def test_product_slug_does_not_repeat_a_part_number_already_in_the_title():
+    product = Product.objects.create(
+        id="p1", data={"title": "Dorman 502-550 Pump", "partNumber": "502-550"}
+    )
+
+    assert product.slug == "dorman-502-550-pump"
+
+
+@pytest.mark.django_db
+def test_product_slug_is_unique_with_a_numeric_suffix():
+    data = {"title": "Lift Pump", "partNumber": "LP-1"}
+    first = Product.objects.create(id="p1", data=data)
+    second = Product.objects.create(id="p2", data=data)
+    third = Product.objects.create(id="p3", data=data)
+
+    assert [first.slug, second.slug, third.slug] == [
+        "lift-pump-lp-1",
+        "lift-pump-lp-1-2",
+        "lift-pump-lp-1-3",
+    ]
+
+
+@pytest.mark.django_db
+def test_product_slug_falls_back_to_the_id_without_title_or_part_number():
+    product = Product.objects.create(id="GM_65_Pump", data={})
+
+    assert product.slug == "gm_65_pump"
+
+
+@pytest.mark.django_db
+def test_product_slug_stays_stable_when_the_title_changes():
+    product = Product.objects.create(id="p1", data={"title": "Old Title", "partNumber": "X1"})
+
+    product.data = {"title": "Brand New Title", "partNumber": "X1"}
+    product.save()
+
+    assert Product.objects.get(pk="p1").slug == "old-title-x1"
+
+
+@pytest.mark.django_db
+def test_product_slug_is_bounded_in_length():
+    product = Product.objects.create(id="p1", data={"title": "Very Long Title " * 30})
+
+    assert len(product.slug) <= 120
+    assert not product.slug.endswith("-")

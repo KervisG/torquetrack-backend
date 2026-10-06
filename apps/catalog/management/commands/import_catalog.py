@@ -1,6 +1,9 @@
-"""`applications` se reemplaza completa porque su clave primaria la genera la
-base y no hay un identificador estable para cruzarla. Los productos que no
-están en la semilla (por ejemplo, los creados desde el panel) no se tocan."""
+"""Las aplicaciones se cruzan por `code` (el `id` de la semilla): se actualizan
+en su lugar y se borran solo las que la semilla ya no trae, así sus filas de
+`product_fitments` sobreviven a una reimportación. El fitment de los productos
+de la semilla se rearma desde sus `applicationIds` (o su texto). Los productos
+que no están en la semilla (por ejemplo, los creados desde el panel) no se
+tocan."""
 
 import json
 from pathlib import Path
@@ -10,7 +13,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.catalog.models import Application, Product
-from apps.catalog.services import product_price_error
+from apps.catalog.services import backfill_product_fitments, product_price_error
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
@@ -46,8 +49,18 @@ class Command(BaseCommand):
                     defaults={"data": product, "active": True, "updated_at": now},
                 )
 
-            Application.objects.all().delete()
-            Application.objects.bulk_create(Application(data=item) for item in applications)
+            codes = []
+            for item in applications:
+                code = str(item["id"])
+                codes.append(code)
+                Application.objects.update_or_create(code=code, defaults={"data": item})
+            Application.objects.exclude(code__in=codes).delete()
+
+            fitment = backfill_product_fitments(
+                Product.objects.filter(id__in=[str(product["id"]) for product in products]),
+                replace=True,
+            )
 
         self.stdout.write(f"Products imported: {len(products)}")
         self.stdout.write(f"Applications imported: {len(applications)}")
+        self.stdout.write(f"Fitment rows created: {fitment['links']}")

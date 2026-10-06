@@ -13,6 +13,15 @@ from apps.catalog.services.admin import (
     serialize_admin_product,
     upsert_admin_product,
 )
+from apps.catalog.services.fitment import (
+    APPLICATION_IDS_ERROR,
+    application_codes,
+    backfill_product_fitments,
+    list_applications,
+    resolve_application_codes,
+    serialize_application,
+    set_product_applications,
+)
 from apps.catalog.services.pricing import (
     MAX_STOREFRONT_QUANTITY,
     STOREFRONT_QUANTITY_ERROR,
@@ -29,6 +38,7 @@ from apps.catalog.services.pricing import (
 )
 
 __all__ = [
+    "APPLICATION_IDS_ERROR",
     "COST_FIELDS",
     "HIDDEN_WITHOUT_COSTS",
     "InvalidPrice",
@@ -41,13 +51,19 @@ __all__ = [
     "PricingError",
     "STOREFRONT_QUANTITY_ERROR",
     "UnpricedProducts",
+    "application_codes",
+    "backfill_product_fitments",
     "build_totals",
     "deactivate_admin_product",
     "list_admin_products",
+    "list_applications",
     "parse_quantity",
     "price_lines",
     "product_price_error",
+    "resolve_application_codes",
+    "serialize_application",
     "serialize_admin_product",
     "serialize_totals",
+    "set_product_applications",
     "upsert_admin_product",
 ]

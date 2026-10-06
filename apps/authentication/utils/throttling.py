@@ -20,7 +20,7 @@ def get_client_ip(request):
     """Sin un proxy de confianza `X-Forwarded-For` lo escribe el propio
     cliente, y rotarlo abriría una cuota nueva en cada request. Primero manda
     el header que `CLIENT_IP_HEADER` declara como confiable (el que inyecta
-    Cloudflare). Si no, `get_ident` de DRF con `NUM_PROXIES`: en 0 (el default)
+    un proxy de confianza). Si no, `get_ident` de DRF con `NUM_PROXIES`: en 0 (el default)
     es `REMOTE_ADDR`; en N toma la entrada que agregó el proxy más externo de
     los N, así lo que el cliente haya puesto antes no cuenta.
     """

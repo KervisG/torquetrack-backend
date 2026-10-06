@@ -1,7 +1,7 @@
 """IP del cliente con la que se agrupan los throttles (`get_client_ip`).
 
 Sin configurar nada manda `REMOTE_ADDR` y nunca se lee `X-Forwarded-For`.
-Detrás de un proxy que no es Cloudflare, `NUM_PROXIES` (el de DRF) dice
+Detrás de uno o más proxies, `NUM_PROXIES` (el de DRF) dice
 cuántos proxies de confianza agregan su entrada al final del header: se toma
 la que escribió el más externo y se ignora lo que el cliente haya puesto
 antes. `CLIENT_IP_HEADER` gana sobre todo lo anterior. Sin base de datos ni

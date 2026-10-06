@@ -100,7 +100,7 @@ SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)  # noqa: F4
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 
-# Detrás de un proxy que termina TLS (Cloudflare, el balanceador del hosting)
+# Detrás de un proxy que termina TLS (el balanceador de Render)
 # Django ve HTTP y, con el redirect activo, entraría en un bucle de 301. Solo
 # se activa si el proxy SIEMPRE escribe `X-Forwarded-Proto` y el origen no es
 # alcanzable sin pasar por él; si no, cualquiera podría mandar el header.
@@ -111,11 +111,11 @@ SECURE_PROXY_SSL_HEADER = (
 )
 
 # IP del cliente para los throttles: `base.py` lee `CLIENT_IP_HEADER`
-# (Cloudflare) y `NUM_PROXIES` (proxies de confianza que agregan su entrada a
-# `X-Forwarded-For`). Detrás del proxy del mismo dominio que sirve el SPA y la
-# API, sin ninguno de los dos todos los clientes comparten la IP del proxy y
-# un mismo tope; con `NUM_PROXIES` mayor que los proxies reales, cualquiera
-# elige su IP.
+# (un header que solo escribe un proxy de confianza) y `NUM_PROXIES`
+# (proxies de confianza que agregan su entrada a `X-Forwarded-For`). Detrás
+# del proxy del mismo dominio que sirve el SPA y la API, sin ninguno de los
+# dos todos los clientes comparten la IP del proxy y un mismo tope; con
+# `NUM_PROXIES` mayor que los proxies reales, cualquiera elige su IP.
 
 # Estáticos con hash en el nombre y comprimidos (gzip/brotli), servidos por
 # WhiteNoise con caché larga. Exige `collectstatic` antes de arrancar: el

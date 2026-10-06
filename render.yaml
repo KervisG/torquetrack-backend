@@ -1,0 +1,214 @@
+# Blueprint de Render (https://render.com/docs/blueprint-spec). Vive en este
+# repo porque aquí están la base, el broker, el worker y las migraciones; el
+# frontend (Nginx) se trae de su propio repo con `repo:`.
+#
+# Topología: proxy de Render (TLS) -> torquetrack-web (Nginx: SPA y proxy
+# de /api/, /django-admin/ y /static/) -> torquetrack-backend (gunicorn,
+# servicio privado). El worker corre Celery con beat embebido.
+#
+# Todo en la misma región: la red privada no cruza regiones.
+#
+# Las variables con `sync: false` se piden una sola vez, al crear el Blueprint;
+# en syncs posteriores Render las ignora y se cambian en el dashboard.
+
+services:
+  # --- Nginx: único servicio público ------------------------------------------
+  - type: web
+    name: torquetrack-web
+    runtime: docker
+    repo: https://github.com/KervisG/torquetrack-frontend
+    branch: main
+    region: virginia
+    plan: 0.5c-512mb
+    # Solo Nginx: si apuntara a /api/health/, una caída de la base reiniciaría
+    # también el proxy y el SPA.
+    healthCheckPath: /nginx-health
+    envVars:
+      # El Dockerfile completa el host con el dominio `search` del contenedor
+      # (18-backend-upstream.envsh). PORT lo define Render (10000).
+      - key: BACKEND_UPSTREAM
+        fromService:
+          type: pserv
+          name: torquetrack-backend
+          property: hostport
+
+  # --- Django (gunicorn): solo por la red privada -----------------------------
+  - type: pserv
+    name: torquetrack-backend
+    runtime: docker
+    region: virginia
+    plan: 0.5c-512mb
+    # El pre-deploy corre en una instancia aparte antes de cada deploy (solo en
+    # planes pagos). Los servicios privados solo tienen health check TCP: no
+    # admiten `healthCheckPath`, así que /api/health/ no se configura aquí.
+    preDeployCommand: python manage.py migrate --noinput
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.prod
+      # Mismo default que el Dockerfile; explícito para que `hostport` sea
+      # siempre :8000.
+      - key: PORT
+        value: "8000"
+      # 512 MB: dos workers dejan margen a WeasyPrint (PDF de cotización).
+      - key: WEB_CONCURRENCY
+        value: "2"
+      # `generateValue` da 44 caracteres y `prod.py` exige 50 o más:
+      # generarla con `python -c "import secrets; print(secrets.token_urlsafe(64))"`.
+      - key: DJANGO_SECRET_KEY
+        sync: false
+      # Host que Nginx reenvía (`Host $host`): el de onrender.com y el dominio
+      # propio, separados por comas.
+      - key: DJANGO_ALLOWED_HOSTS
+        sync: false
+      # https://<dominio público>. De aquí sale CSRF_TRUSTED_ORIGINS.
+      - key: APP_URL
+        sync: false
+      # Nginx reenvía el X-Forwarded-Proto de Render y el backend no es público.
+      - key: USE_X_FORWARDED_PROTO
+        value: "true"
+      # Proxy de Render + Nginx. Confirmar con el X-Forwarded-For del log de
+      # acceso de Nginx: un valor mayor que el real deja elegir la IP.
+      - key: NUM_PROXIES
+        value: "2"
+      - key: CLIENT_IP_HEADER
+        value: ""
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: torquetrack-redis
+          property: connectionString
+      # Sin CACHE_URL: la cache (throttles) queda en la tabla de Postgres que
+      # crea la migración 0002_cache_table, y Key Value queda solo como broker.
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: torquetrack-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: torquetrack-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: torquetrack-db
+          property: password
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: torquetrack-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: torquetrack-db
+          property: port
+      - key: STRIPE_SECRET_KEY
+        sync: false
+      - key: STRIPE_WEBHOOK_SECRET
+        sync: false
+      - key: TAXJAR_API_KEY
+        sync: false
+      - key: EASYPOST_API_KEY
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: FROM_EMAIL
+        sync: false
+      - key: SALES_EMAIL
+        sync: false
+      - key: REPLY_TO_EMAIL
+        sync: false
+      - key: ERROR_ALERT_EMAILS
+        sync: false
+
+  # --- Celery: worker con beat embebido --------------------------------------
+  # Un solo proceso de beat es obligatorio (dos duplican cada trabajo): por eso
+  # beat va dentro del único worker y este servicio no se escala a más de una
+  # instancia. Separar beat en otro worker costaría una instancia más para dos
+  # trabajos (expire_quotes cada hora, purge_carts una vez al día).
+  - type: worker
+    name: torquetrack-worker
+    runtime: docker
+    region: virginia
+    plan: 0.5c-512mb
+    numInstances: 1
+    # `-s` en /tmp porque /app es de root. `--concurrency` fijo: sin él,
+    # Celery crea un proceso por CPU del host, no del plan.
+    dockerCommand: celery -A config worker -B -l info -s /tmp/celerybeat-schedule --concurrency 2
+    envVars:
+      - key: DJANGO_SETTINGS_MODULE
+        value: config.settings.prod
+      # `prod.py` exige DJANGO_SECRET_KEY y APP_URL al importarse; se toman del
+      # backend para cargarlos una sola vez.
+      - key: DJANGO_SECRET_KEY
+        fromService:
+          type: pserv
+          name: torquetrack-backend
+          envVarKey: DJANGO_SECRET_KEY
+      - key: APP_URL
+        fromService:
+          type: pserv
+          name: torquetrack-backend
+          envVarKey: APP_URL
+      - key: CELERY_BROKER_URL
+        fromService:
+          type: keyvalue
+          name: torquetrack-redis
+          property: connectionString
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: torquetrack-db
+          property: database
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: torquetrack-db
+          property: user
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: torquetrack-db
+          property: password
+      - key: POSTGRES_HOST
+        fromDatabase:
+          name: torquetrack-db
+          property: host
+      - key: POSTGRES_PORT
+        fromDatabase:
+          name: torquetrack-db
+          property: port
+      # Alertas de error por correo (config/error_alerts.py).
+      - key: RESEND_API_KEY
+        fromService:
+          type: pserv
+          name: torquetrack-backend
+          envVarKey: RESEND_API_KEY
+      - key: FROM_EMAIL
+        fromService:
+          type: pserv
+          name: torquetrack-backend
+          envVarKey: FROM_EMAIL
+      - key: ERROR_ALERT_EMAILS
+        fromService:
+          type: pserv
+          name: torquetrack-backend
+          envVarKey: ERROR_ALERT_EMAILS
+
+  # --- Broker de Celery --------------------------------------------------------
+  - type: keyvalue
+    name: torquetrack-redis
+    region: virginia
+    # El plan free no persiste: un reinicio perdería las tareas encoladas.
+    plan: 256mb
+    # Broker: con eviction Redis podría borrar mensajes encolados.
+    maxmemoryPolicy: noeviction
+    # Lista vacía: sin acceso desde internet, solo por la red privada.
+    ipAllowList: []
+
+databases:
+  - name: torquetrack-db
+    region: virginia
+    # El plan free expira a los 30 días.
+    plan: 0.1c-256mb
+    databaseName: torquetrack
+    user: torquetrack
+    # La misma versión que docker-compose.
+    postgresMajorVersion: "16"
+    # Sin acceso desde internet; para un `psql` externo, agregar la IP aquí o
+    # en el dashboard.
+    ipAllowList: []

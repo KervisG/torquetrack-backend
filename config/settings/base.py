@@ -246,8 +246,8 @@ SPECTACULAR_SETTINGS = {
 }
 
 # Key de `request.META` con la IP real del cliente. Solo es confiable si el
-# origen acepta tráfico exclusivamente desde Cloudflare; si no, cualquiera
-# puede falsificar el header. Vacío usa `REMOTE_ADDR`.
+# origen acepta tráfico exclusivamente del proxy que escribe el header; si no,
+# cualquiera puede falsificarlo. Vacío usa `NUM_PROXIES` o `REMOTE_ADDR`.
 CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
 
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")

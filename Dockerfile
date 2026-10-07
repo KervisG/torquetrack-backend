@@ -69,4 +69,7 @@ EXPOSE 8000
 #
 # Timeout de 60 s: el PDF de la cotización (WeasyPrint) se renderiza dentro del
 # request. `WEB_CONCURRENCY` ajusta los workers según la RAM del hosting.
-CMD ["sh", "-c", "exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]
+#
+# `migrate` corre en cada arranque: el plan gratuito de Render no tiene
+# pre-deploy ni shell. Si no hay migraciones pendientes, no hace nada.
+CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]

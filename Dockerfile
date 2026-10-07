@@ -72,4 +72,6 @@ EXPOSE 8000
 #
 # `migrate` corre en cada arranque: el plan gratuito de Render no tiene
 # pre-deploy ni shell. Si no hay migraciones pendientes, no hace nada.
-CMD ["sh", "-c", "python manage.py migrate --noinput && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]
+# `import_catalog --if-empty` carga la semilla solo si no hay productos; si
+# falla (por ejemplo, un precio en 0) se registra y el servidor arranca igual.
+CMD ["sh", "-c", "python manage.py migrate --noinput && (python manage.py import_catalog --if-empty || echo 'import_catalog failed: catalog not loaded') && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]

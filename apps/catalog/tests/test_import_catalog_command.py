@@ -90,3 +90,97 @@ def test_import_aborts_without_writing_when_a_product_has_no_price(tmp_path):
         call_command("import_catalog", products=products, stdout=StringIO())
 
     assert not Product.objects.exists()
+
+
+def _write_products(tmp_path, products):
+    path = tmp_path / "products.json"
+    path.write_text(json.dumps(products), encoding="utf-8")
+    return path
+
+
+@pytest.mark.django_db
+def test_import_lists_every_unpriced_product_with_the_count(tmp_path):
+    products = _write_products(
+        tmp_path,
+        [{"id": "zero", "price": 0}, {"id": "missing"}, {"id": "priced", "price": 5}],
+    )
+
+    with pytest.raises(CommandError) as error:
+        call_command("import_catalog", products=products, stdout=StringIO())
+
+    message = str(error.value)
+    assert message.startswith("2 products without a valid price")
+    assert "zero" in message and "missing" in message
+    assert "priced\n" not in message
+
+
+@pytest.mark.django_db
+def test_dry_run_validates_and_reports_without_writing(tmp_path):
+    products = _write_products(
+        tmp_path,
+        [{"id": "on", "price": 10}, {"id": "off", "price": 12, "active": False}],
+    )
+    out = StringIO()
+
+    call_command("import_catalog", products=products, dry_run=True, stdout=out)
+
+    assert not Product.objects.exists()
+    assert not Application.objects.exists()
+    output = out.getvalue()
+    assert "Products to import: 2 (1 active, 1 inactive)" in output
+    assert f"Applications to import: {len(_load('applications.json'))}" in output
+    assert "Dry run: nothing was written." in output
+
+
+@pytest.mark.django_db
+def test_dry_run_still_rejects_unpriced_products(tmp_path):
+    products = _write_products(tmp_path, [{"id": "unpriced", "price": 0}])
+
+    with pytest.raises(CommandError, match="unpriced"):
+        call_command("import_catalog", products=products, dry_run=True, stdout=StringIO())
+
+
+@pytest.mark.django_db
+def test_import_honors_active_flag_without_storing_it_in_data(tmp_path):
+    # La exportación del panel trae `active` por producto: la columna lo toma y
+    # `data` queda igual que la semilla, sin la clave.
+    products = _write_products(
+        tmp_path,
+        [{"id": "on", "price": 10}, {"id": "off", "price": 12, "active": False}],
+    )
+
+    call_command("import_catalog", products=products, stdout=StringIO())
+
+    assert Product.objects.get(pk="on").active is True
+    inactive = Product.objects.get(pk="off")
+    assert inactive.active is False
+    assert inactive.data == {"id": "off", "price": 12}
+
+
+@pytest.mark.django_db
+def test_import_rejects_a_non_boolean_active_flag(tmp_path):
+    products = _write_products(tmp_path, [{"id": "weird", "price": 10, "active": "no"}])
+
+    with pytest.raises(CommandError, match="weird"):
+        call_command("import_catalog", products=products, stdout=StringIO())
+
+    assert not Product.objects.exists()
+
+
+@pytest.mark.django_db
+def test_if_empty_loads_the_seed_into_an_empty_database():
+    out = StringIO()
+    call_command("import_catalog", if_empty=True, stdout=out)
+
+    assert Product.objects.count() == len(_load("products.json"))
+
+
+@pytest.mark.django_db
+def test_if_empty_skips_when_products_already_exist():
+    Product.objects.create(id="panel-product", data={"title": "Edited"}, active=True)
+    out = StringIO()
+
+    call_command("import_catalog", if_empty=True, stdout=out)
+
+    assert Product.objects.count() == 1
+    assert "skipped" in out.getvalue()

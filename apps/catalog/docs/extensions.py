@@ -81,6 +81,38 @@ class AdminProductListViewExtension(OpenApiViewExtension):
         return AdminProductListView
 
 
+class AdminProductExportViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminProductExportView"
+
+    def view_replacement(self):
+        class AdminProductExportView(self.target_class):
+            @extend_schema(
+                operation_id="admin_products_export",
+                tags=["admin: products"],
+                summary="Export the catalog as a ZIP",
+                description=(
+                    "Requires `products.view`. ZIP attachment "
+                    "(`torquetrack-catalog-<YYYY-MM-DD>.zip`) with `products.json` (active and "
+                    "inactive, with `active` and `applicationIds`), `applications.json`, "
+                    "`image/<file>` for every local `/static/image/...` image and "
+                    "`missing-images.txt` when a local image is not found. Both JSON files load "
+                    "back with `import_catalog --products ... --applications ...`. Cost and "
+                    "supplier fields are included only with `costs.view`."
+                ),
+                responses={
+                    (200, "application/zip"): OpenApiResponse(
+                        bytes, description="Catalog ZIP attachment."
+                    ),
+                    401: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def get(self, request):
+                return super().get(request)
+
+        return AdminProductExportView
+
+
 class AdminApplicationListViewExtension(OpenApiViewExtension):
     target_class = "apps.catalog.views.admin.AdminApplicationListView"
 

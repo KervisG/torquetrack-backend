@@ -1,7 +1,7 @@
 """API pública de los services del catálogo. El storefront lee con los
 `ReadOnlyModelViewSet` de `views/storefront.py`; las reglas propias son las
 del panel (`admin.py`) y el precio de líneas y totales (`pricing.py`), que
-usan `checkout` y `quotes`."""
+usan `checkout` y `quotes`. `export.py` arma el ZIP del catálogo del panel."""
 from apps.catalog.services.admin import (
     COST_FIELDS,
     HIDDEN_WITHOUT_COSTS,
@@ -13,6 +13,7 @@ from apps.catalog.services.admin import (
     serialize_admin_product,
     upsert_admin_product,
 )
+from apps.catalog.services.export import build_catalog_export, export_filename
 from apps.catalog.services.fitment import (
     APPLICATION_IDS_ERROR,
     application_codes,
@@ -53,8 +54,10 @@ __all__ = [
     "UnpricedProducts",
     "application_codes",
     "backfill_product_fitments",
+    "build_catalog_export",
     "build_totals",
     "deactivate_admin_product",
+    "export_filename",
     "list_admin_products",
     "list_applications",
     "parse_quantity",

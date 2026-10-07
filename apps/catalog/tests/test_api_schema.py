@@ -37,3 +37,10 @@ def test_sitemap_is_documented_as_xml(schema):
 
     assert op["operationId"] == "catalog_sitemap"
     assert "application/xml" in op["responses"]["200"]["content"]
+
+
+def test_admin_product_export_is_documented_as_zip(schema):
+    op = schema["paths"]["/api/admin/products/export/"]["get"]
+
+    assert op["operationId"] == "admin_products_export"
+    assert "application/zip" in op["responses"]["200"]["content"]

@@ -125,6 +125,10 @@ STORE_TIME_ZONE = env("STORE_TIME_ZONE", default="") or "America/New_York"
 STATIC_URL = "static/"
 # `collectstatic` copia acá los estáticos al construir la imagen.
 STATIC_ROOT = BASE_DIR / "staticfiles"
+# Fuente de los estáticos propios: las imágenes de producto viven en el repo
+# (`static/image/`) porque Render no tiene disco persistente; `data.image` las
+# referencia como `/static/image/<archivo>`.
+STATICFILES_DIRS = [BASE_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 

@@ -8,7 +8,10 @@ tocan.
 `active` es opcional por producto: la semilla no lo trae (todo queda activo) y
 la exportación del panel (`GET /api/admin/products/export/`) sí, para que un
 producto desactivado siga desactivado al cargarlo en otro servidor. Va a la
-columna y nunca a `data`."""
+columna y nunca a `data`.
+
+`--only-missing` (el que corre el contenedor al arrancar) solo inserta lo que
+falta: no actualiza, no borra aplicaciones ni rearma el fitment existente."""
 
 import json
 from pathlib import Path
@@ -61,21 +64,31 @@ class Command(BaseCommand):
             action="store_true",
             help="Validate the files and print the summary without writing.",
         )
-        parser.add_argument(
+        mode = parser.add_mutually_exclusive_group()
+        mode.add_argument(
             "--if-empty",
             action="store_true",
-            help="Import only when there are no products yet (used on container start).",
+            help="Import only when there are no products yet.",
+        )
+        mode.add_argument(
+            "--only-missing",
+            action="store_true",
+            help=(
+                "Insert only the products and applications that do not exist yet "
+                "(used on container start)."
+            ),
         )
 
     def handle(self, *args, **options):
-        # El contenedor lo corre en cada arranque: solo carga la primera vez,
-        # para no pisar los cambios hechos después desde el panel.
         if options["if_empty"] and Product.objects.exists():
             self.stdout.write("Catalog already loaded: import skipped.")
             return
 
         products = _read_json(options["products"])
         applications = _read_json(options["applications"])
+        if options["only_missing"]:
+            self._import_missing(products, applications, dry_run=options["dry_run"])
+            return
 
         _validate(products)
         inactive = sum(1 for product in products if product.get("active") is False)
@@ -117,4 +130,50 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Products imported: {len(products)}")
         self.stdout.write(f"Applications imported: {len(applications)}")
+        self.stdout.write(f"Fitment rows created: {fitment['links']}")
+
+    def _import_missing(self, products, applications, *, dry_run):
+        """El contenedor lo corre en cada arranque: agrega solo lo que falta y
+        nunca actualiza ni borra, para no pisar lo editado o desactivado desde
+        el panel. Así un archivo que crece entra solo en el siguiente deploy."""
+        existing_products = set(Product.objects.values_list("id", flat=True))
+        existing_codes = set(Application.objects.values_list("code", flat=True))
+        new_products = [p for p in products if str(p["id"]) not in existing_products]
+        new_applications = [a for a in applications if str(a["id"]) not in existing_codes]
+
+        _validate(new_products)
+        self.stdout.write(
+            f"Missing products: {len(new_products)} "
+            f"(skipped {len(products) - len(new_products)} existing)"
+        )
+        self.stdout.write(f"Missing applications: {len(new_applications)}")
+        if dry_run:
+            self.stdout.write("Dry run: nothing was written.")
+            return
+        if not new_products and not new_applications:
+            self.stdout.write("Catalog up to date: nothing to import.")
+            return
+
+        # Las aplicaciones van primero: el fitment de los productos nuevos las
+        # referencia por código.
+        with transaction.atomic():
+            now = timezone.now()
+            Application.objects.bulk_create(
+                Application(code=str(item["id"]), data=item) for item in new_applications
+            )
+            for product in new_products:
+                data = {key: value for key, value in product.items() if key != "active"}
+                Product.objects.create(
+                    id=str(product["id"]),
+                    data=data,
+                    active=product.get("active", True),
+                    updated_at=now,
+                )
+            fitment = backfill_product_fitments(
+                Product.objects.filter(id__in=[str(p["id"]) for p in new_products]),
+                replace=True,
+            )
+
+        self.stdout.write(f"Products imported: {len(new_products)}")
+        self.stdout.write(f"Applications imported: {len(new_applications)}")
         self.stdout.write(f"Fitment rows created: {fitment['links']}")

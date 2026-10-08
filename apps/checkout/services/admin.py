@@ -29,7 +29,7 @@ from apps.checkout.services.refunds import order_refund_summary, serialize_refun
 from apps.common.business_day import store_today_bounds
 from apps.common.emails import branded_email_html
 from apps.common.errors import error_payload
-from apps.common.numbers import money, money_decimal
+from apps.common.numbers import ZERO, money, money_decimal
 from apps.integrations.email import resend
 from apps.integrations.exceptions import ProviderError
 
@@ -110,6 +110,51 @@ def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict
 ORDER_DATE_FILTERS = ("today",)
 INVALID_ORDER_DATE_FILTER = "date must be today"
 
+# El checkout de la tienda guarda transportista y servicio de EasyPost. Un
+# pedido convertido desde una cotización solo trae el monto (`shipping` como
+# número) y en el panel el método sale vacío. Estas tres opciones las elige
+# el staff; Regular Ground no se cobra.
+SHIPPING_METHOD_LABELS = {
+    "NEXT_DAY_AIR": "Next Day Air",
+    "SECOND_DAY_AIR": "2nd Day Air",
+    "GROUND": "Regular Ground (Free)",
+}
+FREE_SHIPPING_METHOD = "GROUND"
+INVALID_SHIPPING_METHOD = "Invalid shipping method"
+
+
+def _with_shipping_method(data: dict, method: str, *, charged: bool) -> dict:
+    """Guarda el método dentro de `shipping`. En un pedido sin cobrar, Regular
+    Ground deja el envío en 0 y descuenta esa diferencia del total. Un pedido
+    ya cobrado conserva el monto: el pago no se reescribe desde aquí."""
+    shipping = data.get("shipping")
+    previous = shipping if isinstance(shipping, dict) else {}
+    if isinstance(shipping, dict):
+        rate = money_decimal(shipping.get("rate"))
+    else:
+        rate = money_decimal(shipping)
+    if method == FREE_SHIPPING_METHOD and not charged:
+        rate = ZERO
+    updated = {
+        **data,
+        "shipping": {
+            **previous,
+            "method": method,
+            "service": SHIPPING_METHOD_LABELS[method],
+            "rate": money(rate),
+        },
+    }
+    totals = data.get("totals")
+    if isinstance(totals, dict) and method == FREE_SHIPPING_METHOD and not charged:
+        previous_shipping = money_decimal(totals.get("shipping"))
+        next_totals = {**totals, "shipping": money(rate)}
+        if "total" in totals:
+            next_totals["total"] = money(
+                money_decimal(totals.get("total")) - previous_shipping + rate
+            )
+        updated["totals"] = next_totals
+    return updated
+
 
 def list_admin_orders(
     can_view_transaction_ids: bool = False, date: str | None = None
@@ -160,8 +205,8 @@ def _workflow_patch(workflow: dict, actor_email: str) -> dict:
 
 
 def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
-    """`status` y `workflow` se validan juntos y se aplican en la misma
-    transacción: o cambian los dos o ninguno."""
+    """`status`, `workflow` y `shippingMethod` se validan juntos y se aplican
+    en la misma transacción: o cambian todos o ninguno."""
     status = str(payload["status"]).upper() if payload.get("status") else None
     if status is not None and status not in OrderStatus.values:
         return {"error": "Invalid order status", "status": 400}
@@ -174,7 +219,14 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
             return result
         patch = result["patch"]
 
-    if status is None and patch is None:
+    method = None
+    if "shippingMethod" in payload:
+        raw_method = payload.get("shippingMethod")
+        if not isinstance(raw_method, str) or raw_method not in SHIPPING_METHOD_LABELS:
+            return {"error": INVALID_SHIPPING_METHOD, "field": "shippingMethod", "status": 400}
+        method = raw_method
+
+    if status is None and patch is None and method is None:
         return {"error": "No supported changes supplied", "status": 400}
 
     with transaction.atomic():
@@ -194,8 +246,15 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
         if status is not None:
             order.status = status
             fields.append("status")
-        if patch is not None:
-            order.data = {**(order.data or {}), **patch}
+        if patch is not None or method is not None:
+            data = {**(order.data or {}), **(patch or {})}
+            if method is not None:
+                data = _with_shipping_method(
+                    data,
+                    method,
+                    charged=order.payment_status in CHARGED_PAYMENT_STATUSES,
+                )
+            order.data = data
             fields.append("data")
         order.updated_at = timezone.now()
         order.save(update_fields=fields)
@@ -221,6 +280,15 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
             data={"number": order.number, **patch},
         )
         response.update(patch)
+    if method is not None:
+        record_activity(
+            actor=actor_email,
+            action="ORDER_SHIPPING_METHOD_CHANGED",
+            entity_type="ORDER",
+            entity_id=order.pk,
+            data={"number": order.number, "shippingMethod": method},
+        )
+        response["shippingMethod"] = method
     return response
 
 

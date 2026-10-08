@@ -427,6 +427,94 @@ def test_patch_neither_status_nor_workflow_returns_400():
     assert response.status_code == 400
 
 
+QUOTE_TOTALS = {"subtotal": 100.0, "core": 0.0, "shipping": 25.0, "tax": 7.0, "total": 132.0}
+
+
+@pytest.mark.django_db
+def test_patch_shipping_method_requires_orders_status():
+    _insert_user("usr_ship_perm", permissions=["orders.view"])
+    _make_order(data={"shipping": 25, "totals": dict(QUOTE_TOTALS)})
+
+    response = _admin_client("usr_ship_perm").patch(
+        "/api/admin/orders/ord_1/", {"shippingMethod": "GROUND"}, format="json"
+    )
+
+    assert response.status_code == 403
+    assert Order.objects.get(pk="ord_1").data["shipping"] == 25
+
+
+@pytest.mark.django_db
+def test_patch_shipping_method_rejects_an_unknown_choice():
+    _insert_user("usr_ship_bad", permissions=["orders.status"])
+    _make_order(data={"shipping": 25})
+
+    response = _admin_client("usr_ship_bad").patch(
+        "/api/admin/orders/ord_1/", {"shippingMethod": "OVERNIGHT"}, format="json"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["error"] == "Invalid shipping method"
+    assert Order.objects.get(pk="ord_1").data["shipping"] == 25
+
+
+@pytest.mark.django_db
+def test_patch_next_day_air_keeps_the_quoted_shipping_amount():
+    _insert_user("usr_ship_air", permissions=["orders.status"])
+    _make_order(data={"shipping": 25, "totals": dict(QUOTE_TOTALS)})
+
+    response = _admin_client("usr_ship_air").patch(
+        "/api/admin/orders/ord_1/", {"shippingMethod": "NEXT_DAY_AIR"}, format="json"
+    )
+
+    assert response.status_code == 200
+    stored = Order.objects.get(pk="ord_1").data
+    assert stored["shipping"]["method"] == "NEXT_DAY_AIR"
+    assert stored["shipping"]["service"] == "Next Day Air"
+    assert stored["shipping"]["rate"] == 25
+    assert stored["totals"] == QUOTE_TOTALS
+    assert activity_count(action="ORDER_SHIPPING_METHOD_CHANGED", entity_id="ord_1") == 1
+
+
+@pytest.mark.django_db
+def test_patch_regular_ground_is_free_on_an_unpaid_order():
+    _insert_user("usr_ship_ground", permissions=["orders.status"])
+    _make_order(data={"shipping": 25, "totals": dict(QUOTE_TOTALS)})
+
+    response = _admin_client("usr_ship_ground").patch(
+        "/api/admin/orders/ord_1/", {"shippingMethod": "GROUND"}, format="json"
+    )
+
+    assert response.status_code == 200
+    stored = Order.objects.get(pk="ord_1").data
+    assert stored["shipping"]["service"] == "Regular Ground (Free)"
+    assert stored["shipping"]["rate"] == 0
+    assert stored["totals"]["shipping"] == 0
+    assert stored["totals"]["total"] == 107
+
+
+@pytest.mark.django_db
+def test_patch_regular_ground_keeps_the_amount_already_charged():
+    _insert_user("usr_ship_paid", permissions=["orders.status"])
+    _make_order(
+        payment_status="PAID",
+        data={
+            "shipping": {"carrier": "UPS", "service": "Ground", "rate": 18.5},
+            "totals": dict(QUOTE_TOTALS),
+        },
+    )
+
+    response = _admin_client("usr_ship_paid").patch(
+        "/api/admin/orders/ord_1/", {"shippingMethod": "GROUND"}, format="json"
+    )
+
+    assert response.status_code == 200
+    stored = Order.objects.get(pk="ord_1").data
+    assert stored["shipping"]["method"] == "GROUND"
+    assert stored["shipping"]["carrier"] == "UPS"
+    assert stored["shipping"]["rate"] == 18.5
+    assert stored["totals"] == QUOTE_TOTALS
+
+
 # --- DELETE ---------------------------------------------------------------
 
 

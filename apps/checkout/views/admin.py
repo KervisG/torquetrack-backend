@@ -64,6 +64,9 @@ class AdminOrderDetailView(APIView):
             ):
                 return Response({"error": "Forbidden"}, status=403)
 
+        if "shippingMethod" in body and not has_role_permission(user, "orders.status"):
+            return Response({"error": "Forbidden"}, status=403)
+
         result = patch_admin_order(order_id, body, user.email)
         return service_response(result)
 

@@ -200,7 +200,8 @@ class AdminOrderDetailViewExtension(OpenApiViewExtension):
                 summary="Update an order",
                 description=(
                     "Staff session required. `status` needs `orders.status`, except "
-                    "`CANCELLED`, which needs `orders.cancel`. An illegal status jump is 409."
+                    "`CANCELLED`, which needs `orders.cancel`. `shippingMethod` "
+                    "needs `orders.status`. An illegal status jump is 409."
                 ),
                 parameters=[OpenApiParameter("order_id", str, OpenApiParameter.PATH)],
                 request=OrderPatchSerializer,

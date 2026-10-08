@@ -47,6 +47,14 @@ class OrderSummarySerializer(serializers.Serializer):
 class OrderPatchSerializer(serializers.Serializer):
     status = serializers.CharField(required=False)
     notes = serializers.CharField(required=False, allow_blank=True)
+    shippingMethod = serializers.ChoiceField(
+        choices=["NEXT_DAY_AIR", "SECOND_DAY_AIR", "GROUND"],
+        required=False,
+        help_text=(
+            "Next Day Air, 2nd Day Air, or Regular Ground (Free). "
+            "Needs orders.status. Ground sets shipping to 0 on an unpaid order."
+        ),
+    )
 
 
 class CheckoutItemSerializer(serializers.Serializer):

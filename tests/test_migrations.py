@@ -50,7 +50,7 @@ def test_cache_table_migration_creates_the_database_cache_table():
     # El test runner ya corre `createcachetable` al crear la base de test, así
     # que se borra la tabla y se vuelve a correr la migración para probar que
     # `migrate` sola la crea en un deploy.
-    migration = import_module("apps.authentication.migrations.0002_cache_table")
+    migration = import_module("apps.authentication.migrations.0003_cache_table")
     with connection.schema_editor() as schema_editor:
         schema_editor.execute("DROP TABLE IF EXISTS django_cache")
         assert "django_cache" not in _public_tables()

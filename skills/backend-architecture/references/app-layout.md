@@ -117,7 +117,7 @@ apps/authorization/             # quién puede qué; solo la consume el panel
 ├── urls.py
 ├── views.py                    # /api/admin/users/**, /api/admin/roles/
 ├── models/
-│   ├── __init__.py             # reexporta Role, ADMIN_ROLE_SLUG, EMPLOYEE_ROLE_SLUG
+│   ├── __init__.py             # reexporta Role, ADMIN_ROLE_SLUG
 │   └── role.py
 ├── permissions/
 │   ├── __init__.py             # reexporta con __all__: las apps importan de apps.authorization.permissions
@@ -220,7 +220,7 @@ La autenticación es `SessionAuthentication` de DRF, que drf-spectacular ya desc
 
 `to_number` trata `None`, `False`, `""`, `0` y lo no numérico como "sin dato" y devuelve `default`. Un `"0"` escrito como texto sí es `0.0`; quien necesita un mínimo lo aplica (`max(1, int(to_number(qty, 1)))`, `to_number(qty, 1.0) or 1.0`).
 
-`DocumentSequence` (tabla `document_sequences`) pasó de `checkout` a `numbering` con migraciones solo de estado (`checkout/0004_move_document_sequence` y `numbering/0001_initial` con `SeparateDatabaseAndState`): la tabla y sus filas no se tocan.
+`DocumentSequence` (tabla `document_sequences`) pasó de `checkout` a `numbering`.
 
 ## Precio de líneas y totales: `apps/catalog/services/pricing.py`
 
@@ -295,24 +295,7 @@ El dominio traduce: `apps/tax/services/sales_tax.py` cae a `FALLBACK_TAX_RATES` 
 
 El ORM es dueño de todas las tablas. Para una tabla nueva o un cambio de columna: editar el modelo, correr `python manage.py makemigrations <app>` y revisar el archivo generado. Un default que también tiene que valer para un `INSERT` fuera del ORM va con `db_default` (por ejemplo `db_default=Now()` junto a `default=timezone.now`).
 
-Las migraciones `0003_managed_*` (y `cart/0002_managed_cart`) convirtieron las antiguas tablas creadas a mano con SQL. El proyecto no estaba en producción, así que cada una descarta la tabla heredada y la crea desde el modelo:
-
-```python
-operations = [
-    migrations.SeparateDatabaseAndState(
-        state_operations=[migrations.DeleteModel(name="Cart")],
-        database_operations=[
-            migrations.RunSQL(
-                "DROP TABLE IF EXISTS carts CASCADE",
-                reverse_sql=migrations.RunSQL.noop,
-            ),
-        ],
-    ),
-    migrations.CreateModel(name="Cart", fields=[...], options={"db_table": "carts"}),
-]
-```
-
-El `DeleteModel` de estado no borra el `ContentType`, así que los permisos del modelo y los Roles que los tienen sobreviven. No repetir este patrón en cambios nuevos: con datos reales, un cambio de esquema es un `AddField` o `AlterField` normal.
+Las migraciones se reiniciaron: cada app parte de `0001_initial` generado desde los modelos. A mano quedan solo `authentication/0003_cache_table` (tabla del cache), `authorization/0002_seed_roles` (Roles de partida) y una `*_db_on_delete` por app (el `ON DELETE` en Postgres). Una base creada antes del reinicio se marca como migrada insertando estas migraciones en `django_migrations` (sin `--fake`, que rechaza el historial anterior); su esquema es el mismo.
 
 `tests/test_migrations.py` prueba que no queda ningún modelo sin administrar, que `migrate` crea cada tabla de dominio y que `makemigrations --check` no detecta cambios.
 
@@ -348,7 +331,7 @@ class AdminProductDetailView(APIView):
 
 ## Reembolsos de Stripe: `apps/checkout/services/refunds.py`
 
-`Refund` (`models/refund.py`, tabla `refunds`) pertenece a un `Payment` (FK `CASCADE`, llevada a Postgres por `checkout/0007_refund_db_on_delete`): `amount` (`Decimal`, 2 decimales), `status` (`RefundStatus`: `PENDING`, `SUCCEEDED`, `FAILED`, `CANCELED`), `reason`, `stripe_refund_id` (único, vacío hasta que Stripe responde), `created_by` (email del staff o `"stripe"`) y `data`. `tests/test_stripe_payment_boundary.py` falla si alguien fuera de `services/refunds.py` llama a `create_refund` o hace `Refund.objects.create`.
+`Refund` (`models/refund.py`, tabla `refunds`) pertenece a un `Payment` (FK `CASCADE`, llevada a Postgres por `checkout/0002_db_on_delete`): `amount` (`Decimal`, 2 decimales), `status` (`RefundStatus`: `PENDING`, `SUCCEEDED`, `FAILED`, `CANCELED`), `reason`, `stripe_refund_id` (único, vacío hasta que Stripe responde), `created_by` (email del staff o `"stripe"`) y `data`. `tests/test_stripe_payment_boundary.py` falla si alguien fuera de `services/refunds.py` llama a `create_refund` o hace `Refund.objects.create`.
 
 Estados de cobro: `order.payment_status` (`OrderPaymentStatus`) y `Payment.status` (`PaymentStatus`) usan `PAID`, `PARTIALLY_REFUNDED` y `REFUNDED` (`CHARGED_PAYMENT_STATUSES` de `services/payments.py`). Los tres cuentan como "ya cobrado": el webhook no vuelve a marcar PAID un pago reembolsado, el link de pago y el cobro del panel responden 409 y una cotización con un pedido reembolsado no se vuelve a pagar. Solo cuenta lo reembolsado con `SUCCEEDED`; `order.status` no cambia al reembolsar.
 

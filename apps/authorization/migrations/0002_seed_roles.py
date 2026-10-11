@@ -89,9 +89,7 @@ def seed_roles(apps, schema_editor):
 
     # El acceso total no guarda permisos: los concede todos, también los
     # que se agreguen después.
-    Role.objects.get_or_create(
-        slug=ADMIN_SLUG, defaults={"name": "Admin", "full_access": True}
-    )
+    Role.objects.get_or_create(slug=ADMIN_SLUG, defaults={"name": "Admin", "full_access": True})
     employee, _ = Role.objects.get_or_create(
         slug=EMPLOYEE_SLUG, defaults={"name": "Employee", "full_access": False}
     )
@@ -104,7 +102,6 @@ def unseed_roles(apps, schema_editor):
 
 
 class Migration(migrations.Migration):
-
     dependencies = [
         ("authorization", "0001_initial"),
         ("auth", "0012_alter_user_first_name_max_length"),

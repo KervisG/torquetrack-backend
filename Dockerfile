@@ -70,8 +70,8 @@ EXPOSE 8000
 # Timeout de 60 s: el PDF de la cotización (WeasyPrint) se renderiza dentro del
 # request. `WEB_CONCURRENCY` ajusta los workers según la RAM del hosting.
 #
-# `migrate` corre en cada arranque: el plan gratuito de Render no tiene
-# pre-deploy ni shell. Si no hay migraciones pendientes, no hace nada.
+# `migrate` corre en cada arranque, así el despliegue no necesita un paso
+# aparte. Si no hay migraciones pendientes, no hace nada.
 # `import_catalog --only-missing` agrega solo los productos y aplicaciones de
 # la semilla que aún no existen; nunca actualiza ni borra lo editado desde el
 # panel. Si falla (por ejemplo, un precio en 0) se registra y el servidor

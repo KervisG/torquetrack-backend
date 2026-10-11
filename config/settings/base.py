@@ -126,8 +126,8 @@ STATIC_URL = "static/"
 # `collectstatic` copia acá los estáticos al construir la imagen.
 STATIC_ROOT = BASE_DIR / "staticfiles"
 # Fuente de los estáticos propios: las imágenes de producto viven en el repo
-# (`static/image/`) porque Render no tiene disco persistente; `data.image` las
-# referencia como `/static/image/<archivo>`.
+# (`static/image/`) y viajan dentro de la imagen, sin depender de un disco
+# persistente; `data.image` las referencia como `/static/image/<archivo>`.
 STATICFILES_DIRS = [BASE_DIR / "static"]
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
@@ -258,11 +258,6 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# Key de `request.META` con la IP real del cliente. Solo es confiable si el
-# origen acepta tráfico exclusivamente del proxy que escribe el header; si no,
-# cualquiera puede falsificarlo. Vacío usa `NUM_PROXIES` o `REMOTE_ADDR`.
-CLIENT_IP_HEADER = env("CLIENT_IP_HEADER", default="")
-
 STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
 STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
@@ -276,9 +271,15 @@ SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="") or "34241"
 APP_URL = env("APP_URL", default="http://localhost:5173")
 EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
-FROM_EMAIL = env("FROM_EMAIL", default="")
-SALES_EMAIL = env("SALES_EMAIL", default="")
+# Remitente de Resend y buzón de ventas. Los nombres del entorno son
+# `EMAIL_FROM` y `SALES_NOTIFICATION_EMAIL`; `FROM_EMAIL` y `SALES_EMAIL`
+# quedan como respaldo para los despliegues que aún los definen.
+FROM_EMAIL = env("EMAIL_FROM", default="") or env("FROM_EMAIL", default="")
+SALES_EMAIL = env("SALES_NOTIFICATION_EMAIL", default="") or env("SALES_EMAIL", default="")
 REPLY_TO_EMAIL = env("REPLY_TO_EMAIL", default="")
+# Buzones de cores y devoluciones. Todavía ningún flujo los usa.
+CORES_EMAIL = env("CORES_EMAIL", default="")
+RETURNS_EMAIL = env("RETURNS_EMAIL", default="")
 # Dirección que muestran la cotización y su PDF junto a `SALES_EMAIL` y
 # `APP_URL`.
 COMPANY_ADDRESS = env("COMPANY_ADDRESS", default="") or "Sarasota, FL"

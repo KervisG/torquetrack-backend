@@ -64,6 +64,7 @@ def _load_prod(monkeypatch, **environ):
     for name in (
         "DJANGO_SECRET_KEY",
         "RESEND_API_KEY",
+        "EMAIL_FROM",
         "FROM_EMAIL",
         "APP_URL",
         "CSRF_TRUSTED_ORIGINS",
@@ -225,21 +226,42 @@ def test_prod_warns_when_email_settings_are_missing(monkeypatch, caplog):
 
     message = caplog.text
     assert "RESEND_API_KEY" in message
-    assert "FROM_EMAIL" in message
+    assert "EMAIL_FROM" in message
     assert "APP_URL" not in message
 
 
 def test_prod_does_not_warn_when_email_settings_are_present(monkeypatch, caplog):
     with caplog.at_level(logging.WARNING, logger="config.settings"):
-        _load_prod(
+        prod = _load_prod(
             monkeypatch,
             DJANGO_SECRET_KEY=VALID_SECRET_KEY,
             RESEND_API_KEY="re_test_fake",
-            FROM_EMAIL="TorqueTrack <no-reply@example.com>",
+            EMAIL_FROM="TorqueTrack <no-reply@example.com>",
             APP_URL=VALID_APP_URL,
         )
 
     assert caplog.text == ""
+    assert prod.FROM_EMAIL == "TorqueTrack <no-reply@example.com>"
+
+
+def test_prod_still_reads_the_legacy_from_email_name(monkeypatch):
+    # Un entorno viejo puede definir aún `FROM_EMAIL`; `EMAIL_FROM` gana.
+    prod = _load_prod(
+        monkeypatch,
+        DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+        APP_URL=VALID_APP_URL,
+        FROM_EMAIL="Legacy <legacy@example.com>",
+    )
+    assert prod.FROM_EMAIL == "Legacy <legacy@example.com>"
+
+    prod = _load_prod(
+        monkeypatch,
+        DJANGO_SECRET_KEY=VALID_SECRET_KEY,
+        APP_URL=VALID_APP_URL,
+        FROM_EMAIL="Legacy <legacy@example.com>",
+        EMAIL_FROM="New <new@example.com>",
+    )
+    assert prod.FROM_EMAIL == "New <new@example.com>"
 
 
 # --- cache compartido --------------------------------------------------------

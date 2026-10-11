@@ -55,12 +55,13 @@ CSRF_TRUSTED_ORIGINS = env.list(  # noqa: F405
 # Sin correo no llegan los enlaces de reset de contraseña ni de verificación,
 # pero la tienda funciona igual: se avisa en lugar de impedir el arranque.
 RESEND_API_KEY = env("RESEND_API_KEY", default="")  # noqa: F405
-FROM_EMAIL = env("FROM_EMAIL", default="")  # noqa: F405
+# Misma regla que `base.py`: `EMAIL_FROM` y, si falta, el nombre anterior.
+FROM_EMAIL = env("EMAIL_FROM", default="") or env("FROM_EMAIL", default="")  # noqa: F405
 _missing_email_settings = [
     name
     for name, value in (
         ("RESEND_API_KEY", RESEND_API_KEY),
-        ("FROM_EMAIL", FROM_EMAIL),
+        ("EMAIL_FROM", FROM_EMAIL),
     )
     if not value
 ]
@@ -100,7 +101,7 @@ SECURE_HSTS_PRELOAD = env.bool("SECURE_HSTS_PRELOAD", default=False)  # noqa: F4
 SECURE_CONTENT_TYPE_NOSNIFF = True
 SECURE_REFERRER_POLICY = "same-origin"
 
-# Detrás de un proxy que termina TLS (el balanceador de Render)
+# Detrás del proxy que termina TLS (Caddy en el Droplet)
 # Django ve HTTP y, con el redirect activo, entraría en un bucle de 301. Solo
 # se activa si el proxy SIEMPRE escribe `X-Forwarded-Proto` y el origen no es
 # alcanzable sin pasar por él; si no, cualquiera podría mandar el header.
@@ -110,12 +111,11 @@ SECURE_PROXY_SSL_HEADER = (
     else None
 )
 
-# IP del cliente para los throttles: `base.py` lee `CLIENT_IP_HEADER`
-# (un header que solo escribe un proxy de confianza) y `NUM_PROXIES`
-# (proxies de confianza que agregan su entrada a `X-Forwarded-For`). Detrás
-# del proxy del mismo dominio que sirve el SPA y la API, sin ninguno de los
-# dos todos los clientes comparten la IP del proxy y un mismo tope; con
-# `NUM_PROXIES` mayor que los proxies reales, cualquiera elige su IP.
+# IP del cliente para los throttles: `base.py` lee `NUM_PROXIES` (proxies de
+# confianza que agregan su entrada a `X-Forwarded-For`). Detrás del proxy del
+# mismo dominio que sirve el SPA y la API, sin él todos los clientes comparten
+# la IP del proxy y un mismo tope; con `NUM_PROXIES` mayor que los proxies
+# reales, cualquiera elige su IP.
 
 # Estáticos con hash en el nombre y comprimidos (gzip/brotli), servidos por
 # WhiteNoise con caché larga. Exige `collectstatic` antes de arrancar: el

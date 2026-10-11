@@ -357,7 +357,7 @@ def test_login_ip_throttle_ignores_a_rotating_x_forwarded_for(monkeypatch):
 
 @pytest.mark.django_db
 def test_login_ip_throttle_counts_each_trusted_client_ip_separately(monkeypatch, settings):
-    settings.CLIENT_IP_HEADER = "HTTP_CF_CONNECTING_IP"
+    settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, "NUM_PROXIES": 1}
     monkeypatch.setattr(LoginRateThrottle, "rate", "2/min", raising=False)
     monkeypatch.setattr(LoginAccountRateThrottle, "rate", "1000/min", raising=False)
     client = APIClient()
@@ -365,9 +365,9 @@ def test_login_ip_throttle_counts_each_trusted_client_ip_separately(monkeypatch,
     def attempt(client_ip):
         return client.post(
             "/api/login/",
-            {"email": "cf@example.com", "password": "wrong"},
+            {"email": "proxied@example.com", "password": "wrong"},
             format="json",
-            HTTP_CF_CONNECTING_IP=client_ip,
+            HTTP_X_FORWARDED_FOR=client_ip,
         ).status_code
 
     assert attempt("203.0.113.1") == 401
@@ -380,7 +380,7 @@ def test_login_ip_throttle_counts_each_trusted_client_ip_separately(monkeypatch,
 def test_login_account_throttle_blocks_the_same_email_from_different_ips(
     monkeypatch, settings
 ):
-    settings.CLIENT_IP_HEADER = "HTTP_CF_CONNECTING_IP"
+    settings.REST_FRAMEWORK = {**settings.REST_FRAMEWORK, "NUM_PROXIES": 1}
     monkeypatch.setattr(LoginRateThrottle, "rate", "1000/min", raising=False)
     monkeypatch.setattr(LoginAccountRateThrottle, "rate", "3/min", raising=False)
     create_user("U_ACCT", email="employee@example.com", password=DEFAULT_PASSWORD)
@@ -391,7 +391,7 @@ def test_login_account_throttle_blocks_the_same_email_from_different_ips(
             "/api/login/",
             {"email": identifier, "password": password},
             format="json",
-            HTTP_CF_CONNECTING_IP=client_ip,
+            HTTP_X_FORWARDED_FOR=client_ip,
         ).status_code
 
     assert attempt("employee@example.com", "203.0.113.1") == 401

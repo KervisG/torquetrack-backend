@@ -12,23 +12,16 @@ dominio (`tests/test_app_boundaries.py`), y `apps/common/` no importa DRF.
 """
 import hashlib
 
-from django.conf import settings
 from rest_framework.throttling import BaseThrottle, SimpleRateThrottle
 
 
 def get_client_ip(request):
     """Sin un proxy de confianza `X-Forwarded-For` lo escribe el propio
-    cliente, y rotarlo abriría una cuota nueva en cada request. Primero manda
-    el header que `CLIENT_IP_HEADER` declara como confiable (el que inyecta
-    un proxy de confianza). Si no, `get_ident` de DRF con `NUM_PROXIES`: en 0 (el default)
-    es `REMOTE_ADDR`; en N toma la entrada que agregó el proxy más externo de
-    los N, así lo que el cliente haya puesto antes no cuenta.
+    cliente, y rotarlo abriría una cuota nueva en cada request. `get_ident` de
+    DRF con `NUM_PROXIES`: en 0 (el default) es `REMOTE_ADDR`; en N toma la
+    entrada que agregó el proxy más externo de los N, así lo que el cliente
+    haya puesto antes no cuenta.
     """
-    header = settings.CLIENT_IP_HEADER
-    if header:
-        value = request.META.get(header, "").strip()
-        if value:
-            return value
     return BaseThrottle().get_ident(request)
 
 

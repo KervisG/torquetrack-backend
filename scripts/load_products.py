@@ -1,18 +1,18 @@
-"""Carga el catálogo en la base de producción de Render desde la máquina local.
+"""Carga el catálogo en la base de producción desde la máquina local.
 
-El plan gratuito de Render no tiene shell, así que `import_catalog` corre aquí
-contra la base remota por su External Database URL. El script solo arma la
+`import_catalog` corre aquí contra la base remota por su URL de conexión, sin
+entrar al servidor. El script solo arma la
 conexión y llama al comando: la validación (precio > 0, `active` booleano) y la
 escritura todo o nada son de `import_catalog`, que se corre primero con
 `--dry-run` y después, tras confirmar, de verdad.
 
-La URL sale de `DATABASE_URL` en `.env.render` (ignorado por git; ver
-`.env.render.example`) o del entorno. Nunca se imprime la contraseña.
+La URL sale de `DATABASE_URL` en `.env.remote` (ignorado por git; ver
+`.env.remote.example`) o del entorno. Nunca se imprime la contraseña.
 
 Uso (desde la raíz del repo, con el venv activo):
 
     python scripts/load_products.py <products.json> [--applications <applications.json>]
-        [--env-file .env.render] [--dry-run] [--yes]
+        [--env-file .env.remote] [--dry-run] [--yes]
 """
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ from urllib.parse import unquote, urlsplit
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_APPLICATIONS = BASE_DIR / "apps" / "catalog" / "data" / "applications.json"
-DEFAULT_ENV_FILE = BASE_DIR / ".env.render"
+DEFAULT_ENV_FILE = BASE_DIR / ".env.remote"
 POSTGRES_SCHEMES = ("postgres", "postgresql")
 DEFAULT_POSTGRES_PORT = "5432"
 # `dev.py` no exige broker ni HTTPS; `prod.py` se negaría a arrancar sin las
@@ -37,8 +37,9 @@ PLACEHOLDER_SECRET_KEY = "load-products-script-placeholder-not-a-real-secret"
 
 
 def database_env(url: str) -> dict[str, str]:
-    """Traduce la URL de Render a las variables `POSTGRES_*` que leen los
-    settings. Render exige TLS desde fuera de su red: `DATABASE_SSL` siempre."""
+    """Traduce la URL de la base remota a las variables `POSTGRES_*` que leen
+    los settings. La conexión sale de la red del servidor: `DATABASE_SSL`
+    siempre."""
     parts = urlsplit(url.strip())
     if parts.scheme not in POSTGRES_SCHEMES:
         raise ValueError("DATABASE_URL must start with postgresql://")
@@ -72,7 +73,7 @@ def read_env_file(path: Path) -> dict[str, str]:
 
 def _parse_args(argv):
     parser = argparse.ArgumentParser(
-        description="Load products and applications into the Render database."
+        description="Load products and applications into the remote database."
     )
     parser.add_argument("products", type=Path, help="Path to products.json")
     parser.add_argument("--applications", type=Path, default=DEFAULT_APPLICATIONS)
@@ -93,7 +94,7 @@ def main(argv=None, environ: MutableMapping[str, str] | None = None) -> int:
     if not url:
         print(
             f"DATABASE_URL is not set. Add it to {args.env_file} "
-            "(see .env.render.example) or export it.",
+            "(see .env.remote.example) or export it.",
             file=sys.stderr,
         )
         return 2

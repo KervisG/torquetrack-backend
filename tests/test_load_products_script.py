@@ -1,4 +1,4 @@
-"""`scripts/load_products.py`: carga el catálogo en la base de Render desde la
+"""`scripts/load_products.py`: carga el catálogo en la base remota desde la
 máquina local con `import_catalog`.
 
 El script no es un paquete importable, así que se carga por ruta con
@@ -16,7 +16,7 @@ import pytest
 from apps.catalog.models import Product
 
 SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "load_products.py"
-RENDER_URL = "postgresql://torque_user:p%40ss@dpg-abc123-a.virginia-postgres.render.com/torque_db"
+REMOTE_URL = "postgresql://torque_user:p%40ss@prod-db.example.com/torque_db"
 
 
 @pytest.fixture(scope="module")
@@ -28,7 +28,7 @@ def script():
 
 
 def _env_file(tmp_path, content):
-    path = tmp_path / ".env.render"
+    path = tmp_path / ".env.remote"
     path.write_text(content, encoding="utf-8")
     return path
 
@@ -42,12 +42,12 @@ def _products_file(tmp_path, products):
 # --- database_env ----------------------------------------------------------
 
 
-def test_database_env_maps_render_url_to_postgres_variables(script):
-    assert script.database_env(RENDER_URL) == {
+def test_database_env_maps_remote_url_to_postgres_variables(script):
+    assert script.database_env(REMOTE_URL) == {
         "POSTGRES_DB": "torque_db",
         "POSTGRES_USER": "torque_user",
         "POSTGRES_PASSWORD": "p@ss",
-        "POSTGRES_HOST": "dpg-abc123-a.virginia-postgres.render.com",
+        "POSTGRES_HOST": "prod-db.example.com",
         "POSTGRES_PORT": "5432",
         "DATABASE_SSL": "true",
     }
@@ -81,7 +81,7 @@ def test_database_env_rejects_incomplete_urls(script, url):
 def test_read_env_file_skips_comments_and_strips_quotes(script, tmp_path):
     path = _env_file(
         tmp_path,
-        "# Render > Connections > External Database URL\n\nDATABASE_URL=\"postgresql://a\"\n"
+        "# Production database connection URL\n\nDATABASE_URL=\"postgresql://a\"\n"
         "OTHER='x=y'\n",
     )
 
@@ -107,7 +107,7 @@ def test_main_dry_run_lists_unpriced_products_and_writes_nothing(script, tmp_pat
     products = _products_file(
         tmp_path, [{"id": "needs-price", "price": 0}, {"id": "priced", "price": 5}]
     )
-    env_file = _env_file(tmp_path, f"DATABASE_URL={RENDER_URL}\n")
+    env_file = _env_file(tmp_path, f"DATABASE_URL={REMOTE_URL}\n")
     environ = {}
 
     code = script.main([str(products), "--env-file", str(env_file), "--dry-run"], environ=environ)
@@ -115,16 +115,16 @@ def test_main_dry_run_lists_unpriced_products_and_writes_nothing(script, tmp_pat
     assert code == 1
     captured = capsys.readouterr()
     assert "needs-price" in captured.err
-    assert "dpg-abc123-a.virginia-postgres.render.com" in captured.out
+    assert "prod-db.example.com" in captured.out
     assert "p@ss" not in captured.out + captured.err
-    assert environ["POSTGRES_HOST"] == "dpg-abc123-a.virginia-postgres.render.com"
+    assert environ["POSTGRES_HOST"] == "prod-db.example.com"
     assert not Product.objects.exists()
 
 
 @pytest.mark.django_db
 def test_main_dry_run_passes_for_a_priced_catalog(script, tmp_path, capsys):
     products = _products_file(tmp_path, [{"id": "priced", "price": 5}])
-    env_file = _env_file(tmp_path, f"DATABASE_URL={RENDER_URL}\n")
+    env_file = _env_file(tmp_path, f"DATABASE_URL={REMOTE_URL}\n")
 
     code = script.main([str(products), "--env-file", str(env_file), "--dry-run"], environ={})
 
@@ -136,7 +136,7 @@ def test_main_dry_run_passes_for_a_priced_catalog(script, tmp_path, capsys):
 @pytest.mark.django_db
 def test_main_aborts_when_the_write_is_not_confirmed(script, tmp_path, monkeypatch, capsys):
     products = _products_file(tmp_path, [{"id": "priced", "price": 5}])
-    env_file = _env_file(tmp_path, f"DATABASE_URL={RENDER_URL}\n")
+    env_file = _env_file(tmp_path, f"DATABASE_URL={REMOTE_URL}\n")
     monkeypatch.setattr("builtins.input", lambda prompt: "no")
 
     code = script.main([str(products), "--env-file", str(env_file)], environ={})
@@ -148,7 +148,7 @@ def test_main_aborts_when_the_write_is_not_confirmed(script, tmp_path, monkeypat
 @pytest.mark.django_db
 def test_main_imports_after_confirmation(script, tmp_path):
     products = _products_file(tmp_path, [{"id": "priced", "price": 5}])
-    env_file = _env_file(tmp_path, f"DATABASE_URL={RENDER_URL}\n")
+    env_file = _env_file(tmp_path, f"DATABASE_URL={REMOTE_URL}\n")
 
     code = script.main([str(products), "--env-file", str(env_file), "--yes"], environ={})
 

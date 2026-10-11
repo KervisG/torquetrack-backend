@@ -447,7 +447,8 @@ def test_shipped_email_for_other_carrier_has_no_tracking_link(resend):
     assert response.json()["trackingUrl"] is None
     assert len(resend) == 1
     assert "LOCAL-778" in resend[0]["html"]
-    assert "href" not in resend[0]["html"]
+    # El único enlace que queda es el de la tienda, en el pie del layout.
+    assert "Track your package" not in resend[0]["html"]
 
 
 @pytest.mark.django_db

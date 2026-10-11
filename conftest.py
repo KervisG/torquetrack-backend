@@ -10,3 +10,10 @@ def _celery_tasks_run_in_process():
     from config import celery_app
 
     celery_app.conf.update(task_always_eager=True, task_eager_propagates=True)
+
+
+@pytest.fixture(autouse=True)
+def _email_logo_from_the_app_url(settings):
+    """El logo de los correos sale de `APP_URL`, aunque el `.env` local tenga
+    Spaces configurado: los tests no dependen del bucket de quien los corre."""
+    settings.EMAIL_LOGO_URL = ""

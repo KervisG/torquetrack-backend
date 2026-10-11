@@ -5,12 +5,21 @@
 # Requiere el `.env` de producción junto a este archivo y el repo
 # `torquetrack-frontend` clonado en la carpeta hermana. Solo Caddy publica
 # puertos: la base, Redis y gunicorn quedan en la red interna de compose.
+# Docker guarda los logs sin tope: en un Droplet terminan llenando el disco y
+# tumbando la base. Tres archivos de 10 MB por contenedor.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 x-app: &app
   # Sin `target`: el último stage del Dockerfile es `prod`.
   build:
     context: .
   image: torquetrack-backend:prod
   restart: unless-stopped
+  logging: *logging
   env_file: .env
   # Pisan lo que traiga el `.env`: host y puertos son los de la red de compose.
   environment:
@@ -34,6 +43,7 @@ services:
   db:
     image: postgres:16
     restart: unless-stopped
+    logging: *logging
     # Solo crea el usuario y la base la primera vez: con el volumen ya
     # inicializado, cambiar estas variables no los modifica.
     environment:
@@ -52,6 +62,7 @@ services:
     # Broker de Celery (base 0) y cache de Django (base 1).
     image: redis:7-alpine
     restart: unless-stopped
+    logging: *logging
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -79,12 +90,14 @@ services:
       args:
         VITE_GA_MEASUREMENT_ID: ${VITE_GA_MEASUREMENT_ID:-}
     restart: unless-stopped
+    logging: *logging
     depends_on:
       - backend
 
   caddy:
     image: caddy:2-alpine
     restart: unless-stopped
+    logging: *logging
     ports:
       - "80:80"
       - "443:443"

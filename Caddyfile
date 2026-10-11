@@ -3,3 +3,11 @@
 {$SITE_DOMAIN} {
 	reverse_proxy frontend:80
 }
+
+# `www` redirige al dominio principal: una sola URL para los buscadores y para
+# las cookies `__Host-`. Necesita su propio registro DNS apuntando al Droplet;
+# sin él Caddy no consigue el certificado de `www`, y el sitio principal sigue
+# funcionando igual.
+www.{$SITE_DOMAIN} {
+	redir https://{$SITE_DOMAIN}{uri} permanent
+}

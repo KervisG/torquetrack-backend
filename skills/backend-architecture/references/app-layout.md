@@ -297,6 +297,14 @@ El ORM es dueño de todas las tablas. Para una tabla nueva o un cambio de column
 
 Las migraciones se reiniciaron: cada app parte de `0001_initial` generado desde los modelos. A mano quedan solo `authentication/0003_cache_table` (tabla del cache), `authorization/0002_seed_roles` (Roles de partida) y una `*_db_on_delete` por app (el `ON DELETE` en Postgres). Una base creada antes del reinicio se marca como migrada insertando estas migraciones en `django_migrations` (sin `--fake`, que rechaza el historial anterior); su esquema es el mismo.
 
+`Product`, `Application`, `Customer`, `Order` y `Quote` guardan lo tipado en columnas y filas, y `data` es una propiedad con la forma camelCase de la API:
+
+- `Product` y `Application` (`apps/catalog/models/columns.py`, `ColumnDataMixin`): `attributes` más las columnas de su `COLUMN_FIELDS` (precio, número de parte y años en el producto; marca, modelos, años y motor en la aplicación). Un valor del tipo equivocado lanza `ColumnValueError`.
+- `Customer`: `details` más las columnas del perfil (`PROFILE_COLUMNS`: nombre, empresa, teléfono y dirección).
+- `Order` y `Quote` (`apps/common/line_items.py`): `details` más `items` desde `OrderItem` y `QuoteItem` (una sola forma de línea: `productId`, `title`, `partNumber`, `quantity`, `unitPrice`, `coreCharge`) y `totals` desde las columnas de `DocumentTotals`.
+
+Asignar `data` reparte los valores; `save(update_fields=[..., "data"])` funciona, salvo en `Product`. No funcionan `queryset.update(data=...)` ni `data__` en un filtro: se usan las columnas o `details__`/`attributes__`. Una suma o un filtro va sobre la columna (`Sum("total")`, `name__icontains`), nunca sobre el JSON. Una lista de pedidos o cotizaciones pide `prefetch_related("items")`.
+
 `tests/test_migrations.py` prueba que no queda ningún modelo sin administrar, que `migrate` crea cada tabla de dominio y que `makemigrations --check` no detecta cambios.
 
 ## Formas de retorno de los services

@@ -1,12 +1,10 @@
-from decimal import Decimal, InvalidOperation
-
 from django.db import models
 from django.db.models import F, Q
 from django.db.models.functions import Now
 from django.utils import timezone
 from django.utils.text import slugify
 
-from apps.common.numbers import money_decimal
+from apps.catalog.models.columns import ColumnDataMixin
 
 # Deja lugar para el sufijo numérico (`-2`, `-3`...) sin pasar el largo de la columna.
 SLUG_MAX_LENGTH = 120
@@ -30,41 +28,6 @@ COLUMN_FIELDS = {
 }
 
 
-class ProductFieldError(ValueError):
-    """Un valor que no entra en su columna; `field` es la clave de la API."""
-
-    def __init__(self, field: str, message: str):
-        super().__init__(message)
-        self.field = field
-
-
-def _to_column(key: str, kind: str, value):
-    """Vacío es "sin dato" (`None`), igual que una clave ausente del JSON."""
-    if value is None or value == "":
-        return None
-    if kind == "text":
-        return str(value)
-    if isinstance(value, bool):
-        raise ProductFieldError(key, f"{key} must be a number")
-    if kind == "year":
-        try:
-            return int(value)
-        except (TypeError, ValueError):
-            raise ProductFieldError(key, f"{key} must be a year") from None
-    try:
-        number = Decimal(str(value))
-    except InvalidOperation:
-        raise ProductFieldError(key, f"{key} must be a number") from None
-    if not number.is_finite():
-        raise ProductFieldError(key, f"{key} must be a number")
-    return money_decimal(number)
-
-
-def _from_column(kind: str, value):
-    # El JSON de la API lleva números, no el texto con que DRF serializa un `Decimal`.
-    return float(value) if kind == "money" else value
-
-
 def product_slug_base(data: dict, product_id: str) -> str:
     """Slug legible del título más el número de parte, sin el sufijo de
     unicidad. El número de parte no se repite si el título ya lo contiene; sin
@@ -79,7 +42,9 @@ def product_slug_base(data: dict, product_id: str) -> str:
     return base[:_SLUG_BASE_LENGTH].strip("-") or "product"
 
 
-class Product(models.Model):
+class Product(ColumnDataMixin, models.Model):
+    COLUMN_FIELDS = COLUMN_FIELDS
+
     id = models.TextField(primary_key=True)
     # Se genera al crear y nunca cambia al editar: es la URL pública
     # (`/product/<slug>`) que indexan los buscadores.
@@ -130,30 +95,6 @@ class Product(models.Model):
 
     def __str__(self) -> str:
         return self.id
-
-    @property
-    def data(self) -> dict:
-        """La forma camelCase que consumen la API, el checkout y el panel:
-        `attributes` más las columnas con valor."""
-        merged = dict(self.attributes or {})
-        for key, (column, kind) in COLUMN_FIELDS.items():
-            value = getattr(self, column)
-            if value is not None:
-                merged[key] = _from_column(kind, value)
-        return merged
-
-    @data.setter
-    def data(self, value: dict) -> None:
-        """Reemplaza todo: una clave de columna ausente la deja en `None`.
-        `ProductFieldError` si un valor no entra en su columna."""
-        remaining = dict(value or {})
-        columns = {
-            column: _to_column(key, kind, remaining.pop(key, None))
-            for key, (column, kind) in COLUMN_FIELDS.items()
-        }
-        for column, column_value in columns.items():
-            setattr(self, column, column_value)
-        self.attributes = remaining
 
     def save(self, *args, **kwargs):
         # Vive en el modelo y no en un service porque los productos nacen por

@@ -1,4 +1,5 @@
 """Conciliación de los eventos del webhook de Stripe."""
+
 from __future__ import annotations
 
 import logging
@@ -23,6 +24,7 @@ from apps.checkout.services.payments import (
     lock_order_and_payment,
 )
 from apps.checkout.services.refunds import sync_stripe_refund
+from apps.checkout.services.workflow_emails import notify_core_opened
 from apps.common.numbers import money, to_cents
 
 logger = logging.getLogger(__name__)
@@ -163,6 +165,10 @@ def reconcile_paid_session(session_obj: dict) -> None:
         order.updated_at = now
         order.data = {**order_data, **paid_patch}
         order.save(update_fields=["status", "payment_status", "updated_at", "data"])
+        if "coreCase" in paid_patch:
+            # Recién con el pago confirmado: si la transacción hace rollback,
+            # nadie recibe un aviso de un core que no existe.
+            transaction.on_commit(lambda: notify_core_opened(order))
 
         # Las otras sesiones abiertas del pedido ya no deben cobrarse.
         superseded = Payment.objects.select_for_update().filter(

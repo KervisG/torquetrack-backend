@@ -1,5 +1,6 @@
 """La firma se verifica con el adaptador real (HMAC local, sin red); solo se
 parchea `retrieve_payment_method`, que llamaría a la API de Stripe."""
+
 import hashlib
 import hmac
 import json
@@ -511,3 +512,73 @@ def test_payment_on_a_closed_order_is_recorded_without_reopening_it(
     assert activity_count(entity_id="ord_closed_1", action="PAYMENT_PAID") == 0
     assert activity_count(entity_id="ord_closed_1", action="PAYMENT_ON_CLOSED_ORDER") == 1
     assert "ord_closed_1" in caplog.text
+
+
+@pytest.mark.django_db
+def test_a_paid_order_with_a_core_charge_sends_the_core_emails(
+    monkeypatch, settings, django_capture_on_commit_callbacks
+):
+    from tests.fakes import install_resend
+
+    settings.RESEND_API_KEY = "re_test_fake"
+    settings.FROM_EMAIL = "TorqueTrack <no-reply@example.com>"
+    settings.CORES_EMAIL = "cores@example.com"
+    monkeypatch.setattr(
+        "apps.checkout.services.workflow_emails.run_in_background",
+        lambda func, *args, **kwargs: func(*args, **kwargs),
+    )
+    monkeypatch.setattr(
+        "apps.integrations.payments.stripe.retrieve_payment_method", lambda payment_intent_id: None
+    )
+    sent = install_resend(monkeypatch).sent
+    _insert_order(
+        "ord_core_mail",
+        "O10009",
+        "PENDING_PAYMENT",
+        "UNPAID",
+        {"totals": {"core": 50.0}, "customer": {"name": "Ana", "email": "buyer@example.com"}},
+    )
+    _insert_payment("pay_core_mail", "ord_core_mail", "PENDING", {"sessionId": "cs_test_mail"})
+    payload = json.dumps(
+        _checkout_completed_event("ord_core_mail", session_id="cs_test_mail")
+    ).encode()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        response = APIClient().post(
+            "/api/webhooks/stripe/",
+            data=payload,
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE=_sign(payload),
+        )
+
+    assert response.status_code == 200
+    assert [email["to"] for email in sent] == [["cores@example.com"], ["buyer@example.com"]]
+    assert sent[1]["reply_to"] == "cores@example.com"
+
+
+@pytest.mark.django_db
+def test_a_paid_order_without_a_core_charge_sends_no_core_email(
+    monkeypatch, settings, django_capture_on_commit_callbacks
+):
+    from tests.fakes import install_resend
+
+    settings.CORES_EMAIL = "cores@example.com"
+    monkeypatch.setattr(
+        "apps.integrations.payments.stripe.retrieve_payment_method", lambda payment_intent_id: None
+    )
+    sent = install_resend(monkeypatch).sent
+    _insert_order("ord_no_core", "O10010", "PENDING_PAYMENT", "UNPAID", {"totals": {"core": 0}})
+    _insert_payment("pay_no_core", "ord_no_core", "PENDING", {"sessionId": "cs_test_nocore"})
+    payload = json.dumps(
+        _checkout_completed_event("ord_no_core", session_id="cs_test_nocore")
+    ).encode()
+
+    with django_capture_on_commit_callbacks(execute=True):
+        APIClient().post(
+            "/api/webhooks/stripe/",
+            data=payload,
+            content_type="application/json",
+            HTTP_STRIPE_SIGNATURE=_sign(payload),
+        )
+
+    assert sent == []

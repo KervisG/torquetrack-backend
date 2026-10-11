@@ -1,4 +1,5 @@
 """Reglas de negocio de los pedidos en el panel de administración."""
+
 from __future__ import annotations
 
 import logging
@@ -26,6 +27,7 @@ from apps.checkout.services.payments import (
     start_stripe_payment,
 )
 from apps.checkout.services.refunds import order_refund_summary, serialize_refund
+from apps.checkout.services.workflow_emails import notify_workflow_changes
 from apps.common.business_day import store_today_bounds
 from apps.common.emails import branded_email_html
 from apps.common.errors import error_payload
@@ -78,9 +80,7 @@ def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
         "paymentStatus": order.payment_status,
         "createdAt": order.created_at,
         "customer": customer,
-        "payments": [
-            _serialize_payment(payment, can_view_transaction_ids) for payment in payments
-        ],
+        "payments": [_serialize_payment(payment, can_view_transaction_ids) for payment in payments],
         "refunds": [
             serialize_refund(refund, can_view_transaction_ids) for refund in refunds["refunds"]
         ],
@@ -172,7 +172,7 @@ def list_admin_orders(
                 queryset=Payment.objects.order_by("created_at").prefetch_related(
                     Prefetch("refunds", queryset=Refund.objects.order_by("created_at"))
                 ),
-            )
+            ),
         )
         .order_by("created_at")
     )
@@ -243,6 +243,9 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
                     "error": f"Cannot move order from {order.status} to {status}",
                     "status": 409,
                 }
+        # Antes del cambio: los correos de core y devolución salen solo por
+        # lo que cambió de estado.
+        previous = dict(order.data or {})
         fields = ["updated_at"]
         if status is not None:
             order.status = status
@@ -281,6 +284,7 @@ def patch_admin_order(order_id: str, payload: dict, actor_email: str) -> dict:
             data={"number": order.number, **patch},
         )
         response.update(patch)
+        notify_workflow_changes(order, previous, patch)
     if method is not None:
         record_activity(
             actor=actor_email,

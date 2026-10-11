@@ -35,6 +35,12 @@ EXPECTED_ON_DELETE = {
     # Una fila de fitment no tiene sentido sin su producto o su aplicación.
     ("product_fitments", "product_id"): "c",
     ("product_fitments", "application_id"): "c",
+    # Una línea vive y muere con su pedido o cotización; si se borra el
+    # producto, la línea queda como foto de la venta.
+    ("order_items", "order_id"): "c",
+    ("order_items", "product_id"): "n",
+    ("quote_items", "quote_id"): "c",
+    ("quote_items", "product_id"): "n",
 }
 
 

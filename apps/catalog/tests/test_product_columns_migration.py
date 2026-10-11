@@ -28,7 +28,9 @@ def migrate_products(transactional_db):
         return new_apps.get_model("catalog", "Product")
 
     yield run
-    _migrate([("catalog", "0003_product_columns")])
+    # Volver a `BEFORE` también deshace las apps que dependen de `catalog`
+    # (las líneas de pedidos y cotizaciones): se migra todo hasta el final.
+    _migrate(MigrationExecutor(connection).loader.graph.leaf_nodes())
 
 
 def test_business_fields_move_to_columns(migrate_products):

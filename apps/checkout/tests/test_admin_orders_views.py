@@ -818,3 +818,23 @@ def test_payment_link_email_escapes_the_order_number_and_the_session_url(monkeyp
     assert "&lt;b&gt;O1&lt;/b&gt;" in html
     assert 'href="https://checkout.stripe.com/pay?a=1&amp;b=&quot;x&quot;"' in html
     assert f'<img src="{email_logo_url()}"' in html
+
+
+@pytest.mark.django_db
+def test_listing_orders_reads_their_lines_without_one_query_per_order():
+    _insert_user("usr_list_lines", permissions=["orders.view"])
+    line = {"title": "Pump", "partNumber": "P1", "quantity": 1, "unitPrice": 10}
+    client = _admin_client("usr_list_lines")
+
+    def list_query_count():
+        with CaptureQueriesContext(connection) as queries:
+            response = client.get("/api/admin/orders/")
+        assert response.status_code == 200
+        return len(queries.captured_queries)
+
+    _make_order("ord_1", "O1", data={"items": [line]})
+    one = list_query_count()
+    for index in range(2, 6):
+        _make_order(f"ord_{index}", f"O{index}", data={"items": [line, line]})
+
+    assert list_query_count() == one

@@ -13,13 +13,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 
-from django.db.models import Count, Q, Sum
-from django.db.models.functions import Trunc
+from django.db.models import Count, F, Max, Q, Sum, TextField, Value
+from django.db.models.functions import Coalesce, NullIf, Trunc
 from django.utils import timezone
 
 from apps.cart.services import count_abandoned_carts_between, count_carts_created_between
-from apps.catalog.services import PricingError, price_lines
-from apps.checkout.models import Order, OrderStatus, Payment, Refund, RefundStatus
+from apps.checkout.models import Order, OrderItem, OrderStatus, Payment, Refund, RefundStatus
 from apps.checkout.services import CHARGED_PAYMENT_STATUSES
 from apps.common.business_day import store_timezone, store_today
 from apps.common.numbers import ZERO, money, money_decimal
@@ -96,7 +95,7 @@ def _succeeded_refunds(start, end):
 def _sales_totals(start, end) -> tuple[Decimal, Decimal, int]:
     """(cobrado sin impuesto, reembolsado, pedidos con un cobro) en [start, end)."""
     charged = _charged_payments(start, end).aggregate(
-        gross=Sum(net_of_tax("order__data"), default=ZERO),
+        gross=Sum(net_of_tax("order__"), default=ZERO),
         orders=Count("order", distinct=True),
     )
     refunded = _succeeded_refunds(start, end).aggregate(total=Sum("amount", default=ZERO))
@@ -119,7 +118,7 @@ def _revenue_series(window: _Window) -> list[dict]:
         _charged_payments(window.start, window.end),
         "paid_at",
         window,
-        gross=Sum(net_of_tax("order__data")),
+        gross=Sum(net_of_tax("order__")),
         orders=Count("order", distinct=True),
     )
     refunded = _bucketed(
@@ -183,38 +182,40 @@ def _orders_by_status(window: _Window) -> list[dict]:
 
 def _top_products(window: _Window) -> list[dict]:
     """Por lo vendido (precio x cantidad, sin core ni envío) en los pedidos con
-    un cobro en el período. Las líneas guardadas se leen con `price_lines`
-    (`allow_custom_price=True`), igual que Stripe y la cotización: cubre las
-    del storefront (`qty`/`price`) y las de una cotización (`quantity`/
-    `unitPrice`). La suma va en Python porque `items` es un array JSON y el
-    ORM no lo despliega sin SQL crudo; es una sola consulta."""
+    un cobro en el período, agrupado por producto. Una línea personalizada,
+    sin producto, se agrupa por número de parte o, sin él, por título."""
     order_ids = _charged_payments(window.start, window.end).values("order_id")
-    item_lists = Order.objects.filter(pk__in=order_ids).values_list("data__items", flat=True)
-    totals: dict[str, dict] = {}
-    for items in item_lists:
-        for item in items if isinstance(items, list) else []:
-            try:
-                (line,) = price_lines([item], allow_custom_price=True, max_quantity=None).lines
-            except (PricingError, ValueError):
-                continue
-            product_id = line.product_id
-            key = str(product_id or item.get("partNumber") or item.get("title") or "")
-            if not key:
-                continue
-            row = totals.setdefault(
-                key,
-                {
-                    "productId": product_id,
-                    "title": item.get("title") or "",
-                    "partNumber": item.get("partNumber") or "",
-                    "units": 0,
-                    "revenue": ZERO,
-                },
+    rows = (
+        OrderItem.objects.filter(order_id__in=order_ids)
+        .annotate(
+            key=Coalesce(
+                "product_id",
+                NullIf("part_number", Value("")),
+                NullIf("title", Value("")),
+                output_field=TextField(),
             )
-            row["units"] += line.quantity
-            row["revenue"] += line.line_total
-    ranked = sorted(totals.values(), key=lambda row: (-row["revenue"], -row["units"], row["title"]))
-    return [{**row, "revenue": money(row["revenue"])} for row in ranked[:TOP_PRODUCTS_LIMIT]]
+        )
+        .exclude(key=None)
+        .values("key")
+        .annotate(
+            product=Max("product_id"),
+            title=Max("title"),
+            part_number=Max("part_number"),
+            units=Sum("quantity"),
+            revenue=Sum(F("unit_price") * F("quantity")),
+        )
+        .order_by("-revenue", "-units", "title")[:TOP_PRODUCTS_LIMIT]
+    )
+    return [
+        {
+            "productId": row["product"],
+            "title": row["title"],
+            "partNumber": row["part_number"],
+            "units": row["units"],
+            "revenue": money(row["revenue"]),
+        }
+        for row in rows
+    ]
 
 
 def _quote_funnel(window: _Window) -> dict:
@@ -224,7 +225,7 @@ def _quote_funnel(window: _Window) -> dict:
         created_at__gte=window.start, created_at__lt=window.end
     ).aggregate(
         created=Count("pk"),
-        sent=Count("pk", filter=Q(data__has_key="lastEmailedAt")),
+        sent=Count("pk", filter=Q(details__has_key="lastEmailedAt")),
         converted=Count("pk", filter=Q(status=QuoteStatus.CONVERTED)),
     )
     rate = Decimal(counts["converted"]) / counts["created"] * 100 if counts["created"] else ZERO
@@ -236,13 +237,13 @@ def _quote_funnel(window: _Window) -> dict:
 
 def _cart_funnel(window: _Window) -> dict:
     """`checkoutStarted` y `converted` salen de los pedidos del storefront
-    (`data.cartId`), que no se borran; `created` y `abandoned`, de las filas de
+    (`details.cartId`), que no se borran; `created` y `abandoned`, de las filas de
     `carts` que siguen existiendo (un carrito vaciado se borra)."""
     checkouts = (
         Order.objects.filter(
-            created_at__gte=window.start, created_at__lt=window.end, data__has_key="cartId"
+            created_at__gte=window.start, created_at__lt=window.end, details__has_key="cartId"
         )
-        .exclude(data__cartId=None)
+        .exclude(details__cartId=None)
         .aggregate(
             started=Count("pk"),
             converted=Count("pk", filter=Q(payment_status__in=CHARGED_PAYMENT_STATUSES)),

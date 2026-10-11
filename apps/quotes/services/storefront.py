@@ -275,7 +275,7 @@ def is_quote_payable(quote: Quote) -> bool:
     if _checkout_refusal(quote) is not None:
         return False
     return not Order.objects.filter(
-        data__quoteNumber=quote.number, payment_status__in=CHARGED_PAYMENT_STATUSES
+        details__quoteNumber=quote.number, payment_status__in=CHARGED_PAYMENT_STATUSES
     ).exists()
 
 
@@ -299,7 +299,7 @@ def checkout_from_quote(quote: Quote) -> dict:
             return refusal
         orders = list(
             Order.objects.select_for_update()
-            .filter(data__quoteNumber=quote.number)
+            .filter(details__quoteNumber=quote.number)
             .order_by("-created_at")
         )
         # Un pedido reembolsado sigue cobrado: la cotización no se vuelve a pagar.

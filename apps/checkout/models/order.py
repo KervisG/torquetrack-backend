@@ -4,6 +4,14 @@ from django.db import models
 from django.db.models.functions import Now
 from django.utils import timezone
 
+from apps.common.line_items import (
+    DocumentTotals,
+    LineItem,
+    LineItemsMixin,
+    line_item_constraints,
+    total_constraints,
+)
+
 
 class OrderStatus(models.TextChoices):
     OPEN = "OPEN"
@@ -75,7 +83,7 @@ TRACKING_URL_TEMPLATES = {
 }
 
 
-class Order(models.Model):
+class Order(LineItemsMixin, DocumentTotals):
     id = models.TextField(primary_key=True)
     number = models.TextField(unique=True)
     customer = models.ForeignKey(
@@ -102,12 +110,14 @@ class Order(models.Model):
     tracking_number = models.TextField(blank=True, default="", db_default="")
     shipped_at = models.DateTimeField(null=True, blank=True)
     delivered_at = models.DateTimeField(null=True, blank=True)
-    data = models.JSONField(default=dict)
+    # Lo que no tiene columna; las líneas viven en `OrderItem` y `data` las suma.
+    details = models.JSONField(default=dict)
     created_at = models.DateTimeField(default=timezone.now, db_default=Now())
     updated_at = models.DateTimeField(default=timezone.now, db_default=Now())
 
     class Meta:
         db_table = "orders"
+        constraints = total_constraints("orders")
         permissions = [
             ("change_status", "Can change order status"),
             ("cancel_order", "Can cancel orders"),
@@ -138,3 +148,14 @@ class Order(models.Model):
             "shippedAt": self.shipped_at,
             "deliveredAt": self.delivered_at,
         }
+
+
+class OrderItem(LineItem):
+    order = models.ForeignKey(Order, on_delete=models.CASCADE, related_name="items")
+
+    class Meta(LineItem.Meta):
+        db_table = "order_items"
+        constraints = [
+            models.UniqueConstraint(fields=["order", "position"], name="order_items_position"),
+            *line_item_constraints("order_items"),
+        ]

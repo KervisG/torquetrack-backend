@@ -316,7 +316,7 @@ def update_account(customer: Customer, payload: dict) -> dict:
 
 
 def list_account_orders(customer: Customer) -> list[dict]:
-    orders = customer.orders.order_by("-created_at")
+    orders = customer.orders.prefetch_related("items").order_by("-created_at")
     result = []
     for order in orders:
         data = order.data or {}
@@ -338,7 +338,7 @@ def list_account_orders(customer: Customer) -> list[dict]:
 
 
 def list_account_quotes(customer: Customer) -> list[dict]:
-    quotes = customer.quotes.order_by("-created_at")
+    quotes = customer.quotes.prefetch_related("items").order_by("-created_at")
     result = []
     for quote in quotes:
         data = quote.data or {}

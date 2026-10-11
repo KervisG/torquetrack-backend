@@ -22,6 +22,7 @@ import pytest
 from django.utils import timezone
 
 from apps.cart.models import Cart
+from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment, Refund
 from apps.common.business_day import store_today_bounds
 from apps.quotes.models import Quote
@@ -288,8 +289,15 @@ def test_orders_by_status_counts_orders_created_in_range_with_every_status():
 # --- productos más vendidos -------------------------------------------------------
 
 
+def _catalog(*product_ids):
+    # Una línea guarda el producto solo si existe en el catálogo.
+    for product_id in product_ids:
+        Product.objects.create(id=product_id, data={"title": product_id, "price": 1})
+
+
 @pytest.mark.django_db
 def test_top_products_rank_by_revenue_across_charged_orders_in_range():
+    _catalog("pump", "filter", "injector")
     pump = {"id": "pump", "title": "CP3 Pump", "partNumber": "0445020150", "price": 500.0}
     filter_item = {"id": "filter", "title": "Fuel Filter", "partNumber": "FF-1", "price": 20.0}
     _paid("OID_TP1", {"subtotal": 1040.0}, paid_at=_days_ago(1),
@@ -318,6 +326,7 @@ def test_top_products_rank_by_revenue_across_charged_orders_in_range():
 
 @pytest.mark.django_db
 def test_top_products_returns_at_most_ten():
+    _catalog(*(f"p{i}" for i in range(1, 13)))
     items = [
         {"id": f"p{i}", "title": f"Part {i}", "partNumber": f"P{i}", "price": float(i), "qty": 1}
         for i in range(1, 13)

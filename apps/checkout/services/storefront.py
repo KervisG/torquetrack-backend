@@ -44,8 +44,9 @@ def next_order_number() -> str:
 
 def _order_item(line: PricedLine) -> dict:
     product_data = line.product
+    # Misma forma que una línea de cotización (`apps/common/line_items.py`).
     return {
-        "id": product_data.get("id"),
+        "productId": product_data.get("id"),
         "title": (
             product_data.get("title") or product_data.get("partNumber") or product_data.get("id")
         ),
@@ -55,8 +56,8 @@ def _order_item(line: PricedLine) -> dict:
             or product_data.get("aftermarketPart")
             or ""
         ),
-        "qty": line.quantity,
-        "price": money(line.unit_price),
+        "quantity": line.quantity,
+        "unitPrice": money(line.unit_price),
         "coreCharge": money(line.core_charge),
     }
 

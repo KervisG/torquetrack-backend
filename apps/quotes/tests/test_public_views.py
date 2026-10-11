@@ -378,7 +378,7 @@ def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["orderNumber"] == existing_order.number
-    assert Order.objects.filter(data__quoteNumber=quote.number).count() == 1
+    assert Order.objects.filter(details__quoteNumber=quote.number).count() == 1
 
 
 @pytest.mark.django_db
@@ -442,7 +442,7 @@ def test_public_checkout_refuses_a_quote_that_is_already_paid(client, monkeypatc
 
     assert response.status_code == 409
     assert response.json() == {"error": "This quote has already been paid"}
-    assert Order.objects.filter(data__quoteNumber="Q10020").count() == 1
+    assert Order.objects.filter(details__quoteNumber="Q10020").count() == 1
     assert Quote.objects.get(pk="quo_paid_1").data["orderNumber"] == "O20001"
 
 
@@ -458,7 +458,7 @@ def test_public_checkout_twice_after_payment_does_not_charge_again(client, monke
     second = client.post(f"/api/quote/public/{token}/checkout/")
 
     assert second.status_code == 409
-    assert Order.objects.filter(data__quoteNumber="Q10021").count() == 1
+    assert Order.objects.filter(details__quoteNumber="Q10021").count() == 1
 
 
 @pytest.mark.django_db
@@ -521,7 +521,7 @@ def test_public_checkout_returns_410_for_expired_quote(client, monkeypatch):
 
     assert response.status_code == 410
     assert response.json() == {"error": "This quote has expired"}
-    assert not Order.objects.filter(data__quoteNumber="Q10005").exists()
+    assert not Order.objects.filter(details__quoteNumber="Q10005").exists()
 
 
 @pytest.mark.django_db
@@ -555,7 +555,7 @@ def test_public_checkout_rejects_non_payable_statuses(client, monkeypatch, statu
 
     assert response.status_code == 409
     assert response.json() == {"error": message}
-    assert not Order.objects.filter(data__quoteNumber="Q10007").exists()
+    assert not Order.objects.filter(details__quoteNumber="Q10007").exists()
     assert Quote.objects.get(pk="quo_not_payable").status == status
 
 

@@ -166,6 +166,7 @@ def list_admin_orders(
     orders = (
         Order.objects.select_related("customer")
         .prefetch_related(
+            "items",
             Prefetch(
                 "payments",
                 queryset=Payment.objects.order_by("created_at").prefetch_related(

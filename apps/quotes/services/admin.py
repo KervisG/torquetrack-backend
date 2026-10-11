@@ -225,7 +225,11 @@ def estimate_admin_quote_tax(payload: dict) -> dict:
 
 def list_admin_quotes() -> list[dict]:
     """Solo lectura: `serialize_quote` ya informa `EXPIRED` a las vencidas."""
-    quotes = Quote.objects.select_related("customer").order_by("created_at")
+    quotes = (
+        Quote.objects.select_related("customer")
+        .prefetch_related("items")
+        .order_by("created_at")
+    )
     return [serialize_quote(quote) for quote in quotes if not (quote.data or {}).get("archived")]
 
 

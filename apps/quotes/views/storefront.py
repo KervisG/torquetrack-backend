@@ -21,7 +21,7 @@ from config.responses import service_response
 
 
 def _find_by_token(token: str) -> Quote | None:
-    return Quote.objects.filter(data__publicToken=token).select_related("customer").first()
+    return Quote.objects.filter(details__publicToken=token).select_related("customer").first()
 
 
 class QuoteRequestView(APIView):

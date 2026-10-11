@@ -4,9 +4,8 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from django.db.models import Count, DecimalField, Q, Sum, Value
-from django.db.models.fields.json import KeyTextTransform, KeyTransform
-from django.db.models.functions import Cast, Coalesce
+from django.db.models import Count, DecimalField, F, Q, Sum, Value
+from django.db.models.functions import Coalesce
 
 from apps.cart.models import CartStatus
 from apps.cart.services import count_carts_by_status
@@ -17,26 +16,22 @@ from apps.common.numbers import money
 from apps.quotes.models import Quote, QuoteStatus
 from apps.quotes.services import unexpired_quotes_q
 
-_NUMERIC = DecimalField(max_digits=20, decimal_places=6)
+_MONEY = DecimalField(max_digits=12, decimal_places=2)
 
 
-def _order_total(key: str, data_path: str = "data"):
-    """`data.totals.<key>` del pedido como numeric (no float), para no
-    arrastrar error de coma flotante; una clave ausente suma 0. `data_path`
-    permite leerlo desde otra tabla (`order__data` desde `Payment`)."""
-    # `KeyTextTransform` sobre `KeyTransform` y no `KT(...)`: `KT` toma el
-    # primer segmento como campo y no sabe cruzar la relación de `order__data`.
-    amount = KeyTextTransform(key, KeyTransform("totals", data_path))
-    return Coalesce(Cast(amount, _NUMERIC), Value(Decimal(0), _NUMERIC))
+def _order_total(column: str, prefix: str):
+    """Una columna de totales del pedido; sin dato suma 0."""
+    return Coalesce(F(f"{prefix}{column}"), Value(Decimal(0), _MONEY))
 
 
-def net_of_tax(data_path: str = "data"):
+def net_of_tax(prefix: str = ""):
     """Lo vendido sin impuesto (subtotal + core + envío): el impuesto se cobra
-    por cuenta del estado. Única definición, compartida con `analytics.py`."""
+    por cuenta del estado. Única definición, compartida con `analytics.py`.
+    `prefix` lo lee desde otra tabla (`order__` desde `Payment`)."""
     return (
-        _order_total("subtotal", data_path)
-        + _order_total("core", data_path)
-        + _order_total("shipping", data_path)
+        _order_total("subtotal", prefix)
+        + _order_total("core_total", prefix)
+        + _order_total("shipping_total", prefix)
     )
 
 

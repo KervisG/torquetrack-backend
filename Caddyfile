@@ -1,0 +1,5 @@
+# Termina TLS (certificado automático de Let's Encrypt) y reenvía todo a nginx.
+# `SITE_DOMAIN` sale del `.env`; el DNS debe apuntar al Droplet antes de arrancar.
+{$SITE_DOMAIN} {
+	reverse_proxy frontend:80
+}

@@ -1,0 +1,106 @@
+# Producción en el Droplet: Caddy (TLS) -> nginx (SPA) -> gunicorn.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Requiere el `.env` de producción junto a este archivo y el repo
+# `torquetrack-frontend` clonado en la carpeta hermana. Solo Caddy publica
+# puertos: la base, Redis y gunicorn quedan en la red interna de compose.
+x-app: &app
+  # Sin `target`: el último stage del Dockerfile es `prod`.
+  build:
+    context: .
+  image: torquetrack-backend:prod
+  restart: unless-stopped
+  env_file: .env
+  # Pisan lo que traiga el `.env`: host y puertos son los de la red de compose.
+  environment:
+    DJANGO_SETTINGS_MODULE: config.settings.prod
+    POSTGRES_HOST: db
+    POSTGRES_PORT: "5432"
+    DATABASE_SSL: "false"
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CACHE_URL: redis://redis:6379/1
+    # Caddy siempre escribe `X-Forwarded-Proto` y gunicorn no es alcanzable
+    # sin pasar por él. Dos proxies de confianza: Caddy y nginx.
+    USE_X_FORWARDED_PROTO: "true"
+    NUM_PROXIES: "2"
+  depends_on:
+    db:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    # Solo crea el usuario y la base la primera vez: con el volumen ya
+    # inicializado, cambiar estas variables no los modifica.
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-torquetrack}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Definir POSTGRES_PASSWORD en .env}
+      POSTGRES_DB: ${POSTGRES_DB:-torquetrack}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    # Broker de Celery (base 0) y cache de Django (base 1).
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    # El CMD de la imagen corre `migrate` y luego gunicorn.
+    <<: *app
+
+  worker:
+    <<: *app
+    command: celery -A config worker -l info
+
+  beat:
+    <<: *app
+    # Una sola instancia, o cada trabajo programado sale dos veces.
+    command: celery -A config beat -l info -s /tmp/celerybeat-schedule
+
+  frontend:
+    # nginx sirve el SPA y reenvía /api/, /django-admin/ y /static/ a
+    # `backend:8000` (default de `BACKEND_UPSTREAM` en su imagen).
+    build:
+      context: ../torquetrack-frontend
+      args:
+        VITE_GA_MEASUREMENT_ID: ${VITE_GA_MEASUREMENT_ID:-}
+    restart: unless-stopped
+    depends_on:
+      - backend
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?Definir SITE_DOMAIN en .env}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificados emitidos: sin este volumen se piden de nuevo en cada
+      # arranque y Let's Encrypt limita los pedidos por dominio.
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

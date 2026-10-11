@@ -11,8 +11,8 @@ from tests.factories import create_customer, create_user
 def test_raw_insert_relies_on_database_defaults_for_timestamps_and_tax_status():
     with connection.cursor() as cursor:
         cursor.execute(
-            "insert into customers (id, email, data) values (%s, %s, %s)",
-            ["cus_raw", "fleet@example.com", json.dumps({"name": "Diesel Fleet LLC"})],
+            "insert into customers (id, email, name, details) values (%s, %s, %s, %s)",
+            ["cus_raw", "fleet@example.com", "Diesel Fleet LLC", json.dumps({})],
         )
 
     customer = Customer.objects.get(pk="cus_raw")

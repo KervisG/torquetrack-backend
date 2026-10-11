@@ -147,7 +147,8 @@ def test_patch_account_normalizes_the_state_code(raw, saved):
     response = client.patch("/api/account/", {"state": raw}, format="json")
 
     assert response.status_code == 200
-    assert Customer.objects.get(pk="C_PAT").data["state"] == saved
+    # Vacío es "sin dato": la columna queda en `NULL` y la clave no sale en `data`.
+    assert Customer.objects.get(pk="C_PAT").data.get("state", "") == saved
 
 
 @pytest.mark.django_db

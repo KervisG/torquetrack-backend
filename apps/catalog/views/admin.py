@@ -1,4 +1,5 @@
 from django.http import HttpResponse
+from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -10,6 +11,11 @@ from apps.catalog.services import (
     list_admin_products,
     list_applications,
     upsert_admin_product,
+)
+from apps.catalog.services.images import (
+    add_product_image,
+    delete_product_image,
+    reorder_product_images,
 )
 from apps.common.business_day import store_today
 from config.responses import service_response
@@ -42,9 +48,7 @@ class AdminProductExportView(APIView):
             can_view_costs=has_role_permission(request.user, "costs.view"),
         )
         response = HttpResponse(content, content_type="application/zip")
-        response["Content-Disposition"] = (
-            f'attachment; filename="{export_filename(store_today())}"'
-        )
+        response["Content-Disposition"] = f'attachment; filename="{export_filename(store_today())}"'
         response["Cache-Control"] = "no-store"
         return response
 
@@ -81,3 +85,33 @@ class AdminApplicationListView(APIView):
 
     def get(self, request):
         return Response(list_applications())
+
+
+class AdminProductImagesView(APIView):
+    """Subir una foto (multipart, campo `file`) y reordenar la galería."""
+
+    permission_classes = [HasRolePermission]
+    required_permission = "products.edit"
+    parser_classes = [MultiPartParser, JSONParser]
+
+    def post(self, request, product_id):
+        return service_response(
+            add_product_image(
+                product_id,
+                request.FILES.get("file"),
+                request.data.get("alt"),
+                request.user.email,
+            )
+        )
+
+    def patch(self, request, product_id):
+        body = request.data if isinstance(request.data, dict) else {}
+        return service_response(reorder_product_images(product_id, body.get("order")))
+
+
+class AdminProductImageDetailView(APIView):
+    permission_classes = [HasRolePermission]
+    required_permission = "products.edit"
+
+    def delete(self, request, product_id, image_id):
+        return service_response(delete_product_image(product_id, image_id, request.user.email))

@@ -63,7 +63,7 @@ def test_product_list_returns_application_ids_per_product():
     _insert_product("a-linked").applications.set([early])
     _insert_product("b-unlinked")
 
-    body = APIClient().get("/api/products/").json()
+    body = APIClient().get("/api/products/").json()["results"]
 
     assert body[0]["applicationIds"] == ["ford-73-powerstroke-1994-1997"]
     assert "applicationIds" not in body[1]

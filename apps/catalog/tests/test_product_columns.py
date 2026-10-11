@@ -22,6 +22,7 @@ CATALOG_ROW = {
     "yearFrom": 1994,
     "yearTo": 2000,
     "manufacturer": "Dorman",
+    "condition": "Remanufactured",
     "description": "Remanufactured pump.",
 }
 
@@ -45,6 +46,7 @@ def test_business_fields_are_stored_in_typed_columns():
         "Injection Pump",
     )
     assert (product.year_from, product.year_to) == (1994, 2000)
+    assert (product.manufacturer, product.condition) == ("Dorman", "Remanufactured")
 
 
 @pytest.mark.django_db
@@ -55,7 +57,6 @@ def test_attributes_keep_only_the_fields_without_a_column():
 
     assert product.attributes == {
         "id": "gm-65-pump",
-        "manufacturer": "Dorman",
         "description": "Remanufactured pump.",
     }
 

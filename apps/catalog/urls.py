@@ -5,6 +5,8 @@ from apps.catalog.views import (
     AdminApplicationListView,
     AdminProductDetailView,
     AdminProductExportView,
+    AdminProductImageDetailView,
+    AdminProductImagesView,
     AdminProductListView,
     ApplicationPublicViewSet,
     ProductPublicViewSet,
@@ -34,5 +36,15 @@ urlpatterns = router.urls + [
         "admin/products/<str:product_id>/",
         AdminProductDetailView.as_view(),
         name="admin-product-detail",
+    ),
+    path(
+        "admin/products/<str:product_id>/images/",
+        AdminProductImagesView.as_view(),
+        name="admin-product-images",
+    ),
+    path(
+        "admin/products/<str:product_id>/images/<int:image_id>/",
+        AdminProductImageDetailView.as_view(),
+        name="admin-product-image-detail",
     ),
 ]

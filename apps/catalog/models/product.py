@@ -23,6 +23,8 @@ COLUMN_FIELDS = {
     "make": ("make", "text"),
     "model": ("model", "text"),
     "category": ("category", "text"),
+    "manufacturer": ("manufacturer", "text"),
+    "condition": ("condition", "text"),
     "yearFrom": ("year_from", "year"),
     "yearTo": ("year_to", "year"),
 }
@@ -61,6 +63,9 @@ class Product(ColumnDataMixin, models.Model):
     make = models.TextField(null=True, blank=True)
     model = models.TextField(null=True, blank=True)
     category = models.TextField(null=True, blank=True)
+    # El fabricante de la pieza (Bosch, Garrett), no la marca del vehículo.
+    manufacturer = models.TextField(null=True, blank=True)
+    condition = models.TextField(null=True, blank=True)
     year_from = models.PositiveSmallIntegerField(null=True, blank=True)
     year_to = models.PositiveSmallIntegerField(null=True, blank=True)
     attributes = models.JSONField(default=dict)

@@ -1,5 +1,6 @@
 """Filtrado por resta: todo campo interno nuevo de `data` debe sumarse a
 `RESTRICTED_PRODUCT_FIELDS` para no quedar expuesto en la tienda."""
+
 from rest_framework import serializers
 
 RESTRICTED_PRODUCT_FIELDS = (
@@ -19,7 +20,6 @@ RESTRICTED_PRODUCT_FIELDS = (
 
 
 class ProductPublicSerializer(serializers.Serializer):
-
     def to_representation(self, instance):
         data = dict(instance.data)
         for field in RESTRICTED_PRODUCT_FIELDS:
@@ -33,11 +33,17 @@ class ProductPublicSerializer(serializers.Serializer):
         codes = sorted(application.code for application in instance.applications.all())
         if codes:
             data["applicationIds"] = codes
+        # La galería sale de `ProductImage`; `image` ya es su portada. Sin
+        # fotos la clave no va. La view hace `prefetch_related("images")`.
+        images = [
+            {"id": image.pk, "url": image.url, "alt": image.alt} for image in instance.images.all()
+        ]
+        if images:
+            data["images"] = images
         return data
 
 
 class ApplicationPublicSerializer(serializers.Serializer):
-
     def to_representation(self, instance):
         # El id público es `code`, el mismo que lista `applicationIds`.
         return {**instance.data, "id": instance.code}

@@ -41,6 +41,8 @@ EXPECTED_ON_DELETE = {
     ("order_items", "product_id"): "n",
     ("quote_items", "quote_id"): "c",
     ("quote_items", "product_id"): "n",
+    # Una foto no tiene sentido sin su producto.
+    ("product_images", "product_id"): "c",
 }
 
 

@@ -103,3 +103,30 @@ def quote_shipping(
     Product.objects.filter(id__in=temporary).delete()
     assert status == 200, "quote_shipping could not quote the given items"
     return {"shipmentId": shipment_id, "rateId": rate_id}
+
+
+SPACES = "apps.integrations.storage.spaces"
+
+
+class FakeSpaces:
+    """`spaces.upload` y `spaces.delete` falsos: guarda los objetos en memoria
+    y arma la URL pública como el CDN."""
+
+    def __init__(self):
+        self.objects = {}
+        self.deleted = []
+
+    def upload(self, *, key, content, content_type):
+        self.objects[key] = {"content": content, "content_type": content_type}
+        return f"https://cdn.test/{key}"
+
+    def delete(self, key):
+        self.deleted.append(key)
+        self.objects.pop(key, None)
+
+
+def install_spaces(monkeypatch, fake=None):
+    fake = fake or FakeSpaces()
+    monkeypatch.setattr(f"{SPACES}.upload", fake.upload)
+    monkeypatch.setattr(f"{SPACES}.delete", fake.delete)
+    return fake

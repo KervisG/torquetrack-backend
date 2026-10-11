@@ -12,6 +12,7 @@ from apps.catalog.services.fitment import (
     resolve_application_codes,
     set_product_applications,
 )
+from apps.catalog.services.images import serialize_images
 from apps.common.business_day import store_today
 from apps.common.errors import error_payload
 from apps.common.numbers import money_decimal
@@ -130,8 +131,11 @@ def upsert_admin_product(
     """
     raw = payload.get("product") if isinstance(payload.get("product"), dict) else payload
     # El slug es de la columna y se genera al crear: el panel no lo elige ni lo
-    # cambia, así la URL pública de un producto editado sigue valiendo.
-    product_data = {key: value for key, value in raw.items() if key not in ("active", "slug")}
+    # cambia, así la URL pública de un producto editado sigue valiendo. La galería
+    # (`images`) vive en `ProductImage` y tiene sus propios endpoints.
+    product_data = {
+        key: value for key, value in raw.items() if key not in ("active", "slug", "images")
+    }
     product_data["id"] = product_id
     # El fitment vive en `ProductFitment`, no en `data`. Sin la clave en el
     # body la relación no cambia; con ella (aunque sea `[]`) se reemplaza.
@@ -142,7 +146,7 @@ def upsert_admin_product(
         if error:
             return error_payload(error, "applicationIds"), 400
 
-    active =payload["active"] if "active" in payload else raw.get("active")
+    active = payload["active"] if "active" in payload else raw.get("active")
     if active is not None and not isinstance(active, bool):
         return error_payload("active must be a boolean", "active"), 400
 
@@ -155,6 +159,11 @@ def upsert_admin_product(
     for field in PROTECTED_FIELDS:
         if field not in product_data and field in stored:
             product_data[field] = stored[field]
+
+    # Con galería, la portada la decide la primera foto, no el formulario.
+    cover = product.images.first() if product is not None else None
+    if cover is not None:
+        product_data["image"] = cover.url
 
     changed = [f for f in PROTECTED_FIELDS if product_data.get(f) != stored.get(f)]
     if changed and not can_edit_pricing:
@@ -198,9 +207,10 @@ def upsert_admin_product(
 def list_admin_products(*, can_view_costs: bool) -> list[dict]:
     """Incluye inactivos: el panel es el único lugar donde se reactivan."""
     rows = []
-    for product in Product.objects.prefetch_related("applications").order_by("id"):
+    for product in Product.objects.prefetch_related("applications", "images").order_by("id"):
         data = serialize_admin_product(product.data or {}, can_view_costs=can_view_costs)
         data["applicationIds"] = application_codes(product)
+        data["images"] = serialize_images(product, full=True)
         data["id"] = product.pk
         data["slug"] = product.slug
         data["active"] = product.active
@@ -209,9 +219,7 @@ def list_admin_products(*, can_view_costs: bool) -> list[dict]:
 
 
 def deactivate_admin_product(product_id: str, actor_email: str) -> tuple[dict, int]:
-    updated = Product.objects.filter(pk=product_id).update(
-        active=False, updated_at=timezone.now()
-    )
+    updated = Product.objects.filter(pk=product_id).update(active=False, updated_at=timezone.now())
     if not updated:
         return {"error": "Product not found"}, 404
     record_activity(

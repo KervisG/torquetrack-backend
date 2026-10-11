@@ -270,6 +270,29 @@ SALES_TAX_NEXUS_STATES = ("FL",)
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="") or "34241"
 APP_URL = env("APP_URL", default="http://localhost:5173")
 EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
+# Fotos de producto en DigitalOcean Spaces. Sin las cuatro, subir una foto
+# responde 503 y el resto de la tienda funciona igual.
+SPACES_BUCKET = env("SPACES_BUCKET", default="")
+SPACES_REGION = env("SPACES_REGION", default="")
+SPACES_KEY = env("SPACES_KEY", default="")
+SPACES_SECRET = env("SPACES_SECRET", default="")
+# URL pública de las fotos. Vacía usa el CDN del Space
+# (`https://<bucket>.<region>.cdn.digitaloceanspaces.com`); se define solo
+# para servirlas desde un dominio propio.
+SPACES_PUBLIC_URL = env("SPACES_PUBLIC_URL", default="")
+# Logo de los correos. Con Spaces configurado es el PNG del bucket
+# (`manage.py upload_email_logo` lo sube): una bandeja no puede cargar el del
+# SPA cuando `APP_URL` es `localhost`. El nombre lleva versión porque el CDN lo
+# cachea un año. Vacío usa `APP_URL/brand/email-logo.png`.
+EMAIL_LOGO_KEY = "brand/email-logo-v1.png"
+_SPACES_BASE_URL = SPACES_PUBLIC_URL.rstrip("/") or (
+    f"https://{SPACES_BUCKET}.{SPACES_REGION}.cdn.digitaloceanspaces.com"
+    if SPACES_BUCKET and SPACES_REGION
+    else ""
+)
+EMAIL_LOGO_URL = env("EMAIL_LOGO_URL", default="") or (
+    f"{_SPACES_BASE_URL}/{EMAIL_LOGO_KEY}" if _SPACES_BASE_URL else ""
+)
 RESEND_API_KEY = env("RESEND_API_KEY", default="")
 # Remitente de Resend y buzón de ventas. Los nombres del entorno son
 # `EMAIL_FROM` y `SALES_NOTIFICATION_EMAIL`; `FROM_EMAIL` y `SALES_EMAIL`
@@ -277,7 +300,9 @@ RESEND_API_KEY = env("RESEND_API_KEY", default="")
 FROM_EMAIL = env("EMAIL_FROM", default="") or env("FROM_EMAIL", default="")
 SALES_EMAIL = env("SALES_NOTIFICATION_EMAIL", default="") or env("SALES_EMAIL", default="")
 REPLY_TO_EMAIL = env("REPLY_TO_EMAIL", default="")
-# Buzones de cores y devoluciones. Todavía ningún flujo los usa.
+# Buzones de cores y devoluciones (`checkout/services/workflow_emails.py`):
+# reciben el aviso interno y la respuesta del cliente a cada cambio de estado.
+# Vacío no manda el aviso, y la respuesta del cliente cae en `REPLY_TO_EMAIL`.
 CORES_EMAIL = env("CORES_EMAIL", default="")
 RETURNS_EMAIL = env("RETURNS_EMAIL", default="")
 # Dirección que muestran la cotización y su PDF junto a `SALES_EMAIL` y

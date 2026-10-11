@@ -23,3 +23,47 @@ class AdminProductWriteSerializer(serializers.Serializer):
             "the current list; `[]` clears it. Unknown codes are rejected with 400."
         ),
     )
+
+
+class ProductFacetsSerializer(serializers.Serializer):
+    brands = serializers.ListField(child=serializers.CharField())
+    categories = serializers.ListField(child=serializers.CharField())
+    conditions = serializers.ListField(child=serializers.CharField())
+    priceCeiling = serializers.IntegerField()
+
+
+class ProductPageSerializer(serializers.Serializer):
+    count = serializers.IntegerField()
+    page = serializers.IntegerField()
+    pageSize = serializers.IntegerField()
+    pageCount = serializers.IntegerField()
+    results = CatalogRecordSerializer(many=True)
+    facets = ProductFacetsSerializer(
+        required=False, help_text="Filter options from the whole catalog. Omitted with `ids`."
+    )
+
+
+class ProductImageSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    url = serializers.URLField()
+    alt = serializers.CharField(allow_blank=True)
+    position = serializers.IntegerField(help_text="0 is the cover.")
+    width = serializers.IntegerField(allow_null=True)
+    height = serializers.IntegerField(allow_null=True)
+
+
+class ProductGallerySerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    images = ProductImageSerializer(many=True)
+
+
+class ProductImageUploadSerializer(serializers.Serializer):
+    file = serializers.ImageField(help_text="JPG, PNG or WebP, up to 4 MB.")
+    alt = serializers.CharField(required=False, allow_blank=True)
+
+
+class ProductImageOrderSerializer(serializers.Serializer):
+    order = serializers.ListField(
+        child=serializers.IntegerField(),
+        help_text="Every image id of the product, in the new order. The first is the cover.",
+    )

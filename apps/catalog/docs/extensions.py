@@ -8,7 +8,14 @@ from drf_spectacular.utils import (
 )
 
 from apps.authorization.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
-from apps.catalog.docs.schemas import AdminProductWriteSerializer, CatalogRecordSerializer
+from apps.catalog.docs.schemas import (
+    AdminProductWriteSerializer,
+    CatalogRecordSerializer,
+    ProductGallerySerializer,
+    ProductImageOrderSerializer,
+    ProductImageUploadSerializer,
+    ProductPageSerializer,
+)
 
 
 class ProductPublicViewSetExtension(OpenApiViewExtension):
@@ -19,7 +26,30 @@ class ProductPublicViewSetExtension(OpenApiViewExtension):
             list=extend_schema(
                 operation_id="catalog_products_list",
                 tags=["catalog"],
-                responses={200: OpenApiResponse(CatalogRecordSerializer(many=True))},
+                description=(
+                    "One page of active products, searched, filtered and sorted by the "
+                    "server, with the filter options (`facets`) of the whole catalog."
+                ),
+                parameters=[
+                    OpenApiParameter("q", str, description="Text or part number."),
+                    OpenApiParameter("brand", str, description="Part manufacturer."),
+                    OpenApiParameter("category", str),
+                    OpenApiParameter("condition", str),
+                    OpenApiParameter("min", str, description="Minimum price."),
+                    OpenApiParameter("max", str, description="Maximum price."),
+                    OpenApiParameter("sort", str, enum=["low", "high"]),
+                    OpenApiParameter("page", int),
+                    OpenApiParameter("pageSize", int, description="Default 16, up to 100."),
+                    OpenApiParameter(
+                        "ids", str, description="Comma-separated product ids; no `facets`."
+                    ),
+                    OpenApiParameter("applicationId", str, description="Vehicle application."),
+                    OpenApiParameter("vehicleYear", str),
+                    OpenApiParameter("vehicleMake", str),
+                    OpenApiParameter("vehicleModel", str),
+                    OpenApiParameter("vehicleEngine", str),
+                ],
+                responses={200: OpenApiResponse(ProductPageSerializer)},
             ),
             retrieve=extend_schema(
                 operation_id="catalog_product_retrieve",
@@ -181,6 +211,82 @@ class AdminProductDetailViewExtension(OpenApiViewExtension):
                 return super().delete(request, product_id)
 
         return AdminProductDetailView
+
+
+class AdminProductImagesViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminProductImagesView"
+
+    def view_replacement(self):
+        class AdminProductImagesView(self.target_class):
+            @extend_schema(
+                operation_id="admin_product_image_upload",
+                tags=["admin: products"],
+                summary="Upload a product photo",
+                description=(
+                    "Requires `products.edit`. Multipart body. The photo is stored as WebP, "
+                    "scaled to 1600 px at most. The first photo becomes the cover (`image`). "
+                    "Up to 12 photos per product."
+                ),
+                parameters=[OpenApiParameter("product_id", str, OpenApiParameter.PATH)],
+                request={"multipart/form-data": ProductImageUploadSerializer},
+                responses={
+                    201: OpenApiResponse(ProductGallerySerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                    502: OpenApiResponse(ErrorResponseSerializer),
+                    503: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def post(self, request, product_id):
+                return super().post(request, product_id)
+
+            @extend_schema(
+                operation_id="admin_product_images_reorder",
+                tags=["admin: products"],
+                summary="Reorder the product photos",
+                description="Requires `products.edit`. The first id becomes the cover.",
+                parameters=[OpenApiParameter("product_id", str, OpenApiParameter.PATH)],
+                request=ProductImageOrderSerializer,
+                responses={
+                    200: OpenApiResponse(ProductGallerySerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def patch(self, request, product_id):
+                return super().patch(request, product_id)
+
+        return AdminProductImagesView
+
+
+class AdminProductImageDetailViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminProductImageDetailView"
+
+    def view_replacement(self):
+        class AdminProductImageDetailView(self.target_class):
+            @extend_schema(
+                operation_id="admin_product_image_delete",
+                tags=["admin: products"],
+                summary="Delete a product photo",
+                description=(
+                    "Requires `products.edit`. If it was the cover, the next photo takes over."
+                ),
+                parameters=[
+                    OpenApiParameter("product_id", str, OpenApiParameter.PATH),
+                    OpenApiParameter("image_id", int, OpenApiParameter.PATH),
+                ],
+                responses={
+                    200: OpenApiResponse(ProductGallerySerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def delete(self, request, product_id, image_id):
+                return super().delete(request, product_id, image_id)
+
+        return AdminProductImageDetailView
 
 
 class SitemapViewExtension(OpenApiViewExtension):

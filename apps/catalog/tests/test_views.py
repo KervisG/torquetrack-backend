@@ -70,8 +70,7 @@ def test_product_list_strips_internal_cost_fields():
     response = APIClient().get("/api/products/")
 
     assert response.status_code == 200
-    body = response.json()
-    assert isinstance(body, list)
+    body = response.json()["results"]
     assert len(body) == 1
     for field in RESTRICTED_FIELDS:
         assert field not in body[0]
@@ -86,7 +85,7 @@ def test_product_list_excludes_inactive_products():
 
     response = APIClient().get("/api/products/")
 
-    body = response.json()
+    body = response.json()["results"]
     assert [p["id"] for p in body] == ["gm-65-injection-pump-dorman-502550"]
 
 
@@ -142,7 +141,7 @@ def test_application_detail_returns_full_data():
 def test_product_list_and_detail_expose_the_slug():
     _insert_product("gm-65-injection-pump-dorman-502550", REAL_PRODUCT_SHAPE, active=True)
 
-    listed = APIClient().get("/api/products/").json()[0]
+    listed = APIClient().get("/api/products/").json()["results"][0]
     detail = APIClient().get("/api/products/gm-65-injection-pump-dorman-502550/").json()
 
     assert listed["slug"] == "65l-turbo-diesel-fuel-injection-pump-502-550"

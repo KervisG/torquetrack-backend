@@ -48,6 +48,11 @@ class ProductPublicViewSetExtension(OpenApiViewExtension):
                     OpenApiParameter("vehicleMake", str),
                     OpenApiParameter("vehicleModel", str),
                     OpenApiParameter("vehicleEngine", str),
+                    OpenApiParameter(
+                        "overview",
+                        str,
+                        description="Any value adds `overview`: counts by category and make.",
+                    ),
                 ],
                 responses={200: OpenApiResponse(ProductPageSerializer)},
             ),

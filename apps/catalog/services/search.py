@@ -225,6 +225,46 @@ def _facets(active) -> dict:
     }
 
 
+def _overview(active) -> dict:
+    """Qué vende la tienda, para la portada: cuántos productos hay por
+    categoría y por marca de vehículo, y qué fabricantes tiene cada categoría.
+    Sale de los productos activos, así una categoría nueva aparece sola."""
+    categories: dict[str, dict] = {}
+    makes: dict[str, int] = {}
+    rows = active.values_list("category", "manufacturer", "make")
+    for category, manufacturer, make in rows:
+        raw = str(category or "").strip()
+        if raw:
+            group = categories.setdefault(
+                canonical_category(raw), {"labels": set(), "count": 0, "brands": set()}
+            )
+            group["labels"].add(raw)
+            group["count"] += 1
+            group["brands"].update(_manufacturer_names(manufacturer))
+        name = str(make or "").strip()
+        if name:
+            makes[name] = makes.get(name, 0) + 1
+    return {
+        "productCount": len(rows),
+        "categories": [
+            {
+                "value": value,
+                # Dos textos de la misma categoría: se muestra uno, siempre el mismo.
+                "label": min(group["labels"]),
+                "count": group["count"],
+                "brands": sorted(group["brands"]),
+            }
+            for value, group in sorted(
+                categories.items(), key=lambda item: (-item[1]["count"], item[0])
+            )
+        ],
+        "makes": [
+            {"name": name, "count": count}
+            for name, count in sorted(makes.items(), key=lambda item: (-item[1], item[0]))
+        ],
+    }
+
+
 def search_products(params) -> dict:
     """La página pedida, con sus totales; `products` es la lista de filas
     listas para serializar. Con `ids` no hay página ni `facets`: es la consulta
@@ -304,4 +344,6 @@ def search_products(params) -> dict:
     }
     if not ids:
         result["facets"] = _facets(active)
+    if params.get("overview"):
+        result["overview"] = _overview(active)
     return result

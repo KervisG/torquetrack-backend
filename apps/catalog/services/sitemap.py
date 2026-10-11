@@ -12,9 +12,11 @@ from django.utils import timezone
 from apps.catalog.models import Product
 from apps.common.links import app_url
 
-# Rutas fijas del SPA (`src/routes.tsx` del frontend). El inicio es el catálogo.
+# Rutas fijas del SPA (`src/routes.tsx` del frontend): la portada, el catálogo
+# y las páginas de contenido.
 STATIC_SITEMAP_PATHS = (
     "/",
+    "/shop",
     "/quote",
     "/policies",
     "/policies/shipping",

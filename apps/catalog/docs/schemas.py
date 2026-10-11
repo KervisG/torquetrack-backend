@@ -41,6 +41,13 @@ class ProductPageSerializer(serializers.Serializer):
     facets = ProductFacetsSerializer(
         required=False, help_text="Filter options from the whole catalog. Omitted with `ids`."
     )
+    overview = serializers.DictField(
+        required=False,
+        help_text=(
+            "Only with `overview`: `productCount`, `categories` (value, label, count, brands) "
+            "and `makes` (name, count), for the storefront home page."
+        ),
+    )
 
 
 class ProductImageSerializer(serializers.Serializer):

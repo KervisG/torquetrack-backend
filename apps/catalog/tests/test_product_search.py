@@ -237,3 +237,37 @@ def test_facets_come_from_the_whole_catalog_not_from_the_page():
         "conditions": ["New", "Remanufactured"],
         "priceCeiling": 2400,
     }
+
+
+# --- resumen para la portada ------------------------------------------------
+
+
+@pytest.mark.django_db
+def test_overview_groups_the_catalog_by_category_and_truck():
+    _product("i1", category="Injector", manufacturer="Bosch", make="Ford")
+    _product("i2", category="Fuel Injectors", manufacturer="Alliant Power / Bosch", make="Ford")
+    _product("t1", category="Turbo", manufacturer="Garrett", make="RAM")
+    _product("off", category="Turbo", manufacturer="Hidden", make="RAM", active=False)
+
+    overview = _get(overview="1", pageSize=1)["overview"]
+
+    assert overview == {
+        "productCount": 3,
+        "categories": [
+            {
+                "value": "INJECTOR",
+                "label": "Fuel Injectors",
+                "count": 2,
+                "brands": ["Alliant Power", "Bosch"],
+            },
+            {"value": "TURBO", "label": "Turbo", "count": 1, "brands": ["Garrett"]},
+        ],
+        "makes": [{"name": "Ford", "count": 2}, {"name": "RAM", "count": 1}],
+    }
+
+
+@pytest.mark.django_db
+def test_overview_is_only_sent_when_asked():
+    _product("p1")
+
+    assert "overview" not in _get()

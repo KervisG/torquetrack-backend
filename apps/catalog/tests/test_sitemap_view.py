@@ -45,6 +45,7 @@ def test_sitemap_lists_the_static_storefront_pages():
 
     for path in (
         "/",
+        "/shop",
         "/quote",
         "/policies",
         "/policies/shipping",

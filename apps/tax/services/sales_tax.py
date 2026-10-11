@@ -59,8 +59,11 @@ def calculate_sales_tax(
                 to_zip=zip_code,
                 to_city=city,
                 to_street=address1,
-                amount=taxable_amount,
-                shipping=shipping,
+                # TaxJar trata el envío de FL como no gravable, pero el
+                # checkout siempre lo exige (regla 12A-1.045): va en `amount`
+                # para que coincida con la tabla de respaldo.
+                amount=taxable_amount + shipping,
+                shipping=ZERO,
             )
         except ProviderError:
             # Sin key o con TaxJar caído se estima con la tabla: un impuesto

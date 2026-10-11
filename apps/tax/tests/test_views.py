@@ -226,8 +226,10 @@ def test_taxjar_success_returned_when_configured(settings, monkeypatch):
     assert body["tax"] == 7.35
     assert body["provider"] == "taxjar"
     assert body["estimated"] is False
-    assert captured["amount"] == 120.0
-    assert captured["shipping"] == 5.0
+    # El envío viaja dentro de `amount`: TaxJar no grava el envío de FL por
+    # separado, pero aquí el comprador no puede evitarlo (regla 12A-1.045).
+    assert captured["amount"] == 125.0
+    assert captured["shipping"] == 0
     assert captured["to_state"] == "FL"
     assert captured["to_zip"] == "33701"
 

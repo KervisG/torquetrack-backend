@@ -1,10 +1,8 @@
 {% comment %}
-Plantilla de la cotización, usada en tres renders: la página HTML pública de
-`GET /api/quote/public/<token>` (medio screen, con botón de checkout
-interactivo), el PDF de WeasyPrint (que renderiza como medio print por
-defecto; la regla `@media print` de abajo oculta los botones de acción, así
-que no hace falta una plantilla solo para PDF) y el cuerpo del email "send"
-de admin.
+Plantilla de la cotización, usada en dos renders: el PDF de WeasyPrint (que
+renderiza como medio print por defecto; la regla `@media print` de abajo oculta
+los botones de acción, así que no hace falta una plantilla solo para PDF) y el
+cuerpo del email "send" de admin.
 
 El logo es el SVG en línea (WeasyPrint lo dibuja y el PDF no tiene
 `base_url` para recursos externos); con `for_email` va el PNG publicado por el
@@ -132,8 +130,8 @@ SPA, porque los clientes de correo bloquean el SVG.
   </div>
 
   <div class="actions">
-    {# Enlace real: en el correo (sin JS) abre la página del SPA; en la página HTML el onclick abre el checkout. #}
-    <a class="btn" style="border:0;cursor:pointer" href="{{ public_url }}" onclick="checkoutQuote(); return false;">View / Checkout Quote &rarr;</a>
+    {# En el correo abre la página del SPA, que hace el checkout. #}
+    <a class="btn" style="border:0" href="{{ public_url }}">View / Checkout Quote &rarr;</a>
     <a class="btn" style="background:transparent;color:#fbbf24;border:1px solid #fbbf24" href="{{ pdf_url }}">Download PDF</a>
   </div>
 
@@ -145,20 +143,5 @@ SPA, porque los clientes de correo bloquean el SVG.
     <p style="letter-spacing:4px;text-align:center">FIND IT. PRICE IT. SHIP IT FAST.</p>
   </footer>
 </main>
-<script>
-async function checkoutQuote(){
-  const b = document.querySelector('.actions .btn');
-  if (b) b.textContent = 'Opening secure checkout...';
-  try {
-    const r = await fetch(location.pathname + '/checkout', { method: 'POST' });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || 'Checkout unavailable');
-    location.href = j.url;
-  } catch (e) {
-    if (b) { b.textContent = e && e.message || 'Checkout unavailable'; b.style.background = '#7f1d1d'; b.style.color = '#fff'; }
-  }
-}
-</script>
-{% if print_mode %}<script>window.onload = () => window.print();</script>{% endif %}
 </body>
 </html>

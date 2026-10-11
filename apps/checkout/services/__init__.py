@@ -17,11 +17,8 @@ from apps.checkout.services.fulfillment import (
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
     CLOSED_ORDER_STATUSES,
-    STRIPE_REQUEST_FAILED,
     cancel_pending_payment,
-    cancel_pending_payments,
     cancel_unpaid_order,
-    get_stripe_payment_method,
     start_stripe_payment,
 )
 from apps.checkout.services.refunds import refund_order
@@ -44,14 +41,11 @@ __all__ = [
     "FULFILLMENT_TRANSITIONS",
     "ORDER_STATUS_TRANSITIONS",
     "PAYMENT_START_FAILED",
-    "STRIPE_REQUEST_FAILED",
     "cancel_pending_payment",
-    "cancel_pending_payments",
     "cancel_unpaid_order",
     "create_admin_payment_link",
     "create_storefront_checkout",
     "delete_admin_order",
-    "get_stripe_payment_method",
     "list_admin_orders",
     "next_order_number",
     "patch_admin_order",

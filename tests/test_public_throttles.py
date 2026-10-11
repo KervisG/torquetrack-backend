@@ -142,7 +142,6 @@ UNTHROTTLED_PUBLIC_VIEWS = {
     "apps.authentication.views.SessionView",
     "apps.authentication.views.LogoutView",
     # Lecturas por token imposible de adivinar, sin proveedor.
-    "apps.quotes.views.storefront.PublicQuoteView",
     "apps.quotes.views.storefront.PublicQuoteDetailsView",
     # Exigen sesión (401 sin ella); `AllowAny` solo separa el 401 del 403/404.
     "apps.customers.views.storefront.AccountView",

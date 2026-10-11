@@ -1,4 +1,4 @@
-"""El PDF usa la misma plantilla que la página pública y el correo: `@media print`
+"""El PDF usa la misma plantilla que el correo: `@media print`
 ya oculta los botones. WeasyPrint necesita Pango/Cairo, que trae la imagen de
 `Dockerfile`."""
 from __future__ import annotations
@@ -11,7 +11,7 @@ from apps.quotes.services.rendering import render_quote_html
 def render_quote_pdf_bytes(quote: dict) -> bytes:
     from weasyprint import HTML
 
-    html = render_quote_html(quote, public_url=None, print_mode=False)
+    html = render_quote_html(quote, public_url=None)
     return HTML(string=html).write_pdf()
 
 

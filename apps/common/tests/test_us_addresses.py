@@ -12,7 +12,6 @@ from apps.common.us_addresses import (
     normalize_state_code,
     shipping_zip_error,
     states_for_zip,
-    zip_matches_state,
     zip_states_by_prefix,
 )
 
@@ -85,7 +84,6 @@ def test_other_zip_shapes_are_invalid(raw):
 )
 def test_a_zip_matches_the_state_of_its_usps_prefix(zip_code, state):
     assert states_for_zip(zip_code) == {state}
-    assert zip_matches_state(zip_code, state)
     assert shipping_zip_error(zip_code, state) is None
 
 
@@ -104,7 +102,6 @@ def test_a_zip_matches_the_state_of_its_usps_prefix(zip_code, state):
     ],
 )
 def test_a_zip_from_another_state_does_not_match(zip_code, state):
-    assert not zip_matches_state(zip_code, state)
     assert shipping_zip_error(zip_code, state) == ZIP_STATE_MISMATCH
 
 
@@ -126,8 +123,7 @@ def test_a_zip_from_another_state_does_not_match(zip_code, state):
 def test_unassigned_military_and_freely_associated_zips_are_not_valid(zip_code):
     assert states_for_zip(zip_code) == frozenset()
     for state in ("FL", "NY", "CA", "GU", "DC"):
-        assert not zip_matches_state(zip_code, state)
-    assert shipping_zip_error(zip_code, "FL") == UNKNOWN_SHIPPING_ZIP
+        assert shipping_zip_error(zip_code, state) == UNKNOWN_SHIPPING_ZIP
 
 
 @pytest.mark.parametrize(
@@ -136,14 +132,13 @@ def test_unassigned_military_and_freely_associated_zips_are_not_valid(zip_code):
 )
 def test_a_zip_that_crosses_a_state_line_matches_every_state_it_serves(zip_code, states):
     for state in states:
-        assert zip_matches_state(zip_code, state)
+        assert shipping_zip_error(zip_code, state) is None
     assert states_for_zip(zip_code) == states
-    assert not zip_matches_state(zip_code, "FL")
+    assert shipping_zip_error(zip_code, "FL") == ZIP_STATE_MISMATCH
 
 
 def test_a_malformed_zip_reports_the_shape_error_first():
     assert shipping_zip_error("3370", "FL") == INVALID_SHIPPING_ZIP
-    assert not zip_matches_state("3370", "FL")
     assert states_for_zip(None) == frozenset()
 
 

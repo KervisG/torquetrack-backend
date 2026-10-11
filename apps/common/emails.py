@@ -3,7 +3,7 @@
 Vive en `apps/common/` porque lo usan `authentication`, `checkout` y `quotes`
 y solo arma un string (sin I/O, sin modelos, sin importar apps). El logo es el
 PNG que publica el SPA: los clientes de correo bloquean el SVG, así que el SVG
-en línea queda para la página pública y el PDF de la cotización."""
+en línea queda para el PDF de la cotización."""
 from __future__ import annotations
 
 from django.utils.html import format_html

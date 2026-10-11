@@ -7,7 +7,6 @@ from apps.quotes.views import (
     PublicQuoteCheckoutView,
     PublicQuoteDetailsView,
     PublicQuotePdfView,
-    PublicQuoteView,
     QuoteConvertView,
     QuoteDeleteView,
     QuotePreviewView,
@@ -18,7 +17,6 @@ from apps.quotes.views import (
 
 urlpatterns = [
     path("quote/request/", QuoteRequestView.as_view(), name="quote-request"),
-    path("quote/public/<str:token>/", PublicQuoteView.as_view(), name="quote-public"),
     path("quote/public/<str:token>/pdf/", PublicQuotePdfView.as_view(), name="quote-public-pdf"),
     path(
         "quote/public/<str:token>/details/",

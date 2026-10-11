@@ -5,7 +5,7 @@ módulo por tema; este `__init__` reexporta la API pública para que los imports
 `permission_codenames_for_role` para la respuesta de sesión. Los tests
 parchean el módulo donde se usa cada función
 (`apps.authorization.services.users.record_activity`), no este."""
-from apps.authorization.services.grants import COMMAND_ACTOR, NO_ROLE, grant_role
+from apps.authorization.services.grants import NO_ROLE, grant_role
 from apps.authorization.services.roles import (
     create_admin_role,
     list_admin_roles,
@@ -20,7 +20,6 @@ from apps.authorization.services.users import (
 )
 
 __all__ = [
-    "COMMAND_ACTOR",
     "NO_ROLE",
     "create_admin_role",
     "delete_admin_user",

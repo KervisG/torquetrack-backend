@@ -155,10 +155,6 @@ def states_for_zip(value) -> frozenset[str]:
     return frozenset({state}) if state else frozenset()
 
 
-def zip_matches_state(zip_code, state) -> bool:
-    return normalize_state_code(state) in states_for_zip(zip_code)
-
-
 def shipping_zip_error(zip_code, state) -> str | None:
     """Mensaje para el cliente si el ZIP está mal formado, no existe o no es
     del estado. `state` ya tiene que haber pasado `shipping_state_error`."""

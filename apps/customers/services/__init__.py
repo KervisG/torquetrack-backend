@@ -12,9 +12,6 @@ from apps.customers.services.admin import (
     upsert_admin_customer,
 )
 from apps.customers.services.storefront import (
-    ACCOUNT_PROFILE_FIELDS,
-    CERTIFICATE_MIME_TYPES,
-    MAX_CERTIFICATE_BYTES,
     activate_customer_account,
     customer_for_user,
     link_guest_history,
@@ -29,9 +26,6 @@ from apps.customers.services.storefront import (
 )
 
 __all__ = [
-    "ACCOUNT_PROFILE_FIELDS",
-    "CERTIFICATE_MIME_TYPES",
-    "MAX_CERTIFICATE_BYTES",
     "activate_customer_account",
     "create_portal_invite",
     "customer_for_user",

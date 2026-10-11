@@ -12,7 +12,6 @@ from apps.quotes.views.pdf import PublicQuotePdfView
 from apps.quotes.views.storefront import (
     PublicQuoteCheckoutView,
     PublicQuoteDetailsView,
-    PublicQuoteView,
     QuoteRequestView,
 )
 
@@ -23,7 +22,6 @@ __all__ = [
     "PublicQuoteCheckoutView",
     "PublicQuoteDetailsView",
     "PublicQuotePdfView",
-    "PublicQuoteView",
     "QuoteConvertView",
     "QuoteDeleteView",
     "QuotePreviewView",

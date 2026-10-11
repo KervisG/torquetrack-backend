@@ -1,5 +1,5 @@
 """Presentación de una cotización: serialización, enlaces públicos y la
-plantilla HTML que comparten la página pública, el correo y el PDF."""
+plantilla HTML que comparten el correo y el PDF."""
 from __future__ import annotations
 
 from django.conf import settings
@@ -82,13 +82,11 @@ def render_quote_html(
     *,
     public_url: str | None = None,
     pdf_url: str | None = None,
-    print_mode: bool = False,
     for_email: bool = False,
 ) -> str:
-    """El `pdf_url` por defecto solo vale cuando `public_url` es la ruta HTML
-    de la API; el correo manda el suyo porque enlaza al SPA. `for_email` cambia
-    el logo SVG en línea por el PNG publicado: los clientes de correo bloquean
-    el SVG, que la página pública y el PDF sí dibujan."""
+    """El correo manda su propio `pdf_url` porque `public_url` enlaza al SPA.
+    `for_email` cambia el logo SVG en línea por el PNG publicado: los clientes
+    de correo bloquean el SVG, que el PDF sí dibuja."""
     customer = quote.get("customer") or {}
     vehicle = quote.get("vehicle") or {}
     totals = quote.get("totals") or {}
@@ -103,8 +101,7 @@ def render_quote_html(
             "totals": totals,
             "items": items,
             "public_url": public_url or "#",
-            "pdf_url": pdf_url or (f"{public_url}/pdf" if public_url else "#"),
-            "print_mode": print_mode,
+            "pdf_url": pdf_url or "#",
             "for_email": for_email,
             "email_logo_url": email_logo_url() if for_email else "",
             "greeting_name": greeting_name,

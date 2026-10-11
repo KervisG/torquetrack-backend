@@ -9,7 +9,6 @@ from apps.authentication.services.credentials import (
     change_password,
     create_account,
     parse_email,
-    password_error,
 )
 from apps.authentication.services.email_verification import (
     consume_email_verification,
@@ -46,7 +45,6 @@ __all__ = [
     "issue_activation_token",
     "lock_activation_token",
     "parse_email",
-    "password_error",
     "request_password_reset",
     "resend_verification_email",
     "send_existing_account_email",

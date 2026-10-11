@@ -1,6 +1,5 @@
 """Las rutas públicas por token son `AllowAny`: el control de acceso es poseer
 un token imposible de adivinar, no una sesión."""
-from django.http import HttpResponse
 from rest_framework.parsers import JSONParser
 from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
@@ -16,9 +15,7 @@ from apps.quotes.services import (
     checkout_from_quote,
     create_quote_from_request,
     is_expired,
-    render_quote_html,
     serialize_public_quote,
-    serialize_quote,
 )
 from config.responses import service_response
 
@@ -43,28 +40,6 @@ class QuoteRequestView(APIView):
             body, request.user, cart_id=current_cart_id(request.user, request.session)
         )
         return service_response(result)
-
-
-class PublicQuoteView(APIView):
-
-    permission_classes = [AllowAny]
-
-    def get(self, request, token):
-        quote = _find_by_token(token)
-        if quote is None:
-            return Response({"error": "Quote not found"}, status=404)
-        if is_expired(quote):
-            # El chequeo es de solo lectura y nunca cambia `status`: la
-            # cotización no se reabre sola.
-            return Response({"error": "This quote has expired"}, status=410)
-
-        print_mode = request.GET.get("print") == "1"
-        public_url = f"{request.build_absolute_uri('/api/quote/public/')}{token}"
-        quote_dict = serialize_quote(quote)
-        html = render_quote_html(quote_dict, public_url=public_url, print_mode=print_mode)
-        response = HttpResponse(html, content_type="text/html; charset=utf-8")
-        response["Cache-Control"] = "no-store"
-        return response
 
 
 class PublicQuoteDetailsView(APIView):

@@ -141,7 +141,7 @@ def test_status_defaults_keep_their_values(model, field_name, default):
             },
         ),
         (CartStage, {"CART", "CHECKOUT", "BUILDING_QUOTE"}),
-        (CartStatus, {"ACTIVE", "ABANDONED", "CHECKOUT", "BUILDING_QUOTE", "EMPTY"}),
+        (CartStatus, {"ACTIVE", "ABANDONED", "CHECKOUT", "BUILDING_QUOTE"}),
         (PortalStatus, {"ACTIVE", "INVITED", "NOT ACTIVATED"}),
     ],
 )

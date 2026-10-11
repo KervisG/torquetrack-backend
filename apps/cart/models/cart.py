@@ -22,7 +22,6 @@ class CartStatus(models.TextChoices):
     ABANDONED = "ABANDONED"
     CHECKOUT = "CHECKOUT"
     BUILDING_QUOTE = "BUILDING_QUOTE"
-    EMPTY = "EMPTY"
 
 
 class Cart(models.Model):

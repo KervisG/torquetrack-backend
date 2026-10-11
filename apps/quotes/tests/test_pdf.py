@@ -142,11 +142,24 @@ def test_pdf_footer_uses_the_company_settings(monkeypatch, settings):
     assert "torquetrackdiesel.com" not in html
 
 
+def test_quote_footer_omits_an_unset_sales_email(settings):
+    from apps.quotes.services.rendering import render_quote_html
+
+    settings.SALES_EMAIL = ""
+    settings.COMPANY_ADDRESS = "Tampa, FL"
+
+    html = render_quote_html({"number": "Q1"})
+
+    assert "Tampa, FL" in html
+    assert "&bull; Tampa" not in html
+    assert "teams@" not in html
+
+
 LOGO_PATHS = ("M0 0H51V14H34.5V58H16.5V14H0Z", "M55 0H106V14H89.5V58H71.5V14H55Z")
 
 
 def test_quote_page_draws_the_inline_svg_logo_in_the_amber_palette():
-    # La página pública y el PDF no tienen `base_url`: el logo va en línea.
+    # El PDF no tiene `base_url`: el logo va en línea.
     from apps.quotes.services.rendering import render_quote_html
 
     html = render_quote_html({"number": "Q1"})

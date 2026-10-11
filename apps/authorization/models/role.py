@@ -9,7 +9,6 @@ from django.db import models
 # Roles que siembra `0002_seed_roles`. `createsuperuser` y
 # `manage.py grant_role --role admin` asignan el de acceso total.
 ADMIN_ROLE_SLUG = "admin"
-EMPLOYEE_ROLE_SLUG = "employee"
 
 
 class Role(models.Model):

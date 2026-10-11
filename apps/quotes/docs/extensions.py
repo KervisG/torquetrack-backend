@@ -55,25 +55,6 @@ class QuoteRequestViewExtension(OpenApiViewExtension):
         return QuoteRequestView
 
 
-class PublicQuoteViewExtension(OpenApiViewExtension):
-    target_class = "apps.quotes.views.storefront.PublicQuoteView"
-
-    def view_replacement(self):
-        class PublicQuoteView(self.target_class):
-            @extend_schema(
-                operation_id="quote_public",
-                tags=["storefront"],
-                summary="Read a public quote",
-                auth=[],
-                parameters=[TOKEN],
-                responses={200: OpenApiResponse(QuoteSerializer), 404: ERR},
-            )
-            def get(self, request, token):
-                return super().get(request, token)
-
-        return PublicQuoteView
-
-
 class PublicQuoteDetailsViewExtension(OpenApiViewExtension):
     target_class = "apps.quotes.views.storefront.PublicQuoteDetailsView"
 

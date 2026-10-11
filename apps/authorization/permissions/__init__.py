@@ -12,7 +12,6 @@ from apps.authorization.permissions.catalog import (
     DEFAULT_EMPLOYEE_PERMISSIONS,
     PERMISSION_TO_CODE,
     STAFF_PERMISSIONS,
-    resolve_staff_permission,
 )
 from apps.authorization.permissions.classes import (
     HasRolePermission,
@@ -29,5 +28,4 @@ __all__ = [
     "HasRolePermission",
     "has_role_permission",
     "is_staff_user",
-    "resolve_staff_permission",
 ]

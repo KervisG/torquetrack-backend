@@ -93,7 +93,8 @@ def test_a_line_that_is_not_an_object_is_an_invalid_quantity():
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("price", [0, -5, None, "abc"])
+# Negativos y texto no llegan: la columna `price` los rechaza.
+@pytest.mark.parametrize("price", [0, None])
 def test_a_catalog_price_that_is_not_positive_is_rejected_with_the_lines(price):
     _insert_product(price=price)
     _insert_product("priced", price=10)

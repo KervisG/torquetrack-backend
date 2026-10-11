@@ -5,7 +5,7 @@ import re
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.catalog.models import Product
+from apps.catalog.models import Product, ProductFieldError
 from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS
 from apps.catalog.services.fitment import (
     application_codes,
@@ -169,7 +169,10 @@ def upsert_admin_product(
         product = Product(id=product_id, active=True if active is None else active)
     elif active is not None:
         product.active = active
-    product.data = product_data
+    try:
+        product.data = product_data
+    except ProductFieldError as exc:
+        return error_payload(str(exc), exc.field), 400
     product.updated_at = timezone.now()
     product.save()
     if applications is not None:

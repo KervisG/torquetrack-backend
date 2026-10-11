@@ -118,7 +118,7 @@ def test_prices_come_from_the_catalog_and_ignore_the_client():
 def test_reading_reprices_with_the_current_catalog_price():
     client = APIClient()
     _put(client, [{"id": PUMP, "qty": 1}])
-    Product.objects.filter(pk=PUMP).update(data={**PRODUCTS[PUMP], "price": 200})
+    Product.objects.filter(pk=PUMP).update(price=200)
 
     body = _get(client).json()
 
@@ -140,7 +140,7 @@ def test_reading_omits_a_product_that_was_deactivated_after_it_was_added():
 
 @pytest.mark.django_db
 def test_an_unpriced_product_is_listed_without_a_price_and_left_out_of_the_subtotal():
-    Product.objects.filter(pk=TURBO).update(data={**PRODUCTS[TURBO], "price": 0})
+    Product.objects.filter(pk=TURBO).update(price=0)
     client = APIClient()
 
     body = _put(client, [{"id": PUMP, "qty": 1}, {"id": TURBO, "qty": 1}]).json()

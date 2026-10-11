@@ -135,7 +135,8 @@ def test_returns_400_when_no_valid_products_in_cart():
 
 
 @pytest.mark.django_db
-@pytest.mark.parametrize("price", [0, -5, None])
+# Un negativo no llega: la columna `price` lo rechaza.
+@pytest.mark.parametrize("price", [0, None])
 def test_returns_409_when_a_catalog_price_is_not_positive(price, monkeypatch, shipping):
     # Un producto sin precio en el catálogo se cobraría gratis en Stripe.
     _insert_product(data={**PRODUCT_DATA, "price": price})

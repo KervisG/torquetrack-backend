@@ -38,7 +38,7 @@ def _catalog(db):
 
 
 def _set_price(product_id, price):
-    Product.objects.filter(pk=product_id).update(data={**PRODUCTS[product_id], "price": price})
+    Product.objects.filter(pk=product_id).update(price=price)
 
 
 def _put(client, items, **extra):

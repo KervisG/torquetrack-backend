@@ -207,6 +207,28 @@ def test_put_on_a_stored_product_without_price_requires_setting_one():
     assert accepted.status_code == 200
     assert Product.objects.get(pk="prod_legacy").data["price"] == 80
 
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "field, error_field",
+    [
+        ("compareAt", "compare_at"),
+        ("coreCharge", "core_charge"),
+        ("purchaseCost", "purchase_cost"),
+    ],
+)
+def test_put_rejects_money_that_is_not_a_number(field, error_field):
+    _insert_user("usr_put8", permissions=["products.edit", "pricing.edit", "costs.view"])
+    body = {"title": "Pump", "partNumber": "PM-1", "price": 80, field: "call us"}
+
+    response = _admin_client("usr_put8").put(
+        "/api/admin/products/prod_text/", body, format="json"
+    )
+
+    assert response.status_code == 400
+    assert response.json() == {"error": f"{field} must be a number", "field": error_field}
+    assert not Product.objects.exists()
+
 # --- precios y costos ------------------------------------------------------
 
 STORED = {

@@ -9,6 +9,11 @@ from drf_spectacular.utils import (
 
 from apps.authorization.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 from apps.catalog.docs.schemas import (
+    AdminBrandActiveSerializer,
+    AdminBrandCreateSerializer,
+    AdminBrandLogoUploadSerializer,
+    AdminBrandResponseSerializer,
+    AdminBrandSerializer,
     AdminProductWriteSerializer,
     CatalogRecordSerializer,
     ProductGallerySerializer,
@@ -292,6 +297,121 @@ class AdminProductImageDetailViewExtension(OpenApiViewExtension):
                 return super().delete(request, product_id, image_id)
 
         return AdminProductImageDetailView
+
+
+class AdminBrandListViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminBrandListView"
+
+    def view_replacement(self):
+        class AdminBrandListView(self.target_class):
+            @extend_schema(
+                operation_id="admin_brands_list",
+                tags=["admin: products"],
+                summary="List brands",
+                description=(
+                    "Requires `products.view`. A brand is the name products carry in "
+                    "`manufacturer`; `Alliant Power / Bosch` counts for both brands."
+                ),
+                responses={
+                    200: OpenApiResponse(AdminBrandSerializer(many=True)),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def get(self, request):
+                return super().get(request)
+
+            @extend_schema(
+                operation_id="admin_brand_create",
+                tags=["admin: products"],
+                summary="Create a brand",
+                description=(
+                    "Requires `products.edit`. Saving a product also creates the brands "
+                    "of its `manufacturer` that do not exist yet."
+                ),
+                request=AdminBrandCreateSerializer,
+                responses={
+                    201: OpenApiResponse(AdminBrandResponseSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def post(self, request):
+                return super().post(request)
+
+        return AdminBrandListView
+
+
+class AdminBrandDetailViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminBrandDetailView"
+
+    def view_replacement(self):
+        class AdminBrandDetailView(self.target_class):
+            @extend_schema(
+                operation_id="admin_brand_set_active",
+                tags=["admin: products"],
+                summary="Activate or deactivate a brand",
+                description=(
+                    "Requires `products.edit`. Sets `active` on the brand and on every "
+                    "product that carries it, including products shared with another brand."
+                ),
+                parameters=[OpenApiParameter("brand_id", int, OpenApiParameter.PATH)],
+                request=AdminBrandActiveSerializer,
+                responses={
+                    200: OpenApiResponse(AdminBrandResponseSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def patch(self, request, brand_id):
+                return super().patch(request, brand_id)
+
+        return AdminBrandDetailView
+
+
+class AdminBrandLogoViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminBrandLogoView"
+
+    def view_replacement(self):
+        class AdminBrandLogoView(self.target_class):
+            @extend_schema(
+                operation_id="admin_brand_logo_upload",
+                tags=["admin: products"],
+                summary="Upload the brand logo",
+                description=(
+                    "Requires `products.edit`. Multipart body. The logo is stored as WebP, "
+                    "scaled to 400 px at most, and replaces the previous one."
+                ),
+                parameters=[OpenApiParameter("brand_id", int, OpenApiParameter.PATH)],
+                request={"multipart/form-data": AdminBrandLogoUploadSerializer},
+                responses={
+                    200: OpenApiResponse(AdminBrandResponseSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                    502: OpenApiResponse(ErrorResponseSerializer),
+                    503: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def post(self, request, brand_id):
+                return super().post(request, brand_id)
+
+            @extend_schema(
+                operation_id="admin_brand_logo_delete",
+                tags=["admin: products"],
+                summary="Remove the brand logo",
+                description="Requires `products.edit`.",
+                parameters=[OpenApiParameter("brand_id", int, OpenApiParameter.PATH)],
+                responses={
+                    200: OpenApiResponse(AdminBrandResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def delete(self, request, brand_id):
+                return super().delete(request, brand_id)
+
+        return AdminBrandLogoView
 
 
 class SitemapViewExtension(OpenApiViewExtension):

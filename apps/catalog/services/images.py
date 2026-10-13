@@ -45,8 +45,8 @@ class InvalidImage(ValueError):
     pass
 
 
-def process_image(content: bytes) -> tuple[bytes, int, int]:
-    """La foto como WebP, con el lado mayor en `MAX_IMAGE_SIDE` como máximo.
+def process_image(content: bytes, *, max_side: int = MAX_IMAGE_SIDE) -> tuple[bytes, int, int]:
+    """La foto como WebP, con el lado mayor en `max_side` como máximo.
     `InvalidImage` si no es un JPG, PNG o WebP legible."""
     try:
         with Image.open(io.BytesIO(content)) as image:
@@ -56,7 +56,7 @@ def process_image(content: bytes) -> tuple[bytes, int, int]:
             # aplica antes de descartar los metadatos.
             image = ImageOps.exif_transpose(image)
             image = image.convert("RGBA" if "A" in image.getbands() else "RGB")
-            image.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE))
+            image.thumbnail((max_side, max_side))
             output = io.BytesIO()
             image.save(output, "WEBP", quality=85, method=4)
             return output.getvalue(), image.width, image.height

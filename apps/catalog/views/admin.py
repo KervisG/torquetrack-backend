@@ -6,10 +6,15 @@ from rest_framework.views import APIView
 from apps.authorization.permissions import HasRolePermission, has_role_permission
 from apps.catalog.services import (
     build_catalog_export,
+    create_admin_brand,
     deactivate_admin_product,
     export_filename,
+    list_admin_brands,
     list_admin_products,
     list_applications,
+    remove_admin_brand_logo,
+    set_admin_brand_active,
+    set_admin_brand_logo,
     upsert_admin_product,
 )
 from apps.catalog.services.images import (
@@ -115,3 +120,47 @@ class AdminProductImageDetailView(APIView):
 
     def delete(self, request, product_id, image_id):
         return service_response(delete_product_image(product_id, image_id, request.user.email))
+
+
+class AdminBrandListView(APIView):
+    """Listar pide `products.view`; crear una marca, `products.edit`."""
+
+    permission_classes = [HasRolePermission]
+
+    @property
+    def required_permission(self):
+        return "products.edit" if self.request.method == "POST" else "products.view"
+
+    def get(self, request):
+        return Response(list_admin_brands())
+
+    def post(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        return service_response(create_admin_brand(body, request.user.email))
+
+
+class AdminBrandDetailView(APIView):
+    """Activar o desactivar una marca, con todos los productos que la llevan."""
+
+    permission_classes = [HasRolePermission]
+    required_permission = "products.edit"
+
+    def patch(self, request, brand_id):
+        body = request.data if isinstance(request.data, dict) else {}
+        return service_response(set_admin_brand_active(brand_id, body, request.user.email))
+
+
+class AdminBrandLogoView(APIView):
+    """Subir (multipart, campo `file`) o quitar el logo de la marca."""
+
+    permission_classes = [HasRolePermission]
+    required_permission = "products.edit"
+    parser_classes = [MultiPartParser, JSONParser]
+
+    def post(self, request, brand_id):
+        return service_response(
+            set_admin_brand_logo(brand_id, request.FILES.get("file"), request.user.email)
+        )
+
+    def delete(self, request, brand_id):
+        return service_response(remove_admin_brand_logo(brand_id, request.user.email))

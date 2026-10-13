@@ -8,6 +8,14 @@ from apps.catalog.services.admin import (
     product_price_error,
     upsert_admin_product,
 )
+from apps.catalog.services.brands import (
+    create_admin_brand,
+    ensure_brands,
+    list_admin_brands,
+    remove_admin_brand_logo,
+    set_admin_brand_active,
+    set_admin_brand_logo,
+)
 from apps.catalog.services.export import build_catalog_export, export_filename
 from apps.catalog.services.fitment import (
     application_codes,
@@ -43,14 +51,20 @@ __all__ = [
     "backfill_product_fitments",
     "build_catalog_export",
     "build_totals",
+    "create_admin_brand",
     "deactivate_admin_product",
+    "ensure_brands",
     "export_filename",
+    "list_admin_brands",
     "list_admin_products",
     "list_applications",
     "parse_quantity",
     "price_lines",
     "product_price_error",
+    "remove_admin_brand_logo",
     "serialize_application",
     "serialize_totals",
+    "set_admin_brand_active",
+    "set_admin_brand_logo",
     "upsert_admin_product",
 ]

@@ -13,6 +13,7 @@ DOMAIN_TABLES = {
     "account_tokens",
     "customers",
     "products",
+    "brands",
     "applications",
     "product_fitments",
     "carts",

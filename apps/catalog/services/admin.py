@@ -7,6 +7,7 @@ from django.utils import timezone
 from apps.audit.services import record_activity
 from apps.catalog.models import ColumnValueError, Product
 from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS
+from apps.catalog.services.brands import ensure_brands
 from apps.catalog.services.fitment import (
     application_codes,
     resolve_application_codes,
@@ -184,6 +185,7 @@ def upsert_admin_product(
         return error_payload(str(exc), exc.field), 400
     product.updated_at = timezone.now()
     product.save()
+    ensure_brands(product.manufacturer)
     if applications is not None:
         set_product_applications(product, applications)
 

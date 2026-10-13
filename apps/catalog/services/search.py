@@ -71,7 +71,7 @@ def canonical_category(value) -> str:
     return _CATEGORY_ALIASES.get(category, category)
 
 
-def _manufacturer_names(value) -> list[str]:
+def manufacturer_names(value) -> list[str]:
     """`Alliant Power / Bosch` son dos marcas sueltas."""
     return [part.strip() for part in str(value or "").split("/") if part.strip()]
 
@@ -214,7 +214,7 @@ def _facets(active) -> dict:
     """Opciones de los filtros: salen de todo el catálogo activo, no de la
     página ni de la búsqueda."""
     brands = {
-        name for value in _distinct(active, "manufacturer") for name in _manufacturer_names(value)
+        name for value in _distinct(active, "manufacturer") for name in manufacturer_names(value)
     }
     ceiling = active.aggregate(max=Max("price"))["max"] or 0
     return {
@@ -240,7 +240,7 @@ def _overview(active) -> dict:
             )
             group["labels"].add(raw)
             group["count"] += 1
-            group["brands"].update(_manufacturer_names(manufacturer))
+            group["brands"].update(manufacturer_names(manufacturer))
         name = str(make or "").strip()
         if name:
             makes[name] = makes.get(name, 0) + 1
@@ -298,7 +298,7 @@ def search_products(params) -> dict:
                 for raw in active.exclude(manufacturer__isnull=True)
                 .values_list("manufacturer", flat=True)
                 .distinct()
-                if brand in (name.lower() for name in _manufacturer_names(raw))
+                if brand in (name.lower() for name in manufacturer_names(raw))
             ]
         )
 

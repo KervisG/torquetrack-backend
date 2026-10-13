@@ -1,5 +1,8 @@
 from apps.catalog.views.admin import (
     AdminApplicationListView,
+    AdminBrandDetailView,
+    AdminBrandListView,
+    AdminBrandLogoView,
     AdminProductDetailView,
     AdminProductExportView,
     AdminProductImageDetailView,
@@ -11,6 +14,9 @@ from apps.catalog.views.storefront import ApplicationPublicViewSet, ProductPubli
 
 __all__ = [
     "AdminApplicationListView",
+    "AdminBrandDetailView",
+    "AdminBrandListView",
+    "AdminBrandLogoView",
     "AdminProductDetailView",
     "AdminProductExportView",
     "AdminProductImageDetailView",

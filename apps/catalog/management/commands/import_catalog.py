@@ -21,7 +21,7 @@ from django.db import transaction
 from django.utils import timezone
 
 from apps.catalog.models import Application, Product
-from apps.catalog.services import backfill_product_fitments, product_price_error
+from apps.catalog.services import backfill_product_fitments, ensure_brands, product_price_error
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
@@ -115,6 +115,7 @@ class Command(BaseCommand):
                         "updated_at": now,
                     },
                 )
+                ensure_brands(data.get("manufacturer"))
 
             codes = []
             for item in applications:

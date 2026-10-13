@@ -69,6 +69,33 @@ class ProductImageUploadSerializer(serializers.Serializer):
     alt = serializers.CharField(required=False, allow_blank=True)
 
 
+class AdminBrandSerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    logo = serializers.CharField(allow_null=True, help_text="Public URL of the logo, if any.")
+    active = serializers.BooleanField()
+    productCount = serializers.IntegerField(
+        help_text="Products that carry the brand in `manufacturer`, active or not."
+    )
+
+
+class AdminBrandResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    brand = AdminBrandSerializer()
+
+
+class AdminBrandCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(help_text="Unique, case-insensitive. Cannot contain `/`.")
+
+
+class AdminBrandActiveSerializer(serializers.Serializer):
+    active = serializers.BooleanField()
+
+
+class AdminBrandLogoUploadSerializer(serializers.Serializer):
+    file = serializers.ImageField(help_text="JPG, PNG or WebP, up to 4 MB.")
+
+
 class ProductImageOrderSerializer(serializers.Serializer):
     order = serializers.ListField(
         child=serializers.IntegerField(),

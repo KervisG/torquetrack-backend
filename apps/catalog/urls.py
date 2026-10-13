@@ -3,6 +3,9 @@ from rest_framework.routers import SimpleRouter
 
 from apps.catalog.views import (
     AdminApplicationListView,
+    AdminBrandDetailView,
+    AdminBrandListView,
+    AdminBrandLogoView,
     AdminProductDetailView,
     AdminProductExportView,
     AdminProductImageDetailView,
@@ -25,6 +28,17 @@ urlpatterns = router.urls + [
         "admin/applications/",
         AdminApplicationListView.as_view(),
         name="admin-applications",
+    ),
+    path("admin/brands/", AdminBrandListView.as_view(), name="admin-brands"),
+    path(
+        "admin/brands/<int:brand_id>/",
+        AdminBrandDetailView.as_view(),
+        name="admin-brand-detail",
+    ),
+    path(
+        "admin/brands/<int:brand_id>/logo/",
+        AdminBrandLogoView.as_view(),
+        name="admin-brand-logo",
     ),
     # Antes del detalle: si no, `export` se tomaría como un `product_id`.
     path(

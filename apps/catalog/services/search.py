@@ -24,7 +24,7 @@ from django.db.models import (
 from django.db.models.fields.json import KT
 from django.db.models.functions import Coalesce, Concat, Lower
 
-from apps.catalog.models import Application, Product, ProductFitment
+from apps.catalog.models import Application, Category, Product, ProductFitment, ProductLine
 from apps.catalog.services.fitment import _displacement, _makes
 from apps.common.numbers import to_number
 
@@ -231,6 +231,7 @@ def _overview(active) -> dict:
     Sale de los productos activos, así una categoría nueva aparece sola."""
     categories: dict[str, dict] = {}
     makes: dict[str, int] = {}
+    lines = dict(Category.objects.values_list("value", "line"))
     rows = active.values_list("category", "manufacturer", "make")
     for category, manufacturer, make in rows:
         raw = str(category or "").strip()
@@ -253,6 +254,8 @@ def _overview(active) -> dict:
                 "label": min(group["labels"]),
                 "count": group["count"],
                 "brands": sorted(group["brands"]),
+                # Sección de la portada; una categoría sin fila cae en "More parts".
+                "line": lines.get(value, ProductLine.OTHER),
             }
             for value, group in sorted(
                 categories.items(), key=lambda item: (-item[1]["count"], item[0])

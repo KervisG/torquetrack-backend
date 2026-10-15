@@ -1,16 +1,18 @@
-"""`PUT` y `DELETE /api/admin/products/<id>/` con `products.edit`.
+"""`PUT`, `PATCH` y `DELETE /api/admin/products/<id>/` con `products.edit`.
 
 Los campos de precio (`price`, `compareAt`, `coreCharge`) solo cambian con
 `pricing.edit`; los de costo (`purchaseCost`, `supplierCost`) también exigen
 `pricing.edit` para cambiar y solo se devuelven con `costs.view`. Un campo
-protegido ausente del body conserva su valor. Sin proveedores que mockear.
+protegido ausente del body conserva su valor. El borrado de fotos en Spaces
+se falsea con `install_spaces`.
 """
 import pytest
 from django.utils import timezone
 
-from apps.catalog.models import Product
+from apps.catalog.models import Product, ProductImage
 from apps.common.business_day import store_today
 from tests.factories import create_staff_user, session_client
+from tests.fakes import install_spaces
 
 
 def _insert_user(user_id, permissions=None, active=True, full_access=False):
@@ -24,7 +26,63 @@ def _admin_client(user_id):
     return client
 
 
-# --- DELETE (soft delete) ----------------------------------------------
+# --- PATCH (suspender o reactivar) -----------------------------------------
+
+
+@pytest.mark.django_db
+def test_patch_returns_403_without_products_edit_permission():
+    _insert_user("usr_patch_no_perm", permissions=["products.view"])
+    Product.objects.create(id="prod_p0", data={}, active=True, updated_at=timezone.now())
+    client = _admin_client("usr_patch_no_perm")
+
+    response = client.patch("/api/admin/products/prod_p0/", {"active": False}, format="json")
+
+    assert response.status_code == 403
+    assert Product.objects.get(pk="prod_p0").active is True
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("active", [False, True])
+def test_patch_only_changes_active_and_keeps_the_record(active):
+    _insert_user("usr_patch", permissions=["products.edit"])
+    data = {"title": "Pump", "partNumber": "P-1", "price": 10}
+    Product.objects.create(id="prod_p1", data=data, active=not active, updated_at=timezone.now())
+    client = _admin_client("usr_patch")
+
+    response = client.patch("/api/admin/products/prod_p1/", {"active": active}, format="json")
+
+    assert response.status_code == 200
+    assert response.json() == {"ok": True}
+    product = Product.objects.get(pk="prod_p1")
+    assert product.active is active
+    assert product.data["title"] == "Pump"
+    assert product.data["partNumber"] == "P-1"
+
+
+@pytest.mark.django_db
+def test_patch_rejects_a_non_boolean_active():
+    _insert_user("usr_patch_bad", permissions=["products.edit"])
+    Product.objects.create(id="prod_p2", data={}, active=True, updated_at=timezone.now())
+    client = _admin_client("usr_patch_bad")
+
+    response = client.patch("/api/admin/products/prod_p2/", {"active": "no"}, format="json")
+
+    assert response.status_code == 400
+    assert Product.objects.get(pk="prod_p2").active is True
+
+
+@pytest.mark.django_db
+def test_patch_returns_404_for_unknown_product():
+    _insert_user("usr_patch_404", permissions=["products.edit"])
+    client = _admin_client("usr_patch_404")
+
+    response = client.patch("/api/admin/products/nope/", {"active": False}, format="json")
+
+    assert response.status_code == 404
+    assert response.json() == {"error": "Product not found"}
+
+
+# --- DELETE (borrado definitivo) -------------------------------------------
 
 
 @pytest.mark.django_db
@@ -38,13 +96,19 @@ def test_delete_returns_403_without_products_edit_permission():
     response = client.delete("/api/admin/products/prod_1/")
 
     assert response.status_code == 403
+    assert Product.objects.filter(pk="prod_1").exists()
 
 
 @pytest.mark.django_db
-def test_delete_soft_deletes_by_setting_active_false():
+def test_delete_removes_the_product_and_its_photos(monkeypatch):
+    spaces = install_spaces(monkeypatch)
     _insert_user("usr_del", permissions=["products.edit"])
-    Product.objects.create(
+    product = Product.objects.create(
         id="prod_2", data={"id": "prod_2"}, active=True, updated_at=timezone.now()
+    )
+    key = "products/prod_2/img1.webp"
+    ProductImage.objects.create(
+        product=product, position=0, key=key, url=f"https://cdn.test/{key}", width=1, height=1
     )
     client = _admin_client("usr_del")
 
@@ -52,8 +116,9 @@ def test_delete_soft_deletes_by_setting_active_false():
 
     assert response.status_code == 200
     assert response.json() == {"ok": True}
-    product = Product.objects.get(pk="prod_2")
-    assert product.active is False
+    assert not Product.objects.filter(pk="prod_2").exists()
+    assert not ProductImage.objects.filter(key=key).exists()
+    assert spaces.deleted == [key]
 
 
 @pytest.mark.django_db

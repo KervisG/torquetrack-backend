@@ -12,7 +12,7 @@ La URL sale de `DATABASE_URL` en `.env.remote` (ignorado por git; ver
 Uso (desde la raíz del repo, con el venv activo):
 
     python scripts/load_products.py <products.json> [--applications <applications.json>]
-        [--env-file .env.remote] [--dry-run] [--yes]
+        [--categories <categories.json>] [--env-file .env.remote] [--dry-run] [--yes]
 """
 from __future__ import annotations
 
@@ -25,6 +25,7 @@ from urllib.parse import unquote, urlsplit
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 DEFAULT_APPLICATIONS = BASE_DIR / "apps" / "catalog" / "data" / "applications.json"
+DEFAULT_CATEGORIES = BASE_DIR / "apps" / "catalog" / "data" / "categories.json"
 DEFAULT_ENV_FILE = BASE_DIR / ".env.remote"
 POSTGRES_SCHEMES = ("postgres", "postgresql")
 DEFAULT_POSTGRES_PORT = "5432"
@@ -77,6 +78,7 @@ def _parse_args(argv):
     )
     parser.add_argument("products", type=Path, help="Path to products.json")
     parser.add_argument("--applications", type=Path, default=DEFAULT_APPLICATIONS)
+    parser.add_argument("--categories", type=Path, default=DEFAULT_CATEGORIES)
     parser.add_argument("--env-file", type=Path, default=DEFAULT_ENV_FILE)
     parser.add_argument(
         "--dry-run", action="store_true", help="Validate and print the summary only."
@@ -124,7 +126,12 @@ def main(argv=None, environ: MutableMapping[str, str] | None = None) -> int:
     print(f"Target database: {target}")
     print(f"Products file: {args.products}")
     print(f"Applications file: {args.applications}")
-    files = {"products": args.products, "applications": args.applications}
+    print(f"Categories file: {args.categories}")
+    files = {
+        "products": args.products,
+        "applications": args.applications,
+        "categories": args.categories,
+    }
     try:
         call_command("import_catalog", dry_run=True, **files)
     except CommandError as error:

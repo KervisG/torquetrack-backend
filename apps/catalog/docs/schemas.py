@@ -44,7 +44,7 @@ class ProductPageSerializer(serializers.Serializer):
     overview = serializers.DictField(
         required=False,
         help_text=(
-            "Only with `overview`: `productCount`, `categories` (value, label, count, brands) "
+            "Only with `overview`: `productCount`, `categories` (value, label, count, brands, line)"
             "and `makes` (name, count), for the storefront home page."
         ),
     )
@@ -94,6 +94,33 @@ class AdminBrandActiveSerializer(serializers.Serializer):
 
 class AdminBrandLogoUploadSerializer(serializers.Serializer):
     file = serializers.ImageField(help_text="JPG, PNG or WebP, up to 4 MB.")
+
+
+PRODUCT_LINE_HELP = "Storefront home section: FUEL_SYSTEM, TURBO_AIR, EMISSIONS or OTHER."
+
+
+class AdminCategorySerializer(serializers.Serializer):
+    id = serializers.IntegerField()
+    name = serializers.CharField()
+    value = serializers.CharField(help_text="Canonical form products are matched by.")
+    line = serializers.CharField(help_text=PRODUCT_LINE_HELP)
+    productCount = serializers.IntegerField(
+        help_text="Products in the category, active or not."
+    )
+
+
+class AdminCategoryResponseSerializer(serializers.Serializer):
+    ok = serializers.BooleanField()
+    category = AdminCategorySerializer()
+
+
+class AdminCategoryCreateSerializer(serializers.Serializer):
+    name = serializers.CharField(help_text="Unique by canonical form.")
+    line = serializers.CharField(required=False, help_text=f"{PRODUCT_LINE_HELP} Default OTHER.")
+
+
+class AdminCategoryLineSerializer(serializers.Serializer):
+    line = serializers.CharField(help_text=PRODUCT_LINE_HELP)
 
 
 class ProductImageOrderSerializer(serializers.Serializer):

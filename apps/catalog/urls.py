@@ -6,6 +6,8 @@ from apps.catalog.views import (
     AdminBrandDetailView,
     AdminBrandListView,
     AdminBrandLogoView,
+    AdminCategoryDetailView,
+    AdminCategoryListView,
     AdminProductDetailView,
     AdminProductExportView,
     AdminProductImageDetailView,
@@ -39,6 +41,12 @@ urlpatterns = router.urls + [
         "admin/brands/<int:brand_id>/logo/",
         AdminBrandLogoView.as_view(),
         name="admin-brand-logo",
+    ),
+    path("admin/categories/", AdminCategoryListView.as_view(), name="admin-categories"),
+    path(
+        "admin/categories/<int:category_id>/",
+        AdminCategoryDetailView.as_view(),
+        name="admin-category-detail",
     ),
     # Antes del detalle: si no, `export` se tomaría como un `product_id`.
     path(

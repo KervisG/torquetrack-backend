@@ -5,7 +5,7 @@ el catálogo entero."""
 import pytest
 from rest_framework.test import APIClient
 
-from apps.catalog.models import Application, Product
+from apps.catalog.models import Application, Category, Product
 
 URL = "/api/products/"
 
@@ -248,6 +248,8 @@ def test_overview_groups_the_catalog_by_category_and_truck():
     _product("i2", category="Fuel Injectors", manufacturer="Alliant Power / Bosch", make="Ford")
     _product("t1", category="Turbo", manufacturer="Garrett", make="RAM")
     _product("off", category="Turbo", manufacturer="Hidden", make="RAM", active=False)
+    # La línea de la portada sale de `Category`; sin fila es `OTHER`.
+    Category.objects.create(name="Injector", value="INJECTOR", line="FUEL_SYSTEM")
 
     overview = _get(overview="1", pageSize=1)["overview"]
 
@@ -259,8 +261,15 @@ def test_overview_groups_the_catalog_by_category_and_truck():
                 "label": "Fuel Injectors",
                 "count": 2,
                 "brands": ["Alliant Power", "Bosch"],
+                "line": "FUEL_SYSTEM",
             },
-            {"value": "TURBO", "label": "Turbo", "count": 1, "brands": ["Garrett"]},
+            {
+                "value": "TURBO",
+                "label": "Turbo",
+                "count": 1,
+                "brands": ["Garrett"],
+                "line": "OTHER",
+            },
         ],
         "makes": [{"name": "Ford", "count": 2}, {"name": "RAM", "count": 1}],
     }

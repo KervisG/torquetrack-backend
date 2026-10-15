@@ -3,9 +3,10 @@
 del panel (`admin.py`) y el precio de líneas y totales (`pricing.py`), que
 usan `checkout` y `quotes`. `export.py` arma el ZIP del catálogo del panel."""
 from apps.catalog.services.admin import (
-    deactivate_admin_product,
+    delete_admin_product,
     list_admin_products,
     product_price_error,
+    set_admin_product_active,
     upsert_admin_product,
 )
 from apps.catalog.services.brands import (
@@ -15,6 +16,15 @@ from apps.catalog.services.brands import (
     remove_admin_brand_logo,
     set_admin_brand_active,
     set_admin_brand_logo,
+)
+from apps.catalog.services.categories import (
+    create_admin_category,
+    ensure_category,
+    export_categories,
+    import_categories,
+    invalid_category_rows,
+    list_admin_categories,
+    set_admin_category_line,
 )
 from apps.catalog.services.export import build_catalog_export, export_filename
 from apps.catalog.services.fitment import (
@@ -52,10 +62,16 @@ __all__ = [
     "build_catalog_export",
     "build_totals",
     "create_admin_brand",
-    "deactivate_admin_product",
+    "create_admin_category",
+    "delete_admin_product",
     "ensure_brands",
+    "ensure_category",
+    "export_categories",
     "export_filename",
+    "import_categories",
+    "invalid_category_rows",
     "list_admin_brands",
+    "list_admin_categories",
     "list_admin_products",
     "list_applications",
     "parse_quantity",
@@ -66,5 +82,7 @@ __all__ = [
     "serialize_totals",
     "set_admin_brand_active",
     "set_admin_brand_logo",
+    "set_admin_category_line",
+    "set_admin_product_active",
     "upsert_admin_product",
 ]

@@ -14,6 +14,10 @@ from apps.catalog.docs.schemas import (
     AdminBrandLogoUploadSerializer,
     AdminBrandResponseSerializer,
     AdminBrandSerializer,
+    AdminCategoryCreateSerializer,
+    AdminCategoryLineSerializer,
+    AdminCategoryResponseSerializer,
+    AdminCategorySerializer,
     AdminProductWriteSerializer,
     CatalogRecordSerializer,
     ProductGallerySerializer,
@@ -204,10 +208,36 @@ class AdminProductDetailViewExtension(OpenApiViewExtension):
                 return super().put(request, product_id)
 
             @extend_schema(
-                operation_id="admin_product_deactivate",
+                operation_id="admin_product_set_active",
                 tags=["admin: products"],
-                summary="Deactivate a product",
-                description="Requires `products.edit`. The product stays in the database.",
+                summary="Activate or deactivate a product",
+                description=(
+                    "Requires `products.edit`. Only changes `active`; the rest of the "
+                    "product is kept."
+                ),
+                parameters=[
+                    OpenApiParameter("product_id", str, OpenApiParameter.PATH)
+                ],
+                request=AdminBrandActiveSerializer,
+                responses={
+                    200: OpenApiResponse(OkResponseSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def patch(self, request, product_id):
+                return super().patch(request, product_id)
+
+            @extend_schema(
+                operation_id="admin_product_delete",
+                tags=["admin: products"],
+                summary="Delete a product",
+                description=(
+                    "Requires `products.edit`. Permanently removes the product, its "
+                    "fitment and its photos. Order and quote lines keep their copy of "
+                    "the title and price."
+                ),
                 parameters=[
                     OpenApiParameter("product_id", str, OpenApiParameter.PATH)
                 ],
@@ -412,6 +442,73 @@ class AdminBrandLogoViewExtension(OpenApiViewExtension):
                 return super().delete(request, brand_id)
 
         return AdminBrandLogoView
+
+
+class AdminCategoryListViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminCategoryListView"
+
+    def view_replacement(self):
+        class AdminCategoryListView(self.target_class):
+            @extend_schema(
+                operation_id="admin_categories_list",
+                tags=["admin: products"],
+                summary="List categories",
+                description=(
+                    "Requires `products.view`. A category is the text products carry in "
+                    "`category`, matched by its canonical form."
+                ),
+                responses={
+                    200: OpenApiResponse(AdminCategorySerializer(many=True)),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def get(self, request):
+                return super().get(request)
+
+            @extend_schema(
+                operation_id="admin_category_create",
+                tags=["admin: products"],
+                summary="Create a category",
+                description=(
+                    "Requires `products.edit`. Saving a product also creates its category "
+                    "in `OTHER` when it does not exist yet."
+                ),
+                request=AdminCategoryCreateSerializer,
+                responses={
+                    201: OpenApiResponse(AdminCategoryResponseSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def post(self, request):
+                return super().post(request)
+
+        return AdminCategoryListView
+
+
+class AdminCategoryDetailViewExtension(OpenApiViewExtension):
+    target_class = "apps.catalog.views.admin.AdminCategoryDetailView"
+
+    def view_replacement(self):
+        class AdminCategoryDetailView(self.target_class):
+            @extend_schema(
+                operation_id="admin_category_set_line",
+                tags=["admin: products"],
+                summary="Move a category to another home section",
+                description="Requires `products.edit`.",
+                parameters=[OpenApiParameter("category_id", int, OpenApiParameter.PATH)],
+                request=AdminCategoryLineSerializer,
+                responses={
+                    200: OpenApiResponse(AdminCategoryResponseSerializer),
+                    400: OpenApiResponse(ErrorResponseSerializer),
+                    403: OpenApiResponse(ErrorResponseSerializer),
+                    404: OpenApiResponse(ErrorResponseSerializer),
+                },
+            )
+            def patch(self, request, category_id):
+                return super().patch(request, category_id)
+
+        return AdminCategoryDetailView
 
 
 class SitemapViewExtension(OpenApiViewExtension):

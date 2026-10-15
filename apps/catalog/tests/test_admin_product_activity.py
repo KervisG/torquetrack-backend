@@ -1,10 +1,11 @@
-"""Crear, editar y desactivar un producto desde el panel deja rastro en la
-bitácora (`GET /api/admin/activity/`), igual que pedidos y cotizaciones."""
+"""Crear, editar, suspender y borrar un producto desde el panel deja rastro en
+la bitácora (`GET /api/admin/activity/`), igual que pedidos y cotizaciones."""
 import pytest
 from django.utils import timezone
 
 from apps.catalog.models import Product
 from tests.factories import activity_count, create_staff_user, session_client
+from tests.fakes import install_spaces
 
 
 def _admin_client(user_id, permissions):
@@ -64,7 +65,31 @@ def test_rejected_put_records_no_activity():
 
 
 @pytest.mark.django_db
-def test_delete_records_product_deactivated_activity():
+@pytest.mark.parametrize(
+    ("active", "action"), [(False, "PRODUCT_DEACTIVATED"), (True, "PRODUCT_ACTIVATED")]
+)
+def test_patch_records_the_status_change(active, action):
+    client = _admin_client("usr_act_patch", ["products.edit"])
+    Product.objects.create(
+        id="prod_act_patch", data={}, active=not active, updated_at=timezone.now()
+    )
+
+    response = client.patch(
+        "/api/admin/products/prod_act_patch/", {"active": active}, format="json"
+    )
+
+    assert response.status_code == 200
+    assert (
+        activity_count(
+            action=action, entity_id="prod_act_patch", actor_id="usr_act_patch@example.com"
+        )
+        == 1
+    )
+
+
+@pytest.mark.django_db
+def test_delete_records_product_deleted_activity(monkeypatch):
+    install_spaces(monkeypatch)
     client = _admin_client("usr_act_del", ["products.edit"])
     Product.objects.create(id="prod_act_del", data={}, active=True, updated_at=timezone.now())
 
@@ -73,7 +98,7 @@ def test_delete_records_product_deactivated_activity():
     assert response.status_code == 200
     assert (
         activity_count(
-            action="PRODUCT_DEACTIVATED",
+            action="PRODUCT_DELETED",
             entity_id="prod_act_del",
             actor_id="usr_act_del@example.com",
         )

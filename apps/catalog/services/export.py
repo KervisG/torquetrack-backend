@@ -1,9 +1,10 @@
 """Exportación del catálogo del panel (`GET /api/admin/products/export/`).
 
 El ZIP es una copia que se vuelve a cargar en otro servidor con
-`import_catalog --products products.json --applications applications.json`:
-`products.json` tiene la misma forma que la semilla más `active` (que
-`import_catalog` lleva a la columna) y `applicationIds` sale de
+`import_catalog --products products.json --applications applications.json
+--categories categories.json`. `categories.json` lleva cada categoría con su
+sección de la portada (`line`). `products.json` tiene la misma forma que la
+semilla más `active` (que `import_catalog` lleva a la columna) y `applicationIds` sale de
 `ProductFitment`, la fuente de verdad del fitment. Las imágenes locales
 (`/static/image/<archivo>`) viajan en `image/` para copiarlas a `static/image/`
 del repo destino; una URL externa queda en el JSON y no se descarga.
@@ -22,6 +23,7 @@ from django.contrib.staticfiles import finders
 
 from apps.catalog.models import Product
 from apps.catalog.services.admin import serialize_admin_product
+from apps.catalog.services.categories import export_categories
 from apps.catalog.services.fitment import application_codes, list_applications
 
 # Prefijo con el que `data.image` apunta a un archivo de `static/image/`.
@@ -93,6 +95,7 @@ def build_catalog_export(*, can_view_costs: bool) -> bytes:
     with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr("products.json", _json_bytes(products))
         archive.writestr("applications.json", _json_bytes(list_applications()))
+        archive.writestr("categories.json", _json_bytes(export_categories()))
         for relative, path in sorted(images.items()):
             archive.write(path, arcname=relative)
         if missing:

@@ -1,5 +1,6 @@
 """`GET /api/admin/products/export/` con `products.view`: ZIP con
-`products.json`, `applications.json` y las imágenes locales (`image/<archivo>`).
+`products.json`, `applications.json`, `categories.json` y las imágenes locales
+(`image/<archivo>`).
 
 Sin proveedores que mockear. Las imágenes se leen con los finders de
 `staticfiles`, así que los tests apuntan `STATICFILES_DIRS` a un directorio
@@ -16,7 +17,7 @@ import pytest
 from django.contrib.staticfiles import finders
 from django.core.management import call_command
 
-from apps.catalog.models import Application, Product
+from apps.catalog.models import Application, Category, Product
 from apps.catalog.services import application_codes
 from apps.common.business_day import store_today
 from tests.factories import create_staff_user, session_client
@@ -90,7 +91,11 @@ def test_export_returns_a_dated_zip_attachment(static_dir):
     expected = f'attachment; filename="torquetrack-catalog-{store_today().isoformat()}.zip"'
     assert response["Content-Disposition"] == expected
     assert response["Cache-Control"] == "no-store"
-    assert sorted(_archive(response).namelist()) == ["applications.json", "products.json"]
+    assert sorted(_archive(response).namelist()) == [
+        "applications.json",
+        "categories.json",
+        "products.json",
+    ]
 
 
 @pytest.mark.django_db
@@ -169,25 +174,32 @@ def test_exported_catalog_round_trips_through_import_catalog(static_dir, tmp_pat
     linked = _insert_product("linked", partNumber="LP-1", purchaseCost=5)
     linked.applications.set([application])
     _insert_product("retired", active=False, partNumber="RT-1")
+    Category.objects.create(name="Glow plug", value="GLOW PLUG", line="FUEL_SYSTEM")
     client = _client("usr_export_round_trip", ["products.view", "costs.view"])
     archive = _archive(client.get(URL))
     products_path = tmp_path / "products.json"
     applications_path = tmp_path / "applications.json"
+    categories_path = tmp_path / "categories.json"
     products_path.write_bytes(archive.read("products.json"))
     applications_path.write_bytes(archive.read("applications.json"))
+    categories_path.write_bytes(archive.read("categories.json"))
     before = {
         product.pk: (product.data, product.active)
         for product in Product.objects.all()
     }
     Product.objects.all().delete()
     Application.objects.all().delete()
+    Category.objects.all().delete()
 
     call_command(
         "import_catalog",
         products=products_path,
         applications=applications_path,
+        categories=categories_path,
         stdout=StringIO(),
     )
+
+    assert Category.objects.get(value="GLOW PLUG").line == "FUEL_SYSTEM"
 
     restored = {product.pk: product for product in Product.objects.all()}
     assert set(restored) == set(before)

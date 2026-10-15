@@ -1,0 +1,13 @@
+[
+  {"name": "Injector", "line": "FUEL_SYSTEM"},
+  {"name": "HPFP", "line": "FUEL_SYSTEM"},
+  {"name": "HPOP", "line": "FUEL_SYSTEM"},
+  {"name": "Fuel Rail", "line": "FUEL_SYSTEM"},
+  {"name": "Contamination Kit", "line": "FUEL_SYSTEM"},
+  {"name": "Turbo", "line": "TURBO_AIR"},
+  {"name": "Turbo Actuator", "line": "TURBO_AIR"},
+  {"name": "DPF", "line": "EMISSIONS"},
+  {"name": "DOC", "line": "EMISSIONS"},
+  {"name": "SCR", "line": "EMISSIONS"},
+  {"name": "EGR", "line": "EMISSIONS"}
+]

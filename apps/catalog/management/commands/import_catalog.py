@@ -10,6 +10,10 @@ la exportación del panel (`GET /api/admin/products/export/`) sí, para que un
 producto desactivado siga desactivado al cargarlo en otro servidor. Va a la
 columna y nunca a `data`.
 
+Las categorías (`categories.json`, nombre y sección de la portada) se cargan
+antes que los productos: así un producto no crea su categoría en `OTHER` cuando
+el archivo ya dice en qué sección va. Se cruzan por su forma canónica.
+
 `--only-missing` (el que corre el contenedor al arrancar) solo inserta lo que
 falta: no actualiza, no borra aplicaciones ni rearma el fitment existente."""
 
@@ -20,8 +24,16 @@ from django.core.management.base import BaseCommand, CommandError
 from django.db import transaction
 from django.utils import timezone
 
-from apps.catalog.models import Application, Product
-from apps.catalog.services import backfill_product_fitments, ensure_brands, product_price_error
+from apps.catalog.models import Application, Category, Product
+from apps.catalog.services import (
+    backfill_product_fitments,
+    ensure_brands,
+    ensure_category,
+    import_categories,
+    invalid_category_rows,
+    product_price_error,
+)
+from apps.catalog.services.search import canonical_category
 
 DATA_DIR = Path(__file__).resolve().parents[2] / "data"
 
@@ -51,6 +63,19 @@ def _validate(products: list[dict]) -> None:
         raise CommandError(f"active must be true or false:\n{_id_list(bad_active)}")
 
 
+def _validate_categories(categories) -> None:
+    errors = invalid_category_rows(categories)
+    if errors:
+        raise CommandError("Invalid categories:\n" + "\n".join(f"  - {e}" for e in errors))
+
+
+def _ensure_brands_and_category(data: dict) -> None:
+    """Un producto importado deja creadas sus marcas y su categoría, igual que
+    uno guardado desde el panel."""
+    ensure_brands(data.get("manufacturer"))
+    ensure_category(data.get("category"))
+
+
 class Command(BaseCommand):
     help = "Import the seed catalog (products and applications) into the database."
 
@@ -59,6 +84,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--applications", type=Path, default=DATA_DIR / "applications.json"
         )
+        parser.add_argument("--categories", type=Path, default=DATA_DIR / "categories.json")
         parser.add_argument(
             "--dry-run",
             action="store_true",
@@ -86,8 +112,12 @@ class Command(BaseCommand):
 
         products = _read_json(options["products"])
         applications = _read_json(options["applications"])
+        categories = _read_json(options["categories"])
+        _validate_categories(categories)
         if options["only_missing"]:
-            self._import_missing(products, applications, dry_run=options["dry_run"])
+            self._import_missing(
+                products, applications, categories, dry_run=options["dry_run"]
+            )
             return
 
         _validate(products)
@@ -97,6 +127,7 @@ class Command(BaseCommand):
             f"({len(products) - inactive} active, {inactive} inactive)"
         )
         self.stdout.write(f"Applications to import: {len(applications)}")
+        self.stdout.write(f"Categories to import: {len(categories)}")
         if options["dry_run"]:
             self.stdout.write("Dry run: nothing was written.")
             return
@@ -104,6 +135,7 @@ class Command(BaseCommand):
         # Todo o nada: una semilla a medias deja fitment apuntando a productos
         # que no existen.
         with transaction.atomic():
+            import_categories(categories, only_missing=False)
             now = timezone.now()
             for product in products:
                 data = {key: value for key, value in product.items() if key != "active"}
@@ -115,7 +147,7 @@ class Command(BaseCommand):
                         "updated_at": now,
                     },
                 )
-                ensure_brands(data.get("manufacturer"))
+                _ensure_brands_and_category(data)
 
             codes = []
             for item in applications:
@@ -131,9 +163,10 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Products imported: {len(products)}")
         self.stdout.write(f"Applications imported: {len(applications)}")
+        self.stdout.write(f"Categories imported: {len(categories)}")
         self.stdout.write(f"Fitment rows created: {fitment['links']}")
 
-    def _import_missing(self, products, applications, *, dry_run):
+    def _import_missing(self, products, applications, categories, *, dry_run):
         """El contenedor lo corre en cada arranque: agrega solo lo que falta y
         nunca actualiza ni borra, para no pisar lo editado o desactivado desde
         el panel. Así un archivo que crece entra solo en el siguiente deploy."""
@@ -141,6 +174,10 @@ class Command(BaseCommand):
         existing_codes = set(Application.objects.values_list("code", flat=True))
         new_products = [p for p in products if str(p["id"]) not in existing_products]
         new_applications = [a for a in applications if str(a["id"]) not in existing_codes]
+        existing_categories = set(Category.objects.values_list("value", flat=True))
+        new_categories = [
+            c for c in categories if canonical_category(c["name"]) not in existing_categories
+        ]
 
         _validate(new_products)
         self.stdout.write(
@@ -148,16 +185,19 @@ class Command(BaseCommand):
             f"(skipped {len(products) - len(new_products)} existing)"
         )
         self.stdout.write(f"Missing applications: {len(new_applications)}")
+        self.stdout.write(f"Missing categories: {len(new_categories)}")
         if dry_run:
             self.stdout.write("Dry run: nothing was written.")
             return
-        if not new_products and not new_applications:
+        if not new_products and not new_applications and not new_categories:
             self.stdout.write("Catalog up to date: nothing to import.")
             return
 
         # Las aplicaciones van primero: el fitment de los productos nuevos las
-        # referencia por código.
+        # referencia por código. Las categorías existentes no se tocan: su
+        # sección es la que eligió el panel.
         with transaction.atomic():
+            import_categories(new_categories, only_missing=True)
             now = timezone.now()
             Application.objects.bulk_create(
                 Application(code=str(item["id"]), data=item) for item in new_applications
@@ -170,6 +210,7 @@ class Command(BaseCommand):
                     active=product.get("active", True),
                     updated_at=now,
                 )
+                _ensure_brands_and_category(data)
             fitment = backfill_product_fitments(
                 Product.objects.filter(id__in=[str(p["id"]) for p in new_products]),
                 replace=True,
@@ -177,4 +218,5 @@ class Command(BaseCommand):
 
         self.stdout.write(f"Products imported: {len(new_products)}")
         self.stdout.write(f"Applications imported: {len(new_applications)}")
+        self.stdout.write(f"Categories imported: {len(new_categories)}")
         self.stdout.write(f"Fitment rows created: {fitment['links']}")

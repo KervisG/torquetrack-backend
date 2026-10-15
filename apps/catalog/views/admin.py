@@ -7,14 +7,18 @@ from apps.authorization.permissions import HasRolePermission, has_role_permissio
 from apps.catalog.services import (
     build_catalog_export,
     create_admin_brand,
-    deactivate_admin_product,
+    create_admin_category,
+    delete_admin_product,
     export_filename,
     list_admin_brands,
+    list_admin_categories,
     list_admin_products,
     list_applications,
     remove_admin_brand_logo,
     set_admin_brand_active,
     set_admin_brand_logo,
+    set_admin_category_line,
+    set_admin_product_active,
     upsert_admin_product,
 )
 from apps.catalog.services.images import (
@@ -59,8 +63,9 @@ class AdminProductExportView(APIView):
 
 
 class AdminProductDetailView(APIView):
-    """`products.edit` cubre crear, editar y activar o desactivar; precios y
-    costos exigen además `pricing.edit`, y los costos se ven con `costs.view`."""
+    """`products.edit` cubre crear, editar, suspender o reactivar (PATCH) y
+    borrar (DELETE); precios y costos exigen además `pricing.edit`, y los
+    costos se ven con `costs.view`."""
 
     permission_classes = [HasRolePermission]
     required_permission = "products.edit"
@@ -77,8 +82,12 @@ class AdminProductDetailView(APIView):
             )
         )
 
+    def patch(self, request, product_id):
+        body = request.data if isinstance(request.data, dict) else {}
+        return service_response(set_admin_product_active(product_id, body, request.user.email))
+
     def delete(self, request, product_id):
-        return service_response(deactivate_admin_product(product_id, request.user.email))
+        return service_response(delete_admin_product(product_id, request.user.email))
 
 
 class AdminApplicationListView(APIView):
@@ -164,3 +173,31 @@ class AdminBrandLogoView(APIView):
 
     def delete(self, request, brand_id):
         return service_response(remove_admin_brand_logo(brand_id, request.user.email))
+
+
+class AdminCategoryListView(APIView):
+    """Listar pide `products.view`; crear una categoría, `products.edit`."""
+
+    permission_classes = [HasRolePermission]
+
+    @property
+    def required_permission(self):
+        return "products.edit" if self.request.method == "POST" else "products.view"
+
+    def get(self, request):
+        return Response(list_admin_categories())
+
+    def post(self, request):
+        body = request.data if isinstance(request.data, dict) else {}
+        return service_response(create_admin_category(body, request.user.email))
+
+
+class AdminCategoryDetailView(APIView):
+    """Mover una categoría a otra línea de la portada."""
+
+    permission_classes = [HasRolePermission]
+    required_permission = "products.edit"
+
+    def patch(self, request, category_id):
+        body = request.data if isinstance(request.data, dict) else {}
+        return service_response(set_admin_category_line(category_id, body, request.user.email))

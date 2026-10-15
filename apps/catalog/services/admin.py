@@ -1,13 +1,16 @@
 from __future__ import annotations
 
+import logging
 import re
 
+from django.db import transaction
 from django.utils import timezone
 
 from apps.audit.services import record_activity
 from apps.catalog.models import ColumnValueError, Product
 from apps.catalog.serializers import RESTRICTED_PRODUCT_FIELDS
 from apps.catalog.services.brands import ensure_brands
+from apps.catalog.services.categories import ensure_category
 from apps.catalog.services.fitment import (
     application_codes,
     resolve_application_codes,
@@ -17,7 +20,12 @@ from apps.catalog.services.images import serialize_images
 from apps.common.business_day import store_today
 from apps.common.errors import error_payload
 from apps.common.numbers import money_decimal
+from apps.integrations.exceptions import ProviderError
+from apps.integrations.storage import spaces
 
+logger = logging.getLogger(__name__)
+
+PRODUCT_NOT_FOUND = "Product not found"
 PRICE_FIELDS = ("price", "compareAt", "coreCharge")
 # Deben seguir incluidos en `RESTRICTED_PRODUCT_FIELDS` de `serializers/storefront.py`.
 COST_FIELDS = ("purchaseCost", "supplierCost")
@@ -186,6 +194,7 @@ def upsert_admin_product(
     product.updated_at = timezone.now()
     product.save()
     ensure_brands(product.manufacturer)
+    ensure_category(product.category)
     if applications is not None:
         set_product_applications(product, applications)
 
@@ -220,14 +229,45 @@ def list_admin_products(*, can_view_costs: bool) -> list[dict]:
     return rows
 
 
-def deactivate_admin_product(product_id: str, actor_email: str) -> tuple[dict, int]:
-    updated = Product.objects.filter(pk=product_id).update(active=False, updated_at=timezone.now())
+def set_admin_product_active(product_id: str, payload: dict, actor_email: str) -> tuple[dict, int]:
+    """Suspender o reactivar sin tocar `data`: el PUT exige el registro completo."""
+    active = payload.get("active")
+    if not isinstance(active, bool):
+        return error_payload("active must be a boolean", "active"), 400
+    updated = Product.objects.filter(pk=product_id).update(active=active, updated_at=timezone.now())
     if not updated:
-        return {"error": "Product not found"}, 404
+        return {"error": PRODUCT_NOT_FOUND}, 404
     record_activity(
         actor=actor_email,
-        action="PRODUCT_DEACTIVATED",
+        action="PRODUCT_ACTIVATED" if active else "PRODUCT_DEACTIVATED",
         entity_type="PRODUCT",
         entity_id=product_id,
     )
+    return {"ok": True}, 200
+
+
+def delete_admin_product(product_id: str, actor_email: str) -> tuple[dict, int]:
+    """Borra el producto de la base. Fitment y galería caen en cascada; los
+    renglones de pedidos y cotizaciones quedan con `product = NULL` y
+    conservan su copia del título y el precio."""
+    with transaction.atomic():
+        product = Product.objects.select_for_update().filter(pk=product_id).first()
+        if product is None:
+            return {"error": PRODUCT_NOT_FOUND}, 404
+        keys = [key for key in product.images.values_list("key", flat=True) if key]
+        data = product.data or {}
+        product.delete()
+        record_activity(
+            actor=actor_email,
+            action="PRODUCT_DELETED",
+            entity_type="PRODUCT",
+            entity_id=product_id,
+            data={"partNumber": data.get("partNumber"), "title": data.get("title")},
+        )
+    for key in keys:
+        try:
+            spaces.delete(key)
+        except ProviderError as exc:
+            # La fila ya no existe: un objeto huérfano no rompe nada.
+            logger.warning("Spaces delete of %s failed: %s", key, exc)
     return {"ok": True}, 200

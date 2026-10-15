@@ -83,6 +83,74 @@ def test_stripe_returns_to_the_spa_checkout_routes(monkeypatch, settings):
 
 
 @pytest.mark.django_db
+def test_stripe_receives_the_order_shipping_address_for_radar(monkeypatch):
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return _fake_session()
+
+    monkeypatch.setattr(CREATE_SESSION, _create)
+    customer = {
+        "name": " Pat Doe ",
+        "email": "pat@example.com",
+        "phone": "555-0100",
+        "address1": "1 Main St",
+        "address2": "Unit 4",
+        "city": "Sarasota",
+        "state": "FL",
+        "zip": "34236",
+    }
+    order = Order.objects.create(
+        id="OID_8", number="O30008", data={"customer": customer, "totals": {"total": 10}}
+    )
+
+    start_stripe_payment(order)
+
+    assert captured["customer_email"] == "pat@example.com"
+    assert captured["shipping"] == {
+        "name": "Pat Doe",
+        "phone": "555-0100",
+        "address": {
+            "line1": "1 Main St",
+            "line2": "Unit 4",
+            "city": "Sarasota",
+            "state": "FL",
+            "postal_code": "34236",
+            "country": "US",
+        },
+    }
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize(
+    "customer",
+    [
+        {},
+        {"email": "pat@example.com", "address1": "1 Main St", "city": "Sarasota"},
+        {"name": "Pat Doe", "city": "Sarasota"},
+    ],
+)
+def test_stripe_gets_no_shipping_without_a_name_and_street(monkeypatch, customer):
+    # Stripe exige `name` y `line1`; un pedido del panel sin ellos se cobra
+    # igual, solo que Radar no compara la dirección.
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return _fake_session()
+
+    monkeypatch.setattr(CREATE_SESSION, _create)
+    order = Order.objects.create(
+        id="OID_9", number="O30009", data={"customer": customer, "totals": {"total": 10}}
+    )
+
+    start_stripe_payment(order)
+
+    assert captured["shipping"] is None
+
+
+@pytest.mark.django_db
 def test_start_stripe_payment_records_nothing_when_stripe_fails(monkeypatch):
     def _boom(**kwargs):
         raise ProviderError("Stripe down")

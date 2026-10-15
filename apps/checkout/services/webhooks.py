@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import logging
+from datetime import UTC, datetime
+from decimal import Decimal
 
 from django.db import transaction
 from django.utils import timezone
@@ -271,7 +273,7 @@ def reconcile_expired_session(session_obj: dict) -> None:
     )
 
 
-def _refund_payment(payment_intent) -> Payment | None:
+def _intent_payment(payment_intent, event_name: str) -> Payment | None:
     """`Payment` cobrado del PaymentIntent, o `None` si no es nuestro."""
     payment = (
         Payment.objects.filter(provider="stripe", data__payment_intent=payment_intent)
@@ -282,7 +284,9 @@ def _refund_payment(payment_intent) -> Payment | None:
     )
     if payment is None or payment.order_id is None:
         # Se responde 200 igual: reintentar no va a hacer aparecer el pago.
-        logger.warning("Stripe refund for payment intent %s matches no payment", payment_intent)
+        logger.warning(
+            "Stripe %s for payment intent %s matches no payment", event_name, payment_intent
+        )
         return None
     return payment
 
@@ -292,7 +296,7 @@ def reconcile_stripe_refund(refund_obj: dict, payment_intent=None) -> None:
     la fila `Refund` (idempotente por `stripe_refund_id`) y recalcula el
     estado del pago y del pedido, con el mismo bloqueo pedido → pago que el
     cobro."""
-    payment = _refund_payment(refund_obj.get("payment_intent") or payment_intent)
+    payment = _intent_payment(refund_obj.get("payment_intent") or payment_intent, "refund")
     if payment is None:
         return
     with transaction.atomic():
@@ -309,3 +313,83 @@ def reconcile_refunded_charge(charge_obj: dict) -> None:
     refunds = (charge_obj.get("refunds") or {}).get("data") or []
     for refund_obj in refunds:
         reconcile_stripe_refund(refund_obj, payment_intent=charge_obj.get("payment_intent"))
+
+
+def _flag_order(notice_obj: dict, *, key: str, action: str, event_name: str, patch: dict) -> None:
+    """Guarda el aviso en `order.data[key]` y lo registra en la bitácora.
+
+    No reembolsa ni cambia el estado del pedido: el staff decide si devuelve
+    el cobro (un reembolso a tiempo evita el contracargo) o si responde la
+    disputa. Idempotente por el id del aviso: un reenvío no duplica la bitácora.
+    """
+    payment = _intent_payment(notice_obj.get("payment_intent"), event_name)
+    if payment is None:
+        return
+    with transaction.atomic():
+        order, payment = lock_order_and_payment(payment)
+        if order is None:
+            return
+        order_data = order.data or {}
+        if (order_data.get(key) or {}).get("id") == notice_obj.get("id"):
+            return
+        logger.warning(
+            "Stripe %s %s on order %s (payment %s)",
+            event_name,
+            notice_obj.get("id"),
+            order.pk,
+            payment.pk,
+        )
+        order.data = {**order_data, key: patch}
+        order.updated_at = timezone.now()
+        order.save(update_fields=["data", "updated_at"])
+        record_activity(
+            actor="stripe",
+            action=action,
+            entity_type="ORDER",
+            entity_id=order.pk,
+            data={
+                **patch,
+                "paymentId": payment.pk,
+                "paymentIntent": notice_obj.get("payment_intent"),
+            },
+        )
+
+
+def reconcile_early_fraud_warning(warning_obj: dict) -> None:
+    """`radar.early_fraud_warning.created`: el banco avisa que el cobro
+    probablemente es fraude y es muy posible que llegue un contracargo."""
+    _flag_order(
+        warning_obj,
+        key="fraudWarning",
+        action="FRAUD_WARNING_RECEIVED",
+        event_name="early fraud warning",
+        patch={
+            "id": warning_obj.get("id"),
+            "fraudType": warning_obj.get("fraud_type"),
+            "actionable": bool(warning_obj.get("actionable")),
+            "chargeId": warning_obj.get("charge"),
+            "receivedAt": timezone.now().isoformat(),
+        },
+    )
+
+
+def reconcile_dispute_created(dispute_obj: dict) -> None:
+    """`charge.dispute.created`: el titular abrió un contracargo. Stripe ya
+    retuvo el monto; `evidenceDueBy` es el plazo para responder."""
+    due_by = (dispute_obj.get("evidence_details") or {}).get("due_by")
+    _flag_order(
+        dispute_obj,
+        key="dispute",
+        action="DISPUTE_OPENED",
+        event_name="dispute",
+        patch={
+            "id": dispute_obj.get("id"),
+            "reason": dispute_obj.get("reason"),
+            "amount": money(Decimal(dispute_obj.get("amount") or 0) / 100),
+            "chargeId": dispute_obj.get("charge"),
+            "evidenceDueBy": (
+                datetime.fromtimestamp(due_by, tz=UTC).isoformat() if due_by else None
+            ),
+            "openedAt": timezone.now().isoformat(),
+        },
+    )

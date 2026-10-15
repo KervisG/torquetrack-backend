@@ -69,11 +69,13 @@ def test_checkout_session_maps_line_items_and_returns_id_and_url(settings, monke
     assert captured == {
         "api_key": SECRET_KEY,
         "mode": "payment",
+        "billing_address_collection": "required",
         "client_reference_id": "OID1",
         "success_url": "https://shop.example.com/ok",
         "cancel_url": "https://shop.example.com/cancel",
         "metadata": {"order_id": "OID1", "order_number": "O10001"},
         "customer_email": "pat@example.com",
+        "payment_intent_data": {"metadata": {"order_id": "OID1", "order_number": "O10001"}},
         "line_items": [
             {
                 "price_data": {
@@ -108,6 +110,52 @@ def test_checkout_session_omits_customer_email_when_missing(settings, monkeypatc
     stripe.create_checkout_session(**SESSION_ARGS)
 
     assert "customer_email" not in captured
+
+
+def test_checkout_session_sends_shipping_to_the_payment_intent_for_radar(settings, monkeypatch):
+    settings.STRIPE_SECRET_KEY = SECRET_KEY
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return {"id": "cs_test_3", "url": "https://checkout.stripe.com/pay/cs_test_3"}
+
+    monkeypatch.setattr("stripe.checkout.Session.create", _create)
+    shipping = {
+        "name": "Pat Doe",
+        "phone": "555-0100",
+        "address": {
+            "line1": "1 Main St",
+            "city": "Sarasota",
+            "state": "FL",
+            "postal_code": "34236",
+            "country": "US",
+        },
+    }
+
+    stripe.create_checkout_session(**SESSION_ARGS, shipping=shipping)
+
+    assert captured["payment_intent_data"] == {
+        "shipping": shipping,
+        "metadata": {"order_id": "OID1", "order_number": "O10001"},
+    }
+
+
+def test_checkout_session_without_shipping_still_tags_the_payment_intent(settings, monkeypatch):
+    settings.STRIPE_SECRET_KEY = SECRET_KEY
+    captured = {}
+
+    def _create(**kwargs):
+        captured.update(kwargs)
+        return {"id": "cs_test_4", "url": "https://checkout.stripe.com/pay/cs_test_4"}
+
+    monkeypatch.setattr("stripe.checkout.Session.create", _create)
+
+    stripe.create_checkout_session(**SESSION_ARGS)
+
+    assert captured["payment_intent_data"] == {
+        "metadata": {"order_id": "OID1", "order_number": "O10001"}
+    }
 
 
 def test_checkout_session_stripe_error_maps_to_provider_error(settings, monkeypatch):

@@ -32,11 +32,23 @@ def create_checkout_session(
     cancel_url,
     metadata,
     customer_email=None,
+    shipping=None,
 ) -> dict:
-    """Cada línea es `{"name", "unit_amount" (centavos), "quantity"}`."""
+    """Cada línea es `{"name", "unit_amount" (centavos), "quantity"}`.
+
+    Radar compara la dirección de facturación (AVS) y la de envío con la
+    tarjeta: la facturación se pide siempre en la página de Stripe y el envío
+    (`shipping`, con la forma de `PaymentIntent.shipping`) viaja en el
+    PaymentIntent junto con la metadata, para que un aviso de fraude o una
+    disputa lleguen con el pedido identificado."""
+    payment_intent_data = {"metadata": metadata}
+    if shipping:
+        payment_intent_data["shipping"] = shipping
     params = {
         "api_key": _secret_key(),
         "mode": "payment",
+        "billing_address_collection": "required",
+        "payment_intent_data": payment_intent_data,
         "client_reference_id": client_reference_id,
         "success_url": success_url,
         "cancel_url": cancel_url,

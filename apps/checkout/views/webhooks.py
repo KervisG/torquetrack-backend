@@ -3,6 +3,8 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from apps.checkout.services import (
+    reconcile_dispute_created,
+    reconcile_early_fraud_warning,
     reconcile_expired_session,
     reconcile_failed_session,
     reconcile_paid_session,
@@ -46,5 +48,9 @@ class StripeWebhookView(APIView):
             reconcile_stripe_refund(event_obj)
         elif event_type == "charge.refunded":
             reconcile_refunded_charge(event_obj)
+        elif event_type == "radar.early_fraud_warning.created":
+            reconcile_early_fraud_warning(event_obj)
+        elif event_type == "charge.dispute.created":
+            reconcile_dispute_created(event_obj)
 
         return Response({"received": True})

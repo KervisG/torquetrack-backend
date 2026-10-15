@@ -39,6 +39,32 @@ def _line(name: str, unit_price, qty: int) -> dict:
     return {"name": name, "unit_amount": to_cents(unit_price), "quantity": qty}
 
 
+def _text(value) -> str:
+    return value.strip() if isinstance(value, str) else ""
+
+
+def _stripe_shipping(customer: dict) -> dict | None:
+    """Dirección de envío del pedido con la forma de `PaymentIntent.shipping`,
+    para que Radar la compare con la tarjeta. Stripe exige `name` y `line1`:
+    sin ellos (un pedido del panel a medio cargar) se cobra igual sin
+    dirección. La tienda solo envía dentro de Estados Unidos."""
+    name, line1 = _text(customer.get("name")), _text(customer.get("address1"))
+    if not name or not line1:
+        return None
+    address = {
+        "line1": line1,
+        "line2": _text(customer.get("address2")),
+        "city": _text(customer.get("city")),
+        "state": _text(customer.get("state")),
+        "postal_code": _text(customer.get("zip")),
+        "country": "US",
+    }
+    shipping = {"name": name, "address": {key: value for key, value in address.items() if value}}
+    if phone := _text(customer.get("phone")):
+        shipping["phone"] = phone
+    return shipping
+
+
 def _create_checkout_session(order: dict) -> dict:
     """Devuelve `{"id", "url"}`; lanza `ProviderError` o `ProviderNotConfigured`."""
     totals = order.get("totals") or {}
@@ -61,6 +87,7 @@ def _create_checkout_session(order: dict) -> dict:
             line_items.append(_line(name, value, 1))
 
     order_id = str(order["id"])
+    customer = order.get("customer") or {}
     return stripe_payments.create_checkout_session(
         client_reference_id=order_id,
         line_items=line_items,
@@ -69,7 +96,8 @@ def _create_checkout_session(order: dict) -> dict:
         ),
         cancel_url=app_url("/checkout?canceled=1"),
         metadata={"order_id": order_id, "order_number": order["number"]},
-        customer_email=(order.get("customer") or {}).get("email") or None,
+        customer_email=customer.get("email") or None,
+        shipping=_stripe_shipping(customer),
     )
 
 

@@ -28,6 +28,8 @@ from apps.checkout.services.storefront import (
     next_order_number,
 )
 from apps.checkout.services.webhooks import (
+    reconcile_dispute_created,
+    reconcile_early_fraud_warning,
     reconcile_expired_session,
     reconcile_failed_session,
     reconcile_paid_session,
@@ -49,6 +51,8 @@ __all__ = [
     "list_admin_orders",
     "next_order_number",
     "patch_admin_order",
+    "reconcile_dispute_created",
+    "reconcile_early_fraud_warning",
     "reconcile_expired_session",
     "reconcile_failed_session",
     "reconcile_paid_session",

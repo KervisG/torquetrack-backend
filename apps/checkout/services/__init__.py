@@ -1,6 +1,7 @@
 """API pública de los services de checkout; cada módulo es dueño de su tema:
 `payments` (Stripe), `storefront` (checkout público), `webhooks`
-(conciliación), `refunds` (reembolsos), `fulfillment` (envío y guía) y
+(conciliación), `refunds` (reembolsos), `fulfillment` (envío y guía), `notes` (notas
+internas) y
 `admin` (pedidos del panel)."""
 from apps.checkout.services.admin import (
     ORDER_STATUS_TRANSITIONS,
@@ -14,6 +15,7 @@ from apps.checkout.services.fulfillment import (
     FULFILLMENT_TRANSITIONS,
     update_order_fulfillment,
 )
+from apps.checkout.services.notes import add_order_note
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
     CLOSED_ORDER_STATUSES,
@@ -43,6 +45,7 @@ __all__ = [
     "FULFILLMENT_TRANSITIONS",
     "ORDER_STATUS_TRANSITIONS",
     "PAYMENT_START_FAILED",
+    "add_order_note",
     "cancel_pending_payment",
     "cancel_unpaid_order",
     "create_admin_payment_link",

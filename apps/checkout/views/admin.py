@@ -12,6 +12,7 @@ from apps.authorization.permissions import (
 )
 from apps.checkout.models import OrderStatus
 from apps.checkout.services import (
+    add_order_note,
     create_admin_payment_link,
     delete_admin_order,
     list_admin_orders,
@@ -125,3 +126,11 @@ class AdminOrderFulfillmentView(APIView):
         return service_response(
             update_order_fulfillment(order_id, request.data, request.user.email)
         )
+
+
+class AdminOrderNotesView(APIView):
+    permission_classes = [HasRolePermission]
+    required_permission = "orders.status"
+
+    def post(self, request, order_id):
+        return service_response(add_order_note(order_id, request.data, request.user.email))

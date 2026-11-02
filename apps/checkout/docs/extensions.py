@@ -10,6 +10,8 @@ from apps.checkout.docs.schemas import (
     CheckoutResponseSerializer,
     FulfillmentRequestSerializer,
     FulfillmentSerializer,
+    OrderNoteRequestSerializer,
+    OrderNoteResponseSerializer,
     OrderPatchSerializer,
     OrderSummarySerializer,
     PaymentLinkSerializer,
@@ -350,3 +352,48 @@ class StripeWebhookViewExtension(OpenApiViewExtension):
                 return super().post(request)
 
         return StripeWebhookView
+
+
+class AdminOrderNotesViewExtension(OpenApiViewExtension):
+    target_class = "apps.checkout.views.admin.AdminOrderNotesView"
+
+    def view_replacement(self):
+        class AdminOrderNotesView(self.target_class):
+            @extend_schema(
+                operation_id="admin_order_note_create",
+                tags=[ADMIN_ORDERS_TAG],
+                summary="Add an internal note to an order",
+                description=(
+                    "Requires `orders.status`. Appends a staff-only note (where the part "
+                    "was ordered, verifications, follow-up) to the order.\n\n"
+                    "- Notes are append-only and keep the author email and timestamp.\n"
+                    "- They are returned as `internalNotes` by the admin orders list and "
+                    "never by the customer portal.\n"
+                    "- Logs `ORDER_NOTE_ADDED` in the activity log."
+                ),
+                parameters=[
+                    OpenApiParameter(
+                        "order_id", str, OpenApiParameter.PATH, description="Order id."
+                    )
+                ],
+                request=OrderNoteRequestSerializer,
+                examples=[ex.ORDER_NOTE_REQUEST],
+                responses={
+                    201: OpenApiResponse(
+                        OrderNoteResponseSerializer, examples=[ex.ORDER_NOTE_CREATED]
+                    ),
+                    400: OpenApiResponse(
+                        ErrorResponseSerializer,
+                        examples=[ex.NOTE_REQUIRED, ex.NOTE_TOO_LONG],
+                    ),
+                    403: OpenApiResponse(
+                        ErrorResponseSerializer,
+                        description="No staff session, missing `orders.status`, or CSRF.",
+                    ),
+                    404: OpenApiResponse(ErrorResponseSerializer, examples=[ex.ORDER_NOT_FOUND]),
+                },
+            )
+            def post(self, request, order_id):
+                return super().post(request, order_id)
+
+        return AdminOrderNotesView

@@ -3,6 +3,7 @@ from django.urls import path
 from apps.checkout.views import (
     AdminOrderDetailView,
     AdminOrderFulfillmentView,
+    AdminOrderNotesView,
     AdminOrderPaymentLinkView,
     AdminOrderRefundsView,
     AdminOrdersListView,
@@ -24,6 +25,11 @@ urlpatterns = [
         "admin/orders/<str:order_id>/fulfillment/",
         AdminOrderFulfillmentView.as_view(),
         name="admin-order-fulfillment",
+    ),
+    path(
+        "admin/orders/<str:order_id>/notes/",
+        AdminOrderNotesView.as_view(),
+        name="admin-order-notes",
     ),
     path(
         "admin/orders/<str:order_id>/payment-link/",

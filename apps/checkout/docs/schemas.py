@@ -149,3 +149,18 @@ class FulfillmentSerializer(serializers.Serializer):
     )
     shippedAt = serializers.DateTimeField(allow_null=True)
     deliveredAt = serializers.DateTimeField(allow_null=True)
+
+
+class OrderNoteRequestSerializer(serializers.Serializer):
+    body = serializers.CharField(max_length=2000, help_text="Trimmed; 1 to 2000 characters.")
+
+
+class OrderNoteSerializer(serializers.Serializer):
+    id = serializers.CharField()
+    body = serializers.CharField()
+    by = serializers.EmailField(help_text="Email of the staff user who wrote the note.")
+    at = serializers.DateTimeField()
+
+
+class OrderNoteResponseSerializer(serializers.Serializer):
+    note = OrderNoteSerializer()

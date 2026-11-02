@@ -1,6 +1,7 @@
 from apps.checkout.views.admin import (
     AdminOrderDetailView,
     AdminOrderFulfillmentView,
+    AdminOrderNotesView,
     AdminOrderPaymentLinkView,
     AdminOrderRefundsView,
     AdminOrdersListView,
@@ -12,6 +13,7 @@ from apps.checkout.views.webhooks import StripeWebhookView
 __all__ = [
     "AdminOrderDetailView",
     "AdminOrderFulfillmentView",
+    "AdminOrderNotesView",
     "AdminOrderPaymentLinkView",
     "AdminOrderRefundsView",
     "AdminOrderTakePaymentView",

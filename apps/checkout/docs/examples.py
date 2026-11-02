@@ -105,3 +105,23 @@ SHIPPING_STATE_INVALID = error_example("Shipping state invalid", INVALID_SHIPPIN
 SHIPPING_ZIP_INVALID = error_example("Shipping ZIP invalid", INVALID_SHIPPING_ZIP, "zip")
 SHIPPING_ZIP_UNKNOWN = error_example("Shipping ZIP unassigned", UNKNOWN_SHIPPING_ZIP, "zip")
 SHIPPING_ZIP_MISMATCH = error_example("ZIP from another state", ZIP_STATE_MISMATCH, "zip")
+
+ORDER_NOTE_REQUEST = OpenApiExample(
+    "Add note",
+    value={"body": "Ordered from supplier X, PO 1234"},
+    request_only=True,
+)
+ORDER_NOTE_CREATED = OpenApiExample(
+    "Note added",
+    value={
+        "note": {
+            "id": "note_0A1B2C3D4E5F",
+            "body": "Ordered from supplier X, PO 1234",
+            "by": "seller@torquetrack.com",
+            "at": "2026-09-27T12:00:00+00:00",
+        }
+    },
+    response_only=True,
+)
+NOTE_REQUIRED = error_example("Empty note", "Note is required")
+NOTE_TOO_LONG = error_example("Note too long", "Note must be 2000 characters or fewer")

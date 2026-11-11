@@ -10,6 +10,13 @@ from apps.integrations.vehicles import nhtsa
 # El alfabeto de un VIN nunca incluye I, O ni Q.
 VIN_PATTERN = re.compile(r"^[A-HJ-NPR-Z0-9]{17}$")
 VIN_FORMAT_ERROR = "VIN must contain 17 valid characters"
+VEHICLE_UNIDENTIFIED_ERROR = (
+    "We couldn't identify this vehicle from its VIN. "
+    "Use Year / Make / Model to find parts that fit."
+)
+CHECK_DIGIT_WARNING = "check_digit"
+# Campos que el fitment necesita; el orden es el que ve el usuario.
+REQUIRED_FIELDS = ("year", "make", "model", "engine")
 
 
 def decode_vehicle(raw_vin: str | None) -> tuple[dict, int]:
@@ -27,17 +34,22 @@ def decode_vehicle(raw_vin: str | None) -> tuple[dict, int]:
     if not result:
         return {"error": "Vehicle not found"}, 404
 
-    return (
-        {
-            "vehicle": {
-                "vin": vin,
-                "year": result["model_year"] or "",
-                "make": result["make"] or "",
-                "model": result["model"] or "",
-                "engine": result["displacement_l"] or result["engine_model"] or "",
-                "engineModel": result["engine_model"] or "",
-                "fuelType": result["fuel_type"] or "",
-            }
-        },
-        200,
-    )
+    vehicle = {
+        "vin": vin,
+        "year": result["model_year"] or "",
+        "make": result["make"] or "",
+        "model": result["model"] or "",
+        "engine": result["displacement_l"] or result["engine_model"] or "",
+        "engineModel": result["engine_model"] or "",
+        "fuelType": result["fuel_type"] or "",
+    }
+
+    # Sin marca ni motor no hay con qué filtrar el fitment: no se guarda.
+    if not vehicle["make"] and not vehicle["engine"]:
+        return {"error": VEHICLE_UNIDENTIFIED_ERROR}, 404
+
+    # No se completa nada por fuera del VIN: los campos vacíos se informan
+    # tal cual para que el cliente le pida al usuario lo que falta.
+    missing = [field for field in REQUIRED_FIELDS if not vehicle[field]]
+    warnings = [] if result.get("check_digit_valid", True) else [CHECK_DIGIT_WARNING]
+    return {"vehicle": vehicle, "missingFields": missing, "warnings": warnings}, 200

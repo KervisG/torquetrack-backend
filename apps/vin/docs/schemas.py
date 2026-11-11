@@ -14,3 +14,7 @@ class VehicleSerializer(serializers.Serializer):
 
 class VinDecodeSerializer(serializers.Serializer):
     vehicle = VehicleSerializer()
+    # Campos de `vehicle` que el VIN no trajo: year, make, model o engine.
+    missingFields = serializers.ListField(child=serializers.CharField())
+    # Códigos de aviso; `check_digit` = el VIN probablemente está mal tipeado.
+    warnings = serializers.ListField(child=serializers.CharField())

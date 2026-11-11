@@ -33,6 +33,9 @@ def decode_vin(vin: str) -> dict | None:
     if not results:
         return None
     result = results[0]
+    # `ErrorCode` es una lista separada por comas ("1,14"); el 1 indica que el
+    # dígito verificador (posición 9) no cuadra, señal típica de un VIN mal tipeado.
+    error_codes = {code.strip() for code in str(result.get("ErrorCode") or "").split(",")}
     return {
         "model_year": result.get("ModelYear"),
         "make": result.get("Make"),
@@ -40,4 +43,5 @@ def decode_vin(vin: str) -> dict | None:
         "displacement_l": result.get("DisplacementL"),
         "engine_model": result.get("EngineModel"),
         "fuel_type": result.get("FuelTypePrimary"),
+        "check_digit_valid": "1" not in error_codes,
     }

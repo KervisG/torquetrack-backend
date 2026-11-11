@@ -29,6 +29,7 @@ def test_maps_the_first_result():
                     "DisplacementL": "6.0",
                     "EngineModel": "POWER STROKE",
                     "FuelTypePrimary": "Diesel",
+                    "ErrorCode": "0",
                 }
             ],
         },
@@ -42,7 +43,33 @@ def test_maps_the_first_result():
         "displacement_l": "6.0",
         "engine_model": "POWER STROKE",
         "fuel_type": "Diesel",
+        "check_digit_valid": True,
     }
+
+
+@responses.activate
+def test_error_code_1_marks_the_check_digit_invalid():
+    # vPIC devuelve varios códigos separados por coma; el 1 es el dígito verificador.
+    responses.add(
+        responses.GET,
+        NHTSA_URL,
+        json={"Results": [{"ErrorCode": "1,14"}]},
+        status=200,
+    )
+
+    assert nhtsa.decode_vin(VALID_VIN)["check_digit_valid"] is False
+
+
+@responses.activate
+def test_error_code_14_alone_keeps_the_check_digit_valid():
+    responses.add(
+        responses.GET,
+        NHTSA_URL,
+        json={"Results": [{"ErrorCode": "14"}]},
+        status=200,
+    )
+
+    assert nhtsa.decode_vin(VALID_VIN)["check_digit_valid"] is True
 
 
 @responses.activate

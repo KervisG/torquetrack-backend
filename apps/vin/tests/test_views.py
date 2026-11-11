@@ -17,6 +17,7 @@ DECODED = {
     "displacement_l": "6.0",
     "engine_model": "POWER STROKE",
     "fuel_type": "Diesel",
+    "check_digit_valid": True,
 }
 
 
@@ -77,8 +78,51 @@ def test_valid_vin_returns_decoded_vehicle(monkeypatch):
             "engine": "6.0",
             "engineModel": "POWER STROKE",
             "fuelType": "Diesel",
-        }
+        },
+        "missingFields": [],
+        "warnings": [],
     }
+
+
+def test_fields_the_vin_did_not_return_are_listed_as_missing(monkeypatch):
+    # Caso real: un International 2011 trae año y motor, pero no marca ni modelo.
+    _nhtsa(monkeypatch, result={**DECODED, "make": "", "model": None})
+
+    response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
+
+    assert response.status_code == 200
+    assert response.json()["vehicle"]["make"] == ""
+    assert response.json()["vehicle"]["model"] == ""
+    assert response.json()["missingFields"] == ["make", "model"]
+
+
+def test_invalid_check_digit_adds_a_warning(monkeypatch):
+    _nhtsa(monkeypatch, result={**DECODED, "check_digit_valid": False})
+
+    response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
+
+    assert response.status_code == 200
+    assert response.json()["warnings"] == ["check_digit"]
+
+
+def test_vehicle_without_make_or_engine_returns_404(monkeypatch):
+    _nhtsa(
+        monkeypatch,
+        result={
+            **DECODED,
+            "make": "",
+            "displacement_l": "",
+            "engine_model": "",
+        },
+    )
+
+    response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
+
+    assert response.status_code == 404
+    assert response.json()["error"] == (
+        "We couldn't identify this vehicle from its VIN. "
+        "Use Year / Make / Model to find parts that fit."
+    )
 
 
 def test_engine_falls_back_to_engine_model_when_displacement_missing(monkeypatch):

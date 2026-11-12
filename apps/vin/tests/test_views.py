@@ -78,6 +78,23 @@ def test_valid_vin_returns_decoded_vehicle(monkeypatch):
             "engine": "6.0",
             "engineModel": "POWER STROKE",
             "fuelType": "Diesel",
+            "details": {
+                "engine": "POWER STROKE 6.0L Diesel",
+                "drivetrain": "",
+                "transmission": "",
+                "body": "",
+                "trim": "",
+                "gvwr": "",
+                "fuel": "Diesel",
+                "horsepower": "",
+                "vehicleType": "",
+                "series": "",
+                "cab": "",
+                "brakes": "",
+                "manufacturer": "",
+                "plant": "",
+            },
+            "specs": [],
         },
         "missingFields": [],
         "warnings": [],
@@ -158,3 +175,96 @@ def test_network_failure_returns_502_vin_verification_failed(monkeypatch):
 
     assert response.status_code == 502
     assert response.json()["error"] == "VIN verification failed"
+
+
+def test_details_describe_the_vehicle_like_a_listing(monkeypatch):
+    _nhtsa(
+        monkeypatch,
+        result={
+            **DECODED,
+            "displacement_l": "6.7",
+            "engine_manufacturer": "Cummins Inc.",
+            "engine_cylinders": "6",
+            "engine_configuration": "In-Line",
+            "turbo": "Yes",
+            "drive_type": "4WD/4-Wheel Drive/4x4",
+            "transmission_style": "Automatic",
+            "transmission_speeds": "8",
+            "body_class": "Pickup",
+            "trim": "Laramie",
+            "gvwr": "Class 3: 10,001 - 14,000 lb (4,536 - 6,350 kg)",
+        },
+    )
+
+    response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
+
+    details = response.json()["vehicle"]["details"]
+    assert {key: details[key] for key in ("engine", "drivetrain", "transmission")} == {
+        "engine": "Cummins 6.7L I6 Turbodiesel",
+        "drivetrain": "4WD",
+        "transmission": "8-Spd Automatic",
+    }
+    assert details["body"] == "Pickup"
+    assert details["trim"] == "Laramie"
+    assert details["gvwr"] == "Class 3: 10,001 - 14,000 lb"
+
+
+def test_details_add_plant_power_and_type(monkeypatch):
+    _nhtsa(
+        monkeypatch,
+        result={
+            **DECODED,
+            "vehicle_type": "INCOMPLETE VEHICLE",
+            "manufacturer": "NAVISTAR, INC.",
+            "plant_city": "SPRINGFIELD",
+            "plant_state": "OHIO",
+            "plant_country": "UNITED STATES (USA)",
+            "engine_hp": "220",
+            "brake_system": "Air",
+            "cab_type": "Regular/Standard",
+        },
+    )
+
+    details = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN}).json()["vehicle"]["details"]
+
+    assert details["vehicleType"] == "Incomplete Vehicle"
+    assert details["manufacturer"] == "Navistar, Inc."
+    assert details["plant"] == "Springfield, Ohio, United States"
+    assert details["horsepower"] == "220 hp"
+    assert details["brakes"] == "Air"
+    assert details["cab"] == "Regular"
+
+
+def test_details_name_the_engine_model_when_the_manufacturer_is_missing(monkeypatch):
+    # Caso real: el International 2011 trae el modelo de motor pero no el fabricante.
+    _nhtsa(
+        monkeypatch,
+        result={**DECODED, "displacement_l": "6.4", "engine_model": "International Maxxforce 7"},
+    )
+
+    response = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN})
+
+    details = response.json()["vehicle"]["details"]
+    assert details["engine"] == "International Maxxforce 7 6.4L Diesel"
+
+
+def test_specs_list_every_field_with_data_except_ids_and_errors(monkeypatch):
+    raw = {
+        "VIN": VALID_VIN,
+        "ModelYear": "2011",
+        "MakeID": "1028",
+        "DisplacementCC": "6400.0",
+        "EngineHP_to": "300",
+        "NCSABodyType": "Cab-Chassis",
+        "ErrorText": "1 - Check Digit",
+    }
+    _nhtsa(monkeypatch, result={**DECODED, "raw": raw})
+
+    specs = APIClient().get("/api/vin/decode/", {"vin": VALID_VIN}).json()["vehicle"]["specs"]
+
+    assert specs == [
+        {"label": "Model Year", "value": "2011"},
+        {"label": "Displacement CC", "value": "6400.0"},
+        {"label": "Engine HP to", "value": "300"},
+        {"label": "NCSA Body Type", "value": "Cab-Chassis"},
+    ]

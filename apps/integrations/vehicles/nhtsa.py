@@ -43,5 +43,31 @@ def decode_vin(vin: str) -> dict | None:
         "displacement_l": result.get("DisplacementL"),
         "engine_model": result.get("EngineModel"),
         "fuel_type": result.get("FuelTypePrimary"),
+        # Datos de ficha técnica: vPIC los trae vacíos según la marca y el año.
+        "engine_manufacturer": result.get("EngineManufacturer"),
+        "engine_cylinders": result.get("EngineCylinders"),
+        "engine_configuration": result.get("EngineConfiguration"),
+        "turbo": result.get("Turbo"),
+        "drive_type": result.get("DriveType"),
+        "transmission_style": result.get("TransmissionStyle"),
+        "transmission_speeds": result.get("TransmissionSpeeds"),
+        "body_class": result.get("BodyClass"),
+        "trim": result.get("Trim"),
+        "gvwr": result.get("GVWR"),
+        "vehicle_type": result.get("VehicleType"),
+        "series": result.get("Series"),
+        "manufacturer": result.get("Manufacturer"),
+        "plant_city": result.get("PlantCity"),
+        "plant_state": result.get("PlantState"),
+        "plant_country": result.get("PlantCountry"),
+        "engine_hp": result.get("EngineHP"),
+        "brake_system": result.get("BrakeSystemType"),
+        "cab_type": result.get("BodyCabType"),
         "check_digit_valid": "1" not in error_codes,
+        # Todos los campos con dato, tal cual los nombra vPIC, para "More details".
+        "raw": {
+            key: str(value).strip()
+            for key, value in result.items()
+            if str(value or "").strip() and str(value).strip() != "Not Applicable"
+        },
     }

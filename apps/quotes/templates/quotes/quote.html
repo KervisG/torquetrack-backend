@@ -7,6 +7,9 @@ cuerpo del email "send" de admin.
 El logo es el SVG en línea (WeasyPrint lo dibuja y el PDF no tiene
 `base_url` para recursos externos); con `for_email` va el PNG publicado por el
 SPA, porque los clientes de correo bloquean el SVG.
+
+Diseño sobrio sobre fondo blanco y maquetado con tablas (lo que mejor
+soportan los clientes de correo), pensado para caber en una hoja carta.
 {% endcomment %}
 <!doctype html>
 <html>
@@ -15,132 +18,145 @@ SPA, porque los clientes de correo bloquean el SVG.
 <meta name="viewport" content="width=device-width">
 <title>TorqueTrack Quote {{ quote.number }}</title>
 <style>
+  @page { size: Letter; margin: 0.5in; }
   * { box-sizing: border-box; }
-  body { margin: 0; background: #0a0a0a; color: #fafafa; font-family: Arial, sans-serif; }
-  .page { max-width: 1050px; margin: auto; padding: 38px; }
-  .head { display: flex; justify-content: space-between; gap: 25px; align-items: center; border-bottom: 1px solid #262626; padding-bottom: 25px; }
-  .brand { display: flex; align-items: center; gap: 18px; }
-  .logo { display: block; width: 59px; height: 32px; }
-  .logo-sm { width: 44px; height: 24px; }
-  .name { font-size: 34px; font-weight: 900; }
-  .sub { letter-spacing: 7px; color: #d4d4d4; }
-  .accent { color: #fbbf24; }
-  .hero { display: grid; grid-template-columns: 1.4fr .6fr; gap: 24px; padding: 34px 0; }
-  .hero h1 { font-size: 42px; margin: 0 0 12px; }
-  .card { border: 1px solid #404040; border-radius: 10px; background: #171717; padding: 18px; }
-  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
-  .label { color: #fbbf24; font-weight: 800; }
-  .row { display: grid; grid-template-columns: 1.7fr .8fr .35fr .65fr .65fr .7fr; gap: 8px; padding: 13px; border-bottom: 1px solid #262626; }
-  .row.headrow { background: #262626; color: #fbbf24; font-weight: 800; border-radius: 8px 8px 0 0; }
-  .totals { margin-left: auto; width: min(420px, 100%); padding-top: 18px; }
-  .totalrow { display: flex; justify-content: space-between; padding: 8px 0; border-bottom: 1px solid #262626; }
-  .grand { background: #fbbf24; color: #0a0a0a; padding: 13px; font-size: 24px; font-weight: 900; border-radius: 8px; margin-top: 8px; }
-  .actions { display: flex; gap: 12px; margin: 25px 0; }
-  .btn { display: inline-block; padding: 15px 24px; border-radius: 8px; text-decoration: none; font-weight: 900; background: #fbbf24; color: #0a0a0a; }
-  .footer { border-top: 1px solid #f59e0b; margin-top: 30px; padding-top: 22px; color: #d4d4d4; }
-  .notes { line-height: 1.6; }
+  body { margin: 0; background: #ffffff; color: #1f2937; font-family: Helvetica, Arial, sans-serif; font-size: 11px; line-height: 1.45; }
+  .page { max-width: 760px; margin: auto; padding: 24px; }
+  table { width: 100%; border-collapse: collapse; }
+  td, th { vertical-align: top; text-align: left; }
+  .head > tbody > tr > td, .head > tr > td { padding-bottom: 14px; border-bottom: 2px solid #0f172a; }
+  .logo { display: block; width: 44px; height: 24px; }
+  .logo-sm { width: 30px; height: 16px; }
+  .name { font-size: 18px; font-weight: 700; color: #0f172a; letter-spacing: .3px; }
+  .sub { font-size: 9px; letter-spacing: 3px; color: #64748b; }
+  .doc-title { font-size: 22px; font-weight: 700; color: #0f172a; letter-spacing: 2px; text-align: right; }
+  .doc-meta { text-align: right; color: #475569; }
+  .doc-meta b { color: #0f172a; }
+  .intro { margin: 14px 0; color: #475569; }
+  .label { font-size: 9px; font-weight: 700; letter-spacing: 1.2px; color: #64748b; text-transform: uppercase; margin-bottom: 4px; }
+  .info td { width: 33.33%; padding: 10px 12px; border: 1px solid #e2e8f0; background: #f8fafc; }
+  .info b { color: #0f172a; }
+  .items { margin-top: 14px; }
+  .items th { font-size: 9px; letter-spacing: 1px; text-transform: uppercase; color: #ffffff; background: #0f172a; padding: 7px 8px; }
+  .items td { padding: 7px 8px; border-bottom: 1px solid #e2e8f0; }
+  .num { text-align: right !important; white-space: nowrap; }
+  .bottom { margin-top: 14px; page-break-inside: avoid; }
+  .notes { width: 55%; padding-right: 18px; color: #475569; font-size: 9.5px; }
+  .notes ul { margin: 0; padding-left: 14px; }
+  .totals td { padding: 4px 8px; }
+  .totals .grand td { border-top: 2px solid #0f172a; font-size: 14px; font-weight: 700; color: #0f172a; padding-top: 7px; }
+  .actions { margin: 20px 0; }
+  .btn { display: inline-block; padding: 11px 20px; border-radius: 4px; text-decoration: none; font-weight: 700; background: #0f172a; color: #ffffff; margin-right: 8px; }
+  .btn-outline { background: #ffffff; color: #0f172a; border: 1px solid #0f172a; }
+  .footer { margin-top: 18px; padding-top: 10px; border-top: 1px solid #e2e8f0; color: #64748b; font-size: 9.5px; }
   @media print {
-    body { background: #0a0a0a !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
     .actions { display: none; }
-    .page { padding: 18px; }
+    .page { padding: 0; max-width: none; }
   }
 </style>
 </head>
 <body>
 <main class="page">
-  <header class="head">
-    <div class="brand">
-      {% if for_email %}<img src="{{ email_logo_url }}" width="48" height="48" alt="TorqueTrack" style="display:block;border:0">{% else %}<svg class="logo" viewBox="0 0 106 58" role="img" aria-label="TorqueTrack" xmlns="http://www.w3.org/2000/svg"><path fill="#fbbf24" d="M0 0H51V14H34.5V58H16.5V14H0Z"/><path fill="#fbbf24" d="M55 0H106V14H89.5V58H71.5V14H55Z"/></svg>{% endif %}
-      <div><div class="name">Torque<span class="accent">Track</span></div><div class="sub">DIESEL PARTS</div></div>
-    </div>
-    <div><b>OEM + AFTERMARKET DIESEL COMPONENTS</b><br><span class="accent"><b>Find it. Price it. Ship it fast.</b></span></div>
-  </header>
+  <table class="head">
+    <tr>
+      <td>
+        <table style="width:auto"><tr>
+          <td style="padding-right:10px;vertical-align:middle">{% if for_email %}<img src="{{ email_logo_url }}" width="36" height="36" alt="TorqueTrack" style="display:block;border:0">{% else %}<svg class="logo" viewBox="0 0 106 58" role="img" aria-label="TorqueTrack" xmlns="http://www.w3.org/2000/svg"><path fill="#fbbf24" d="M0 0H51V14H34.5V58H16.5V14H0Z"/><path fill="#fbbf24" d="M55 0H106V14H89.5V58H71.5V14H55Z"/></svg>{% endif %}</td>
+          <td style="vertical-align:middle"><div class="name">TorqueTrack</div><div class="sub">DIESEL PARTS</div></td>
+        </tr></table>
+      </td>
+      <td>
+        <div class="doc-title">QUOTE</div>
+        <div class="doc-meta">
+          <b>No.</b> {{ quote.number }} &nbsp;&middot;&nbsp; <b>Date</b> {{ quote.createdAt|date:"m/d/Y" }}<br>
+          <b>Valid until</b> {% if quote.expiresAt %}{{ quote.expiresAt|date:"m/d/Y" }}{% else %}30 days{% endif %}
+        </div>
+      </td>
+    </tr>
+  </table>
 
-  <section class="hero">
-    <div>
-      <p>Hello {{ greeting_name }},</p>
-      <h1>Thank You for Choosing <span class="accent">TorqueTrack!</span></h1>
-      <p>Attached you&rsquo;ll find your quote <b class="accent">{{ quote.number }}</b> for review. You can proceed with checkout, request changes, or contact us.</p>
-    </div>
-    <div class="card">
-      <div class="label">QUOTE</div>
-      <p>
-        <b>Quote #</b> {{ quote.number }}<br>
-        <b>Date</b> {{ quote.createdAt|date:"m/d/Y" }}<br>
-        <b>Valid Until</b> {% if quote.expiresAt %}{{ quote.expiresAt|date:"m/d/Y" }}{% else %}30 days{% endif %}<br>
-        <b>Sales Rep</b> {{ quote.createdBy|default:"TorqueTrack Team" }}
-      </p>
-    </div>
-  </section>
+  <p class="intro">Dear {{ greeting_name }}, thank you for choosing TorqueTrack. Please find below quote <b>{{ quote.number }}</b> for your review. You can proceed with checkout, request changes, or contact us.</p>
 
-  <section class="grid">
-    <div class="card">
-      <div class="label">CUSTOMER INFORMATION</div>
-      <p>
-        <b>Name:</b> {{ customer.name|default:"" }}<br>
-        <b>Company:</b> {{ customer.company|default:"" }}<br>
-        <b>Email:</b> {{ customer.email|default:"" }}<br>
-        <b>Phone:</b> {{ customer.phone|default:"" }}<br>
-        <b>Address:</b> {{ customer.address1|default:"" }}{% if customer.city %}, {{ customer.city }}{% endif %}{% if customer.state %}, {{ customer.state }}{% endif %}{% if customer.zip %}, {{ customer.zip }}{% endif %}
-      </p>
-    </div>
-    <div class="card">
-      <div class="label">VEHICLE INFORMATION</div>
-      <p>
-        <b>Year:</b> {{ vehicle.year|default:"" }}<br>
-        <b>Make:</b> {{ vehicle.make|default:"" }}<br>
-        <b>Model:</b> {{ vehicle.model|default:"" }}<br>
-        <b>Engine:</b> {{ vehicle.engine|default:"" }}<br>
-        <b>VIN:</b> {{ vehicle.vin|default:"" }}
-      </p>
-    </div>
-  </section>
+  {# Solo se imprimen los datos cargados: un campo vacío no deja una etiqueta suelta. #}
+  <table class="info">
+    <tr>
+      <td>
+        <div class="label">Customer</div>
+        {% if customer.name %}<b>{{ customer.name }}</b><br>{% endif %}
+        {% if customer.company %}{{ customer.company }}<br>{% endif %}
+        {% if customer.email %}{{ customer.email }}<br>{% endif %}
+        {% if customer.phone %}{{ customer.phone }}<br>{% endif %}
+        {% if customer.address1 %}{{ customer.address1 }}{% if customer.city %}, {{ customer.city }}{% endif %}{% if customer.state %}, {{ customer.state }}{% endif %}{% if customer.zip %} {{ customer.zip }}{% endif %}{% endif %}
+      </td>
+      <td>
+        <div class="label">Vehicle</div>
+        {% if vehicle.year or vehicle.make or vehicle.model %}<b>{{ vehicle.year|default:"" }} {{ vehicle.make|default:"" }} {{ vehicle.model|default:"" }}</b><br>{% endif %}
+        {% if vehicle.details.engine %}Engine: {{ vehicle.details.engine }}<br>{% elif vehicle.engine %}Engine: {{ vehicle.engine }}<br>{% endif %}
+        {% if vehicle.details.drivetrain %}Drivetrain: {{ vehicle.details.drivetrain }}<br>{% endif %}
+        {% if vehicle.details.transmission %}Transmission: {{ vehicle.details.transmission }}<br>{% endif %}
+        {% if vehicle.vin %}VIN: {{ vehicle.vin }}{% endif %}
+      </td>
+      <td>
+        <div class="label">Sales representative</div>
+        {{ quote.createdBy|default:"TorqueTrack Team" }}
+      </td>
+    </tr>
+  </table>
 
-  <section style="margin-top:16px" class="card">
-    <div class="row headrow"><span>DESCRIPTION</span><span>PART #</span><span>QTY</span><span>PRICE</span><span>CORE</span><span>TOTAL</span></div>
-    {% for item in items %}
-    <div class="row">
-      <span>{{ item.title }}</span>
-      <span>{{ item.partNumber }}</span>
-      <span>{{ item.quantity }}</span>
-      <span>${{ item.unitPrice|floatformat:2 }}</span>
-      <span>${{ item.coreCharge|floatformat:2 }}</span>
-      <span>${{ item.lineTotal|floatformat:2 }}</span>
-    </div>
-    {% endfor %}
-  </section>
+  <table class="items">
+    <thead>
+      <tr><th>Description</th><th>Part #</th><th class="num">Qty</th><th class="num">Price</th><th class="num">Core</th><th class="num">Total</th></tr>
+    </thead>
+    <tbody>
+      {% for item in items %}
+      <tr>
+        <td>{{ item.title }}</td>
+        <td>{{ item.partNumber }}</td>
+        <td class="num">{{ item.quantity }}</td>
+        <td class="num">${{ item.unitPrice|floatformat:2 }}</td>
+        <td class="num">${{ item.coreCharge|floatformat:2 }}</td>
+        <td class="num">${{ item.lineTotal|floatformat:2 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
 
-  <div class="grid" style="margin-top:16px">
-    <div class="card notes">
-      <div class="label">NOTES</div>
-      &bull; Prices are subject to change without notice.<br>
-      &bull; Availability is based on current stock at time of purchase.<br>
-      &bull; Core charge is refundable upon receipt and inspection of the old unit.<br>
-      &bull; Shipping costs are estimated.<br>
-      &bull; This quote is not a guarantee of item availability.<br>
-      &bull; Please contact us with any questions.
-    </div>
-    <div class="totals">
-      <div class="totalrow"><span>Subtotal</span><b>${{ totals.subtotal|floatformat:2 }}</b></div>
-      <div class="totalrow"><span>Core Charge</span><b>${{ totals.core|floatformat:2 }}</b></div>
-      <div class="totalrow"><span>Shipping</span><b>${{ totals.shipping|floatformat:2 }}</b></div>
-      <div class="totalrow"><span>Tax</span><b>${{ totals.tax|floatformat:2 }}</b></div>
-      <div class="grand"><span>Total (USD)</span><span style="float:right">${{ totals.total|floatformat:2 }}</span></div>
-    </div>
-  </div>
+  <table class="bottom">
+    <tr>
+      <td class="notes">
+        <div class="label">Terms &amp; notes</div>
+        <ul>
+          <li>Prices are subject to change without notice.</li>
+          <li>Availability is based on current stock at time of purchase.</li>
+          <li>Core charge is refundable upon receipt and inspection of the old unit.</li>
+          <li>Shipping costs are estimated.</li>
+          <li>This quote is not a guarantee of item availability.</li>
+          <li>Please contact us with any questions.</li>
+        </ul>
+      </td>
+      <td>
+        <table class="totals">
+          <tr><td>Subtotal</td><td class="num">${{ totals.subtotal|floatformat:2 }}</td></tr>
+          <tr><td>Core charge</td><td class="num">${{ totals.core|floatformat:2 }}</td></tr>
+          <tr><td>Shipping</td><td class="num">${{ totals.shipping|floatformat:2 }}</td></tr>
+          <tr><td>Tax</td><td class="num">${{ totals.tax|floatformat:2 }}</td></tr>
+          <tr class="grand"><td>Total (USD)</td><td class="num">${{ totals.total|floatformat:2 }}</td></tr>
+        </table>
+      </td>
+    </tr>
+  </table>
 
   <div class="actions">
     {# En el correo abre la página del SPA, que hace el checkout. #}
     <a class="btn" style="border:0" href="{{ public_url }}">View / Checkout Quote &rarr;</a>
-    <a class="btn" style="background:transparent;color:#fbbf24;border:1px solid #fbbf24" href="{{ pdf_url }}">Download PDF</a>
+    <a class="btn btn-outline" href="{{ pdf_url }}">Download PDF</a>
   </div>
 
   <footer class="footer">
-    <div class="brand">
-      {% if for_email %}<img src="{{ email_logo_url }}" width="40" height="40" alt="TorqueTrack" style="display:block;border:0">{% else %}<svg class="logo logo-sm" viewBox="0 0 106 58" role="img" aria-label="TorqueTrack" xmlns="http://www.w3.org/2000/svg"><path fill="#fbbf24" d="M0 0H51V14H34.5V58H16.5V14H0Z"/><path fill="#fbbf24" d="M55 0H106V14H89.5V58H71.5V14H55Z"/></svg>{% endif %}
-      <div><b>Torque<span class="accent">Track</span> Diesel Parts</b><br>{% if company_email %}{{ company_email }} &bull; {% endif %}{{ company_address }}<br>{{ company_site }}</div>
-    </div>
-    <p style="letter-spacing:4px;text-align:center">FIND IT. PRICE IT. SHIP IT FAST.</p>
+    <table><tr>
+      <td style="width:40px;vertical-align:middle">{% if for_email %}<img src="{{ email_logo_url }}" width="28" height="28" alt="TorqueTrack" style="display:block;border:0">{% else %}<svg class="logo logo-sm" viewBox="0 0 106 58" role="img" aria-label="TorqueTrack" xmlns="http://www.w3.org/2000/svg"><path fill="#fbbf24" d="M0 0H51V14H34.5V58H16.5V14H0Z"/><path fill="#fbbf24" d="M55 0H106V14H89.5V58H71.5V14H55Z"/></svg>{% endif %}</td>
+      <td style="vertical-align:middle"><b style="color:#0f172a">TorqueTrack Diesel Parts</b><br>{% if company_email %}{{ company_email }} &bull; {% endif %}{{ company_address }}{% if company_site %} &bull; {{ company_site }}{% endif %}</td>
+    </tr></table>
   </footer>
 </main>
 </body>

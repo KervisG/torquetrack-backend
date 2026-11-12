@@ -101,8 +101,8 @@ def test_rendered_lines_use_whole_quantities_and_the_totals_rounding():
         {"items": [{"title": "Glow Plug", "quantity": 3, "unitPrice": 19.995, "coreCharge": 1.005}]}
     )
 
-    assert "<span>3</span>" in html
-    assert "<span>3.0</span>" not in html
+    assert '<td class="num">3</td>' in html
+    assert '<td class="num">3.0</td>' not in html
     assert "$63.03" in html
 
 

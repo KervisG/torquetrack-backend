@@ -6,6 +6,7 @@ import os
 import re
 import sys
 
+import environ as env_module
 import pytest
 from django.conf import settings
 from django.core.cache import cache
@@ -268,6 +269,10 @@ def test_prod_still_reads_the_legacy_from_email_name(monkeypatch):
 
 
 def _load_base(monkeypatch, **environ):
+    # El `.env` local ya está en `os.environ` desde el arranque; releerlo al
+    # recargar devolvería las variables que el test acaba de borrar, y un
+    # "default" dependería del `.env` de quien corre los tests.
+    monkeypatch.setattr(env_module.Env, "read_env", lambda *args, **kwargs: None)
     monkeypatch.delenv("CACHE_URL", raising=False)
     for name, value in environ.items():
         monkeypatch.setenv(name, value)

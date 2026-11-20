@@ -14,7 +14,9 @@ from apps.integrations.exceptions import ProviderError
 from tests.factories import activity_count, create_staff_user, session_client
 from tests.fakes import install_resend
 
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+# Abrir un pago no llama a la pasarela; los fallos se simulan en `start_payment`.
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
+START_PAYMENT = "apps.checkout.services.admin.start_payment"
 
 
 def _insert_user(user_id, permissions=None, active=True, full_access=False):
@@ -42,7 +44,13 @@ def _make_order(order_id="ord_1", number="O20001", data=None, payment_status="UN
     return Order.objects.create(**fields)
 
 
-def _fake_session(session_id="cs_test_admin", url="https://checkout.stripe.com/pay/cs_test_admin"):
+@pytest.fixture(autouse=True)
+def _gateway_credentials(settings):
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+
+
+def _fake_session(session_id="cs_test_admin", url="https://example.test/pay"):
     return {"id": session_id, "url": url}
 
 
@@ -173,45 +181,45 @@ def test_list_includes_payments_without_the_provider_transaction_id():
     assert "cs_secret_session" not in response.content.decode()
 
 
-def _paid_order_with_stripe_ids():
+def _paid_order_with_provider_ids():
     order = _make_order(
         payment_status="PAID",
-        data={"payment": {"provider": "stripe", "last4": "4242", "paymentIntent": "pi_secret"}},
+        data={
+            "payment": {"provider": "authorize_net", "last4": "4242", "transactionId": "60009"}
+        },
     )
     Payment.objects.create(
         id="PAY_PAID",
         order=order,
-        provider="stripe",
-        provider_id="cs_secret_session",
+        provider="authorize_net",
+        provider_id="60009",
         status="PAID",
         amount=10,
-        data={"payment_intent": "pi_secret", "sessionId": "cs_secret_session"},
+        data={"transactionId": "60009"},
     )
 
 
 @pytest.mark.django_db
 def test_list_hides_the_payment_intent_in_order_data_without_transaction_id():
     _insert_user("usr_list_pi", permissions=["orders.view"])
-    _paid_order_with_stripe_ids()
+    _paid_order_with_provider_ids()
 
     response = _admin_client("usr_list_pi").get("/api/admin/orders/")
 
     body = response.content.decode()
-    assert "pi_secret" not in body
-    assert "cs_secret_session" not in body
-    assert response.json()[0]["payment"] == {"provider": "stripe", "last4": "4242"}
+    assert "60009" not in body
+    assert response.json()[0]["payment"] == {"provider": "authorize_net", "last4": "4242"}
 
 
 @pytest.mark.django_db
-def test_list_includes_stripe_ids_with_payments_transaction_id():
+def test_list_includes_provider_ids_with_payments_transaction_id():
     _insert_user("usr_list_tx", permissions=["orders.view", "payments.transaction_id"])
-    _paid_order_with_stripe_ids()
+    _paid_order_with_provider_ids()
 
     row = _admin_client("usr_list_tx").get("/api/admin/orders/").json()[0]
 
-    assert row["payment"]["paymentIntent"] == "pi_secret"
-    assert row["payments"][0]["providerId"] == "cs_secret_session"
-    assert row["payments"][0]["paymentIntent"] == "pi_secret"
+    assert row["payment"]["transactionId"] == "60009"
+    assert row["payments"][0]["providerId"] == "60009"
 
 
 # --- PATCH status -----------------------------------------------------
@@ -557,8 +565,8 @@ def test_delete_removes_unpaid_order_and_its_payments():
     Payment.objects.create(
         id="pay_1",
         order=order,
-        provider="stripe",
-        provider_id="cs_x",
+        provider="authorize_net",
+        provider_id=None,
         status="PENDING",
         amount=10,
         data={},
@@ -641,21 +649,21 @@ def test_payment_link_without_customer_email_is_not_emailed(monkeypatch):
 
 
 @pytest.mark.django_db
-def test_payment_link_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
+def test_payment_link_hides_the_provider_error_behind_a_502(monkeypatch, caplog):
     _insert_user("usr_link5", permissions=["payments.take"])
     _make_order()
     client = _admin_client("usr_link5")
 
-    def _boom(**kwargs):
+    def _boom(order, **kwargs):
         raise ProviderError("Invalid API Key for account acct_internal_123")
 
-    monkeypatch.setattr(CREATE_SESSION, _boom)
+    monkeypatch.setattr(START_PAYMENT, _boom)
 
     with caplog.at_level(logging.WARNING, logger="apps.checkout.services.admin"):
         response = client.post("/api/admin/orders/ord_1/payment-link/")
 
     assert response.status_code == 502
-    assert response.json() == {"error": "Stripe request failed; see server logs."}
+    assert response.json() == {"error": "Payment provider request failed; see server logs."}
     assert "acct_internal_123" in caplog.text
 
 
@@ -704,21 +712,21 @@ def test_take_payment_creates_payment_and_logs_activity_without_status_change(mo
 
 
 @pytest.mark.django_db
-def test_take_payment_hides_the_stripe_error_behind_a_502(monkeypatch, caplog):
+def test_take_payment_hides_the_provider_error_behind_a_502(monkeypatch, caplog):
     _insert_user("usr_take4", permissions=["payments.take"])
     _make_order()
     client = _admin_client("usr_take4")
 
-    def _boom(**kwargs):
+    def _boom(order, **kwargs):
         raise ProviderError("Invalid API Key for account acct_internal_123")
 
-    monkeypatch.setattr(CREATE_SESSION, _boom)
+    monkeypatch.setattr(START_PAYMENT, _boom)
 
     with caplog.at_level(logging.WARNING, logger="apps.checkout.services.admin"):
         response = client.post("/api/admin/orders/ord_1/take-payment/")
 
     assert response.status_code == 502
-    assert response.json() == {"error": "Stripe request failed; see server logs."}
+    assert response.json() == {"error": "Payment provider request failed; see server logs."}
     assert "acct_internal_123" in caplog.text
 
 
@@ -797,7 +805,9 @@ def test_delete_reads_the_order_with_a_row_lock():
 
 
 @pytest.mark.django_db
-def test_payment_link_email_escapes_the_order_number_and_the_session_url(monkeypatch, settings):
+def test_payment_link_email_escapes_the_order_number_and_links_the_payment_page(
+    monkeypatch, settings
+):
     settings.RESEND_API_KEY = "re_test_fake"
     _insert_user("usr_link_escape", permissions=["payments.take"])
     _make_order(
@@ -805,10 +815,6 @@ def test_payment_link_email_escapes_the_order_number_and_the_session_url(monkeyp
         data={"customer": {"email": "buyer@example.com"}, "totals": {"total": 10.0}},
     )
     client = _admin_client("usr_link_escape")
-    monkeypatch.setattr(
-        CREATE_SESSION,
-        lambda **kwargs: _fake_session(url='https://checkout.stripe.com/pay?a=1&b="x"'),
-    )
     resend = install_resend(monkeypatch)
 
     response = client.post("/api/admin/orders/ord_1/payment-link/")
@@ -816,7 +822,8 @@ def test_payment_link_email_escapes_the_order_number_and_the_session_url(monkeyp
     assert response.status_code == 200
     html = resend.sent[0]["html"]
     assert "&lt;b&gt;O1&lt;/b&gt;" in html
-    assert 'href="https://checkout.stripe.com/pay?a=1&amp;b=&quot;x&quot;"' in html
+    payment = Payment.objects.get(order_id="ord_1")
+    assert f'href="http://localhost:5173/api/payments/{payment.pk}/pay/"' in html
     assert f'<img src="{email_logo_url()}"' in html
 
 

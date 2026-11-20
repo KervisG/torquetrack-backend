@@ -4,7 +4,7 @@
 
 No hay `conftest.py` propio ni `schema.sql`. pytest-django crea la base de test y aplica todas las migraciones, igual que `manage.py migrate`: cada tabla que lee un test la creó el ORM.
 
-`tests/test_migrations.py` prueba que ningún modelo es `managed = False`, que `migrate` crea cada tabla de dominio (`DOMAIN_TABLES`), que no queda ninguna tabla retirada (`RETIRED_TABLES`: `sessions`, `employee_roles`) y que `makemigrations --check` no detecta cambios. `tests/test_audit_boundary.py` recorre los módulos con `ast` y falla si algo fuera de `apps/audit/` importa algo distinto de `record_activity`, o si `audit` importa una app de dominio. `tests/test_integrations_boundary.py` hace lo mismo con los proveedores: solo `apps/integrations/` importa `requests`, `stripe` y los SDKs, `integrations` no importa apps de dominio, `send_email` sale solo del adaptador y `calculate_sales_tax` solo del paquete `apps.tax.services` (o de su módulo `sales_tax`). `tests/test_app_boundaries.py` arma el grafo de imports entre apps y falla ante un ciclo, si `apps/common` o `apps/numbering` importan otra app, o si la resolución del cliente (`customer_for_user`, `resolve_guest_customer`, `link_guest_history`) se importa de otro lado que el paquete `apps.customers.services` (o uno de sus módulos).
+`tests/test_migrations.py` prueba que ningún modelo es `managed = False`, que `migrate` crea cada tabla de dominio (`DOMAIN_TABLES`), que no queda ninguna tabla retirada (`RETIRED_TABLES`: `sessions`, `employee_roles`) y que `makemigrations --check` no detecta cambios. `tests/test_audit_boundary.py` recorre los módulos con `ast` y falla si algo fuera de `apps/audit/` importa algo distinto de `record_activity`, o si `audit` importa una app de dominio. `tests/test_integrations_boundary.py` hace lo mismo con los proveedores: solo `apps/integrations/` importa `requests` y los SDKs, `integrations` no importa apps de dominio, `send_email` sale solo del adaptador y `calculate_sales_tax` solo del paquete `apps.tax.services` (o de su módulo `sales_tax`). `tests/test_app_boundaries.py` arma el grafo de imports entre apps y falla ante un ciclo, si `apps/common` o `apps/numbering` importan otra app, o si la resolución del cliente (`customer_for_user`, `resolve_guest_customer`, `link_guest_history`) se importa de otro lado que el paquete `apps.customers.services` (o uno de sus módulos).
 
 ## Helpers de arrange
 
@@ -59,8 +59,8 @@ resend = install_resend(monkeypatch)            # resend.sent[0]["to"] == ["pat@
 forbid_resend(monkeypatch)                      # cualquier envío falla el test
 
 monkeypatch.setattr(
-    "apps.integrations.payments.stripe.create_checkout_session",
-    lambda **kwargs: {"id": "cs_test_1", "url": "https://checkout.stripe.com/pay/cs_test_1"},
+    "apps.integrations.payments.authorize_net.create_hosted_payment_token",
+    lambda **kwargs: {"token": "tok_1", "formUrl": "https://test.authorize.net/payment/payment"},
 )
 ```
 

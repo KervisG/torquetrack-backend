@@ -12,7 +12,7 @@ def record_activity(
     entity_id: str | None = None,
     data: dict | None = None,
 ) -> None:
-    """`actor` es el email del staff o un actor de sistema (`"stripe"`); no es
+    """`actor` es el email del staff o un actor de sistema (`"authorize_net"`); no es
     una FK para que la fila sobreviva al borrado del usuario."""
     ActivityLog.objects.create(
         actor_id=actor,

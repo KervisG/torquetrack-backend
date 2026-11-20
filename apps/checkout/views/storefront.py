@@ -6,7 +6,7 @@ from rest_framework.views import APIView
 from apps.authentication.utils.throttling import CheckoutRateThrottle
 from apps.cart.services import current_cart_id
 from apps.checkout.services import create_storefront_checkout
-from apps.integrations.payments import stripe as stripe_payments
+from apps.integrations.payments import authorize_net
 from config.responses import service_response
 
 
@@ -21,11 +21,11 @@ class CheckoutView(APIView):
     throttle_classes = [CheckoutRateThrottle]
 
     def post(self, request):
-        if not stripe_payments.is_configured():
+        if not authorize_net.is_configured():
             return Response(
                 {
-                    "error": "Payments are not configured. Add STRIPE_SECRET_KEY to "
-                    "the server environment."
+                    "error": "Payments are not configured. Add AUTHORIZE_NET_API_LOGIN_ID and "
+                    "AUTHORIZE_NET_TRANSACTION_KEY to the server environment."
                 },
                 status=503,
             )

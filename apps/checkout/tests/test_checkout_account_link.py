@@ -4,7 +4,8 @@ body no puede cambiar el cliente ni el perfil."""
 import pytest
 
 from apps.catalog.models import Product
-from apps.checkout.models import Order
+from apps.checkout.models import Order, Payment
+from apps.checkout.services.payments import create_payment_form
 from apps.customers.models import Customer
 from tests.factories import (
     CHECKOUT_CONTACT,
@@ -15,7 +16,7 @@ from tests.factories import (
 )
 from tests.fakes import quote_shipping
 
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 
 PRODUCT_ID = "gm-65-injection-pump-dorman-502550"
 PRODUCT_DATA = {
@@ -35,14 +36,15 @@ PROFILE = {"name": "Pat Fleet", "company": "Fleet LLC", "city": "Tampa"}
 
 @pytest.fixture(autouse=True)
 def _stripe(settings, monkeypatch):
-    settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     Product.objects.create(id=PRODUCT_ID, data=PRODUCT_DATA, active=True)
     captured = {}
 
     def _create(**kwargs):
         captured.update(kwargs)
-        return {"id": "cs_test_acct", "url": "https://checkout.stripe.com/pay/cs_test_acct"}
+        return {"id": "cs_test_acct", "url": "https://example.test/pay"}
 
     monkeypatch.setattr(CREATE_SESSION, _create)
     captured["_selection"] = quote_shipping(
@@ -105,6 +107,7 @@ def test_signed_in_customer_body_email_cannot_redirect_the_order(_stripe):
     order = Order.objects.get(pk=response.json()["orderId"])
     assert order.customer_id == "C_PAT"
     assert order.data["customer"]["email"] == "pat@example.com"
+    create_payment_form(Payment.objects.get(order=order))
     assert _stripe["customer_email"] == "pat@example.com"
     assert Customer.objects.get(pk="C_GUEST").data == {}
 

@@ -17,7 +17,7 @@ from apps.catalog.services.pricing import (
     serialize_totals,
 )
 from apps.checkout.models import Order, OrderPaymentStatus, OrderStatus
-from apps.checkout.services.payments import cancel_unpaid_order, start_stripe_payment
+from apps.checkout.services.payments import cancel_unpaid_order, start_payment
 from apps.common.contact import is_plausible_phone, is_valid_email
 from apps.common.errors import error_payload
 from apps.common.ids import random_id
@@ -34,7 +34,7 @@ from apps.vin.services import VIN_FORMAT_ERROR, VIN_PATTERN
 
 logger = logging.getLogger(__name__)
 
-# El detalle de Stripe va al log: puede nombrar la cuenta o la configuración.
+# El detalle de la pasarela va al log: puede nombrar la cuenta o la configuración.
 PAYMENT_START_FAILED = "Payment could not be started. Please try again."
 
 
@@ -120,9 +120,10 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     para ese ZIP y omite el impuesto únicamente con un perfil VERIFIED
     vinculado a la sesión.
 
-    El pedido se crea antes de Stripe porque la sesión necesita su id y su
-    número. Si Stripe falla, el pedido queda `CANCELLED` y el carrito no pasa a
-    `CHECKOUT`: el carrito solo se vincula cuando la sesión existe.
+    El pedido se crea antes del pago porque el cobro necesita su id y su
+    número. Si no se puede abrir el pago (pasarela sin configurar), el pedido
+    queda `CANCELLED` y el carrito no pasa a `CHECKOUT`: el carrito solo se
+    vincula cuando el pago existe.
 
     `cart_id` es el carrito de la cuenta o, sin ella, el de la sesión; el
     `cartId` del body se ignora para que nadie pueda marcar como vendido el
@@ -259,9 +260,9 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
         )
 
     try:
-        _, session = start_stripe_payment(order, data={"source": "STOREFRONT_CHECKOUT"})
+        _, session = start_payment(order, data={"source": "STOREFRONT_CHECKOUT"})
     except ProviderError as exc:
-        logger.warning("Stripe checkout for order %s failed: %s", order.pk, exc)
+        logger.warning("Checkout payment for order %s failed: %s", order.pk, exc)
         cancel_unpaid_order(order, "PAYMENT_SETUP_FAILED")
         return {"error": PAYMENT_START_FAILED}, 502
 

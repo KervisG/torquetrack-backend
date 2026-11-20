@@ -31,7 +31,7 @@ class Payment(models.Model):
     status = models.TextField(choices=PaymentStatus)
     amount = models.DecimalField(max_digits=12, decimal_places=2, default=0, db_default=0)
     data = models.JSONField(default=dict, db_default={})
-    # Momento en que Stripe confirmó el cobro; el dashboard suma las ventas
+    # Momento en que la pasarela confirmó el cobro; el dashboard suma las ventas
     # del día por esta fecha y no por la creación del pedido.
     paid_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now, db_default=Now())

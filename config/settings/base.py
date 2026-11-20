@@ -166,6 +166,11 @@ CELERY_BEAT_SCHEDULE = {
         "task": "apps.quotes.tasks.expire_quotes",
         "schedule": crontab(minute=0),
     },
+    # Vence los pagos PENDING de más de 24 h y cancela su pedido de la tienda.
+    "expire-pending-payments": {
+        "task": "apps.checkout.tasks.expire_pending_payments",
+        "schedule": crontab(minute="*/15"),
+    },
     "purge-empty-carts": {
         "task": "apps.cart.tasks.purge_carts",
         "schedule": crontab(hour=3, minute=30),
@@ -220,6 +225,7 @@ REST_FRAMEWORK = {
         # para corregir la dirección varias veces sin bloquear a un cliente.
         "checkout": "10/hour",
         "quote_checkout": "10/hour",
+        "payment_page": "30/hour",
         "quote_request": "10/hour",
         "quote_pdf": "20/hour",
         "shipping_rates": "30/min",
@@ -258,8 +264,12 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-STRIPE_SECRET_KEY = env("STRIPE_SECRET_KEY", default="")
-STRIPE_WEBHOOK_SECRET = env("STRIPE_WEBHOOK_SECRET", default="")
+# Authorize.net: `sandbox` (apitest.authorize.net) o `production`. La
+# Signature Key firma los webhooks; sin ella el webhook responde 503.
+AUTHORIZE_NET_API_LOGIN_ID = env("AUTHORIZE_NET_API_LOGIN_ID", default="")
+AUTHORIZE_NET_TRANSACTION_KEY = env("AUTHORIZE_NET_TRANSACTION_KEY", default="")
+AUTHORIZE_NET_SIGNATURE_KEY = env("AUTHORIZE_NET_SIGNATURE_KEY", default="")
+AUTHORIZE_NET_ENVIRONMENT = env("AUTHORIZE_NET_ENVIRONMENT", default="sandbox")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 # Estados donde TorqueTrack tiene nexo de impuesto de venta. Es una decisión
 # fiscal del negocio, no de despliegue: por eso no sale del entorno. Fuera de

@@ -4,7 +4,7 @@ El equipo recibe el aviso en `CORES_EMAIL` o `RETURNS_EMAIL`, y el cliente
 recibe cada cambio de estado con la respuesta dirigida a ese mismo buzón. Sin
 el buzón configurado no sale el aviso interno y la respuesta del cliente cae
 en `REPLY_TO_EMAIL`. Los correos se arman aquí y salen en un hilo aparte: ni
-el panel ni el webhook de Stripe esperan a Resend.
+el panel ni el webhook de la pasarela esperan a Resend.
 """
 
 from __future__ import annotations

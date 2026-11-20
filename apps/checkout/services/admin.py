@@ -22,9 +22,9 @@ from apps.checkout.models import (
 from apps.checkout.services.payments import (
     CHARGED_PAYMENT_STATUSES,
     CLOSED_ORDER_STATUSES,
-    STRIPE_REQUEST_FAILED,
+    PAYMENT_REQUEST_FAILED,
     cancel_pending_payments,
-    start_stripe_payment,
+    start_payment,
 )
 from apps.checkout.services.refunds import order_refund_summary, serialize_refund
 from apps.checkout.services.workflow_emails import notify_workflow_changes
@@ -50,7 +50,7 @@ ORDER_STATUS_TRANSITIONS = {
 }
 
 
-# Ids de Stripe: verlos exige `payments.transaction_id`, no `orders.view`.
+# Ids de la pasarela: verlos exige `payments.transaction_id`, no `orders.view`.
 def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
     data = order.data or {}
     if order.customer_id and order.customer is not None:
@@ -69,7 +69,9 @@ def _serialize_order(order: Order, can_view_transaction_ids: bool) -> dict:
     refunds = order_refund_summary(order, payments)
     extra = {}
     if isinstance(data.get("payment"), dict) and not can_view_transaction_ids:
-        extra["payment"] = {k: v for k, v in data["payment"].items() if k != "paymentIntent"}
+        extra["payment"] = {
+            k: v for k, v in data["payment"].items() if k not in ("transactionId", "paymentIntent")
+        }
 
     return {
         **data,
@@ -103,7 +105,6 @@ def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict
     }
     if can_view_transaction_ids:
         row["providerId"] = payment.provider_id
-        row["paymentIntent"] = data.get("payment_intent")
     return row
 
 
@@ -339,12 +340,12 @@ def create_admin_payment_link(order_id: str) -> dict:
         return {"error": "Closed orders cannot be paid", "status": 409}
 
     try:
-        payment, session = start_stripe_payment(
+        payment, session = start_payment(
             order, data={"adminGenerated": True, "source": "ADMIN_PAYMENT_LINK"}
         )
     except ProviderError as exc:
-        logger.warning("Stripe payment link for order %s failed: %s", order_id, exc)
-        return {"error": STRIPE_REQUEST_FAILED, "status": 502}
+        logger.warning("Payment link for order %s failed: %s", order_id, exc)
+        return {"error": PAYMENT_REQUEST_FAILED, "status": 502}
 
     total = money_decimal(payment.amount)
     order.status = OrderStatus.PENDING_PAYMENT
@@ -386,18 +387,18 @@ def take_admin_payment(order_id: str, actor_email: str) -> dict:
         return {"error": "Closed orders cannot be paid", "status": 409}
 
     try:
-        _, session = start_stripe_payment(
+        _, session = start_payment(
             order, data={"employee": actor_email, "source": "EMPLOYEE_TAKE_PAYMENT"}
         )
     except ProviderError as exc:
-        logger.warning("Stripe take-payment for order %s failed: %s", order_id, exc)
-        return {"error": STRIPE_REQUEST_FAILED, "status": 502}
+        logger.warning("Take-payment for order %s failed: %s", order_id, exc)
+        return {"error": PAYMENT_REQUEST_FAILED, "status": 502}
 
     record_activity(
         actor=actor_email,
         action="TAKE_PAYMENT_STARTED",
         entity_type="ORDER",
         entity_id=order_id,
-        data={"sessionId": session["id"]},
+        data={"paymentId": session["id"]},
     )
     return {"ok": True, "url": session["url"]}

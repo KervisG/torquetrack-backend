@@ -1,7 +1,7 @@
 """`POST /api/checkout/`: el chequeo de fitment del `vehicle` usa las filas de
 `ProductFitment` cuando el producto las tiene y el texto de `data` cuando no.
 
-Stripe se parchea en `apps.integrations.payments.stripe.create_checkout_session`
+Stripe se parchea en `apps.integrations.payments.authorize_net.create_hosted_payment_token`
 y la tarifa de envío con `quote_shipping` de `tests/fakes.py`."""
 import pytest
 from rest_framework.test import APIClient
@@ -10,7 +10,7 @@ from apps.catalog.models import Application, Product
 from apps.checkout.models import Order
 from tests.fakes import quote_shipping
 
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 PRODUCT_ID = "ford-73-injector"
 # El texto dice 1994-2003 7.3; las filas lo acotan a la aplicación 1994-1997.
 PRODUCT_DATA = {"id": PRODUCT_ID, "title": "7.3L Injector", "partNumber": "AP63992",
@@ -22,7 +22,8 @@ FORD_73_EARLY = {"id": "ford-73-powerstroke-1994-1997", "make": "Ford", "yearFro
 
 @pytest.fixture(autouse=True)
 def _keys(settings, monkeypatch):
-    settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     monkeypatch.setattr(
         CREATE_SESSION, lambda **kwargs: {"id": "cs_test_1", "url": "https://stripe.test/cs"}

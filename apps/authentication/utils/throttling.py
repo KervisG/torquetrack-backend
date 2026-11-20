@@ -3,7 +3,7 @@ una activación sin tope sirven para crear cuentas en masa o adivinar tokens.
 Un pedido de reset sin tope convierte el formulario en un cañón de correos
 contra la casilla de un tercero.
 
-Las rutas públicas del storefront que cuestan (sesión de Stripe, correos,
+Las rutas públicas del storefront que cuestan (token de la pasarela, correos,
 WeasyPrint, EasyPost, TaxJar, NHTSA) también tienen tope por IP: sin él,
 cualquiera las usa para gastar la cuota paga de un proveedor o saturar los
 workers. Viven acá y no en cada app porque este módulo es la infraestructura
@@ -124,13 +124,18 @@ class PasswordResetAccountRateThrottle(_EmailRateThrottle):
 
 
 class CheckoutRateThrottle(_IpRateThrottle):
-    # Cada intento crea un pedido `PENDING_PAYMENT` y una sesión de Stripe.
+    # Cada intento crea un pedido `PENDING_PAYMENT` y un pago pendiente.
     scope = "checkout"
 
 
 class QuoteCheckoutRateThrottle(_IpRateThrottle):
-    # Pagar una cotización también abre una sesión de Stripe.
+    # Pagar una cotización también abre un pago pendiente.
     scope = "quote_checkout"
+
+
+class PaymentPageRateThrottle(_IpRateThrottle):
+    # Cada apertura del link de pago pide un token a Authorize.net.
+    scope = "payment_page"
 
 
 class QuoteRequestRateThrottle(_IpRateThrottle):

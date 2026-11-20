@@ -4,7 +4,6 @@ drf-spectacular>=0.30,<0.31
 psycopg[binary]>=3.2,<3.3
 django-environ>=0.13,<0.14
 requests>=2.32,<3
-stripe>=11,<12
 weasyprint>=70,<71
 whitenoise>=6.12,<7
 gunicorn>=26.2,<27

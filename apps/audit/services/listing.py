@@ -4,9 +4,12 @@ from django.db.models import Q
 
 from apps.audit.models import ActivityLog
 
-# Ids de Stripe que escriben los pagos en `data`. Verlos exige lo mismo que en
-# el detalle del pedido (`payments.transaction_id`), no solo `activity.view`.
-PAYMENT_ID_KEYS = frozenset({"sessionId", "paymentIntent", "stripeRefundId"})
+# Ids de la pasarela que escriben los pagos en `data`. Verlos exige lo mismo
+# que en el detalle del pedido (`payments.transaction_id`), no solo
+# `activity.view`. Las claves de Stripe siguen para las filas viejas.
+PAYMENT_ID_KEYS = frozenset(
+    {"transactionId", "providerRefundId", "sessionId", "paymentIntent", "stripeRefundId"}
+)
 
 
 def _without_keys(value, keys: frozenset[str]):

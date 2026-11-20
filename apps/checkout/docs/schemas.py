@@ -17,7 +17,7 @@ class RefundRequestSerializer(serializers.Serializer):
     reason = serializers.CharField(
         required=False,
         max_length=500,
-        help_text="Internal note, sent to Stripe as metadata.",
+        help_text="Internal note shown in the admin panel.",
     )
 
 
@@ -27,9 +27,11 @@ class RefundSerializer(serializers.Serializer):
     amount = serializers.FloatField()
     status = serializers.ChoiceField(choices=RefundStatus.choices)
     reason = serializers.CharField(allow_blank=True)
-    createdBy = serializers.CharField(help_text="Staff email, or `stripe` for dashboard refunds.")
+    createdBy = serializers.CharField(
+        help_text="Staff email, or `authorize_net` for Merchant Interface refunds."
+    )
     createdAt = serializers.DateTimeField()
-    stripeRefundId = serializers.CharField(
+    providerRefundId = serializers.CharField(
         required=False,
         allow_null=True,
         help_text="Only with the `payments.transaction_id` permission.",

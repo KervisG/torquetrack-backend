@@ -54,7 +54,7 @@ def test_refunds_route_documents_every_response_with_its_literal_errors(operatio
     } in _examples(op, "400")
     assert {"error": "Order not found"} in _examples(op, "404")
     assert {"error": "Only paid orders can be refunded"} in _examples(op, "409")
-    assert {"error": "Stripe request failed; see server logs."} in _examples(op, "502")
+    assert {"error": "Payment provider request failed; see server logs."} in _examples(op, "502")
     assert "403" in op["responses"]
 
 

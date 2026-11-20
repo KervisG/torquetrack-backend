@@ -8,12 +8,13 @@ guarda como `taxSource: "manual"` y deja `QUOTE_TAX_OVERRIDDEN` en la
 bitácora. Convertir y cobrar la cotización copian ese total guardado.
 
 Mocking: TaxJar en el adaptador (`apps.integrations.tax.taxjar.calculate_tax`)
-y Stripe en `apps.integrations.payments.stripe.create_checkout_session`. Los
+y Stripe en `apps.integrations.payments.authorize_net.create_hosted_payment_token`. Los
 caminos que no deben llamar a TaxJar lo parchean para que lance excepción.
 """
 import pytest
 
-from apps.checkout.models import Order
+from apps.checkout.models import Order, Payment
+from apps.checkout.services.payments import create_payment_form
 from apps.integrations.exceptions import ProviderError
 from apps.quotes.models import Quote
 from tests.factories import (
@@ -25,7 +26,7 @@ from tests.factories import (
 )
 
 TAXJAR = "apps.integrations.tax.taxjar.calculate_tax"
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 FL_ADDRESS = {"address1": "100 Main St", "city": "Tampa", "state": "FL", "zip": "33701"}
 OVERRIDE_FORBIDDEN = {"error": "Overriding tax requires tax_exemptions.review"}
 ADDRESS_REQUIRED = {"error": "Shipping state and ZIP are required to calculate tax"}
@@ -441,12 +442,13 @@ def test_converting_inherits_the_recalculated_tax(taxjar_seven):
 
 @pytest.mark.django_db
 def test_the_public_checkout_inherits_the_recalculated_tax(taxjar_seven, monkeypatch, settings):
-    settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
     sessions = []
 
     def _fake_session(**kwargs):
         sessions.append(kwargs)
-        return {"id": "cs_test_tax", "url": "https://checkout.stripe.com/pay/cs_test_tax"}
+        return {"token": "tok_tax", "formUrl": "https://test.authorize.net/payment/payment"}
 
     monkeypatch.setattr(CREATE_SESSION, _fake_session)
     client = _staff("usr_tax_public")
@@ -460,4 +462,6 @@ def test_the_public_checkout_inherits_the_recalculated_tax(taxjar_seven, monkeyp
     order = Order.objects.get(number=response.json()["orderNumber"])
     assert order.data["totals"]["tax"] == 7
     assert order.data["totals"]["total"] == 107
-    assert len(sessions) == 1
+    # El form de pago se arma al abrir el link: lleva el impuesto recalculado.
+    create_payment_form(Payment.objects.get(order=order))
+    assert sessions[-1]["tax"] == 7

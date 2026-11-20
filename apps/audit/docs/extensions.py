@@ -15,8 +15,8 @@ class AdminActivityViewExtension(OpenApiViewExtension):
                 tags=["admin: activity"],
                 summary="List activity",
                 description=(
-                    "Requires `activity.view`. Newest first. Stripe ids inside `data` are "
-                    "omitted unless the caller has `payments.transaction_id`."
+                    "Requires `activity.view`. Newest first. Payment provider ids inside "
+                    "`data` are omitted unless the caller has `payments.transaction_id`."
                 ),
                 parameters=[
                     OpenApiParameter("limit", int, OpenApiParameter.QUERY, required=False),

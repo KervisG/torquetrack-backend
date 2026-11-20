@@ -8,13 +8,19 @@ from apps.checkout.views import (
     AdminOrderRefundsView,
     AdminOrdersListView,
     AdminOrderTakePaymentView,
+    AuthorizeNetWebhookView,
     CheckoutView,
-    StripeWebhookView,
+    PaymentPageView,
 )
 
 urlpatterns = [
     path("checkout/", CheckoutView.as_view(), name="checkout"),
-    path("webhooks/stripe/", StripeWebhookView.as_view(), name="stripe-webhook"),
+    path(
+        "webhooks/authorize-net/",
+        AuthorizeNetWebhookView.as_view(),
+        name="authorize-net-webhook",
+    ),
+    path("payments/<str:payment_id>/pay/", PaymentPageView.as_view(), name="payment-page"),
     path("admin/orders/", AdminOrdersListView.as_view(), name="admin-orders-list"),
     path(
         "admin/orders/<str:order_id>/",

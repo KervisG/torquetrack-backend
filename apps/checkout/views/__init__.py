@@ -7,8 +7,9 @@ from apps.checkout.views.admin import (
     AdminOrdersListView,
     AdminOrderTakePaymentView,
 )
+from apps.checkout.views.payment_page import PaymentPageView
 from apps.checkout.views.storefront import CheckoutView
-from apps.checkout.views.webhooks import StripeWebhookView
+from apps.checkout.views.webhooks import AuthorizeNetWebhookView
 
 __all__ = [
     "AdminOrderDetailView",
@@ -18,6 +19,7 @@ __all__ = [
     "AdminOrderRefundsView",
     "AdminOrderTakePaymentView",
     "AdminOrdersListView",
+    "AuthorizeNetWebhookView",
     "CheckoutView",
-    "StripeWebhookView",
+    "PaymentPageView",
 ]

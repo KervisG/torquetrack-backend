@@ -44,9 +44,20 @@ REASON_TOO_LONG = error_example(
 )
 ORDER_NOT_FOUND = error_example("Order not found", "Order not found")
 NOT_PAID = error_example("Order not paid", "Only paid orders can be refunded")
-NO_STRIPE_CHARGE = error_example("No Stripe charge", "Order has no Stripe charge to refund")
+NO_CARD_CHARGE = error_example("No card charge", "Order has no card charge to refund")
+PARTIAL_BEFORE_SETTLEMENT = error_example(
+    "Partial refund before settlement",
+    "This payment has not settled yet, so it can only be voided for the full amount. "
+    "Partial refunds are available once it settles (usually within 24 hours).",
+)
+NOT_REFUNDABLE_NOW = error_example(
+    "Not refundable now", "This payment cannot be refunded in its current state"
+)
 NO_BALANCE = error_example("No balance left", "Order has no refundable balance")
-STRIPE_FAILED = error_example("Stripe failed", "Stripe request failed; see server logs.")
+PROVIDER_FAILED = error_example(
+    "Payment provider failed", "Payment provider request failed; see server logs."
+)
+PROVIDER_DECLINED = error_example("Refund declined", "The payment provider declined the refund")
 
 FULFILLMENT_SHIP_REQUEST = OpenApiExample(
     "Mark shipped",

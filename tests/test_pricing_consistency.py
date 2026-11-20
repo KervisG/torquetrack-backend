@@ -16,12 +16,13 @@ from rest_framework.test import APIClient
 
 from apps.catalog.models import Product
 from apps.checkout.models import Order, Payment
+from apps.checkout.services.payments import create_payment_form
 from apps.common.numbers import to_cents
 from apps.quotes.models import Quote
 from tests.factories import CHECKOUT_CONTACT, create_staff_user, session_client
 from tests.fakes import quote_shipping
 
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 PRODUCT_ID = "gm-65-glow-plug"
 PRODUCT_DATA = {
     "id": PRODUCT_ID,
@@ -36,20 +37,23 @@ PRODUCT_DATA = {
     "shippingWeight": 1,
 }
 VEHICLE = {"make": "Chevrolet", "year": 1996, "engine": "6.5"}
+_SESSIONS: list = []
 STOREFRONT_QUANTITY_ERROR = "Item quantity must be a whole number from 1 to 99"
 
 
 @pytest.fixture(autouse=True)
 def _providers(settings, monkeypatch):
-    settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     settings.SALES_EMAIL = ""
-    sessions = []
+    sessions = _SESSIONS
+    sessions.clear()
 
     def _create(**kwargs):
         sessions.append(kwargs)
         number = len(sessions)
-        return {"id": f"cs_test_{number}", "url": f"https://checkout.stripe.com/{number}"}
+        return {"id": f"cs_test_{number}", "url": f"https://example.test/{number}"}
 
     monkeypatch.setattr(CREATE_SESSION, _create)
     return sessions
@@ -59,8 +63,12 @@ def _insert_product():
     Product.objects.create(id=PRODUCT_ID, data=PRODUCT_DATA, active=True)
 
 
-def _stripe_cents(session: dict) -> int:
-    return sum(line["unit_amount"] * line["quantity"] for line in session["line_items"])
+def _charged_cents(payment) -> int:
+    """Lo que detalla el form de Authorize.net: líneas + impuesto + envío."""
+    create_payment_form(payment)
+    form = _SESSIONS[-1]
+    lines = sum(to_cents(line["unitPrice"]) * line["quantity"] for line in form["line_items"])
+    return lines + to_cents(form["tax"]) + to_cents(form["shipping"])
 
 
 def _checkout(monkeypatch, settings, qty):
@@ -141,18 +149,20 @@ def test_checkout_quote_request_and_panel_price_the_same_lines_alike(
 
 
 @pytest.mark.django_db
-def test_stripe_charges_exactly_the_payment_amount_of_a_checkout(monkeypatch, settings, _providers):
+def test_gateway_details_exactly_the_payment_amount_of_a_checkout(
+    monkeypatch, settings, _providers
+):
     _insert_product()
 
     response = _checkout(monkeypatch, settings, qty=3)
 
     assert response.status_code == 200
     payment = Payment.objects.get(order_id=response.json()["orderId"])
-    assert _stripe_cents(_providers[-1]) == to_cents(payment.amount)
+    assert _charged_cents(payment) == to_cents(payment.amount)
 
 
 @pytest.mark.django_db
-def test_stripe_charges_exactly_the_payment_amount_of_a_panel_quote(_providers):
+def test_gateway_details_exactly_the_payment_amount_of_a_panel_quote(_providers):
     client = _staff_client()
     created = _panel_quote(
         client, [{"title": "Glow Plug", "quantity": 3, "unitPrice": 19.995, "coreCharge": 1.005}]
@@ -165,7 +175,7 @@ def test_stripe_charges_exactly_the_payment_amount_of_a_panel_quote(_providers):
     assert response.status_code == 200
     payment = Payment.objects.get(order_id=order_id)
     assert float(payment.amount) == created.json()["quote"]["totals"]["total"] == 63.03
-    assert _stripe_cents(_providers[-1]) == to_cents(payment.amount) == 6303
+    assert _charged_cents(payment) == to_cents(payment.amount) == 6303
 
 
 # --- cantidad ----------------------------------------------------------------

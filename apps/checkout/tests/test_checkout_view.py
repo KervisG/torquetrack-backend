@@ -1,5 +1,6 @@
 
 import logging
+from decimal import Decimal
 
 import pytest
 from rest_framework.test import APIClient
@@ -7,12 +8,16 @@ from rest_framework.test import APIClient
 from apps.cart.models import Cart
 from apps.catalog.models import Product
 from apps.checkout.models import Order, OrderStatus, Payment
+from apps.checkout.services.payments import create_payment_form
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from tests.factories import CHECKOUT_CONTACT, create_customer, guest_cart_client
 from tests.fakes import quote_shipping
 
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+# El checkout no llama a la pasarela: el token se pide al abrir el link de
+# pago. Se parchea igual para probar que nunca se llama durante el checkout.
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
+START_PAYMENT = "apps.checkout.services.storefront.start_payment"
 
 PRODUCT_ID = "gm-65-injection-pump-dorman-502550"
 PRODUCT_DATA = {
@@ -47,8 +52,9 @@ def _fake_session(session_id="cs_test_123", url="https://checkout.stripe.com/pay
 
 
 @pytest.fixture(autouse=True)
-def _stripe_secret_key(settings):
-    settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+def _gateway_credentials(settings):
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     return settings
 
@@ -82,13 +88,14 @@ def _post(body, client=None):
 
 
 @pytest.mark.django_db
-def test_returns_503_when_stripe_not_configured(settings):
-    settings.STRIPE_SECRET_KEY = ""
+def test_returns_503_when_the_gateway_is_not_configured(settings):
+    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
 
     response = _post({"items": []})
 
     assert response.status_code == 503
-    assert "STRIPE_SECRET_KEY" in response.json()["error"]
+    assert "AUTHORIZE_NET_API_LOGIN_ID" in response.json()["error"]
+    assert not Order.objects.exists()
 
 
 @pytest.mark.django_db
@@ -267,8 +274,9 @@ def test_charges_the_server_quoted_shipping_ignoring_the_client_amount(monkeypat
     order = Order.objects.get(pk=response.json()["orderId"])
     assert order.data["totals"]["shipping"] == SHIPPING_RATE
     assert order.data["shipping"]["rate"] == SHIPPING_RATE
-    shipping_lines = [line for line in captured["line_items"] if line["name"] == "Shipping"]
-    assert shipping_lines == [{"name": "Shipping", "unit_amount": 1250, "quantity": 1}]
+    # El form de pago se arma al abrir el link: ahí viaja el envío cotizado.
+    create_payment_form(Payment.objects.get(order=order))
+    assert captured["shipping"] == Decimal("12.50")
 
 
 @pytest.mark.django_db
@@ -723,41 +731,42 @@ def test_guest_checkout_never_merges_into_a_registered_customer_profile(monkeypa
 
 
 @pytest.mark.django_db
-def test_creates_order_and_pending_payment_via_stripe_sdk(monkeypatch, shipping):
+def test_creates_order_and_pending_payment_without_calling_the_gateway(monkeypatch, shipping):
     _insert_product()
-    monkeypatch.setattr(
-        CREATE_SESSION,
-        lambda **kwargs: _fake_session(
-            "cs_test_created", "https://checkout.stripe.com/pay/cs_test_created"
-        ),
-    )
+
+    def _boom(**kwargs):
+        raise AssertionError("The form token is requested only when the payment page opens")
+
+    monkeypatch.setattr(CREATE_SESSION, _boom)
 
     response = _post(_body(shipping))
 
     assert response.status_code == 200
     body = response.json()
-    assert body["url"] == "https://checkout.stripe.com/pay/cs_test_created"
 
     order = Order.objects.get(pk=body["orderId"])
     assert order.status == "PENDING_PAYMENT"
     assert order.payment_status == "UNPAID"
 
     payment = Payment.objects.get(order=order)
-    assert payment.provider == "stripe"
-    assert payment.provider_id == "cs_test_created"
+    assert body["url"] == f"http://localhost:5173/api/payments/{payment.pk}/pay/"
+    assert payment.provider == "authorize_net"
+    assert payment.provider_id is None
     assert payment.status == "PENDING"
     assert float(payment.amount) == order.data["totals"]["total"]
 
 
 @pytest.mark.django_db
-def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypatch, shipping):
+def test_payment_start_failure_cancels_the_order_and_leaves_the_cart_untouched(
+    monkeypatch, shipping
+):
     _insert_product()
     _insert_cart("cart_fail_1", {"items": [{"id": PRODUCT_ID, "qty": 1}], "stage": "CART"})
 
-    def _boom(**kwargs):
+    def _boom(order, **kwargs):
         raise ProviderError("Could not create secure checkout")
 
-    monkeypatch.setattr(CREATE_SESSION, _boom)
+    monkeypatch.setattr(START_PAYMENT, _boom)
 
     response = _post(_body(shipping), guest_cart_client("cart_fail_1"))
 
@@ -775,15 +784,15 @@ def test_stripe_failure_cancels_the_order_and_leaves_the_cart_untouched(monkeypa
 
 
 @pytest.mark.django_db
-def test_stripe_failure_returns_a_generic_message_and_logs_the_detail(
+def test_payment_start_failure_returns_a_generic_message_and_logs_the_detail(
     monkeypatch, shipping, caplog
 ):
     _insert_product()
 
-    def _boom(**kwargs):
+    def _boom(order, **kwargs):
         raise ProviderError("Invalid API Key for account acct_internal_123")
 
-    monkeypatch.setattr(CREATE_SESSION, _boom)
+    monkeypatch.setattr(START_PAYMENT, _boom)
 
     with caplog.at_level(logging.WARNING, logger="apps.checkout.services.storefront"):
         response = _post(_body(shipping), guest_cart_client("cart_fail_2"))

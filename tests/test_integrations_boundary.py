@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 INTEGRATIONS_DIR = BACKEND_DIR / "apps" / "integrations"
 SKIPPED_DIRS = {".venv", "__pycache__", "node_modules"}
 
-PROVIDER_PACKAGES = {"requests", "stripe", "easypost", "resend", "taxjar"}
+PROVIDER_PACKAGES = {"requests", "easypost", "resend", "taxjar"}
 TAX_CALCULATION_NAMES = {"calculate_sales_tax", "FALLBACK_TAX_RATES"}
 # `services/__init__.py` reexporta el cálculo desde su módulo, así que también
 # cuentan los submódulos del paquete.
@@ -109,5 +109,5 @@ def test_the_boundary_check_sees_the_real_callers():
         for path in INTEGRATIONS_DIR.rglob("*.py")
         if any(module.split(".")[0] in PROVIDER_PACKAGES for module, _ in _imports(path))
     }
-    assert "apps/integrations/payments/stripe.py" in adapters
+    assert "apps/integrations/payments/authorize_net.py" in adapters
     assert "apps/integrations/email/resend.py" in adapters

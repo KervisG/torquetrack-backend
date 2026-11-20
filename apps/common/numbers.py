@@ -43,6 +43,6 @@ def money(value) -> float:
 
 
 def to_cents(value) -> int:
-    """Centavos enteros para Stripe. Multiplica el `Decimal` ya redondeado,
-    nunca un `float`: `int(0.29 * 100)` da 28."""
+    """Centavos enteros. Multiplica el `Decimal` ya redondeado, nunca un
+    `float`: `int(0.29 * 100)` da 28."""
     return int(money_decimal(value) * 100)

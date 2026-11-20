@@ -1,6 +1,6 @@
 """Precio de las líneas y totales: la única normalización que usan el checkout,
 la solicitud de cotización, el panel de cotizaciones, su presentación y las
-líneas de Stripe.
+líneas del cobro.
 
 Vive en `catalog` porque el catálogo es dueño del precio y está por debajo de
 `checkout` y `quotes`. `build_totals` también vive aquí y no en

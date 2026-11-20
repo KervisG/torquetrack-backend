@@ -36,14 +36,14 @@ Reglas:
 - Ningún archivo de la raíz lleva prefijo de superficie (`admin_views.py`, `admin_services.py`, `webhook_views.py`, `pdf_views.py`): lo reemplazan `views/admin.py`, `views/webhooks.py`, `views/pdf.py` y `services/admin.py`. `pdf.py` y los demás módulos de lógica van a `services/`.
 - Nunca crear una carpeta vacía ni un `__init__.py` sin módulos al lado. Nunca `logic/`, `core/`, `domain/`, `helpers/` ni `constants/`: una constante vive en el módulo que la usa o que es dueño de su tema.
 - Mover un modelo entre módulos de `models/` no cambia su `app_label` (sale del paquete de la app) ni su `db_table` (explícito en `Meta`), así que no genera migraciones. Si `makemigrations` detecta un cambio, el movimiento está mal.
-- Los tests se nombran por superficie (`test_views.py`, `test_admin_views.py`, `test_stripe_webhook_view.py`), no por la ruta del archivo que prueban.
+- Los tests se nombran por superficie (`test_views.py`, `test_admin_views.py`, `test_authorize_net_flow.py`), no por la ruta del archivo que prueban.
 
 Excepciones documentadas:
 
 - `apps/common/` no es una app de Django (sin `apps.py`, modelos, views, urls ni migraciones): es un paquete de helpers sin estado y conserva sus módulos planos (`emails.py`, `ids.py`, `links.py`, `numbers.py`, `tokens.py`).
 - `apps/integrations/exceptions.py` queda en la raíz porque es el contrato compartido de todos los adaptadores; los adaptadores viven en carpetas por capacidad (`email/`, `payments/`, `shipping/`, `tax/`, `vehicles/`).
 
-Ejemplo de una app con tres superficies (storefront, panel y webhook de Stripe):
+Ejemplo de una app con tres superficies (storefront, panel y webhook de Authorize.net):
 
 ```text
 apps/checkout/
@@ -57,17 +57,17 @@ apps/checkout/
 │   └── refund.py               # tabla `refunds`, FK CASCADE a Payment
 ├── services/
 │   ├── __init__.py             # reexporta la API pública con __all__
-│   ├── payments.py             # único dueño de las sesiones de Stripe y de Payment.objects.create
+│   ├── payments.py             # único dueño de start_payment, create_payment_form y Payment.objects.create
 │   ├── storefront.py           # create_storefront_checkout, next_order_number, PAYMENT_START_FAILED
-│   ├── webhooks.py             # reconcile_paid/failed/expired_session, reconcile_stripe_refund, reconcile_refunded_charge
-│   ├── refunds.py              # único dueño de los reembolsos: refund_order, sync_stripe_refund, saldos
+│   ├── webhooks.py             # handle_webhook_event, reconcile_charge, reconcile_refund, reconcile_void
+│   ├── refunds.py              # único dueño de los reembolsos: refund_order, sync_provider_refund/void, saldos
 │   ├── fulfillment.py          # envío del pedido: update_order_fulfillment, FULFILLMENT_TRANSITIONS
 │   └── admin.py                # pedidos del panel, link de pago y cobro del staff
 ├── views/
 │   ├── __init__.py             # reexporta las views con __all__
 │   ├── storefront.py           # POST /api/checkout/
 │   ├── admin.py                # /api/admin/orders/** (incluye POST .../refunds/ y .../fulfillment/)
-│   └── webhooks.py             # POST /api/webhooks/stripe/
+│   └── webhooks.py             # POST /api/webhooks/authorize-net/
 ├── migrations/
 └── tests/
 ```
@@ -161,9 +161,9 @@ Apps sin tabla y por lo tanto sin `models/` ni `migrations/`: `fitment`, `shippi
 
 `services/` siempre es un paquete, aunque tenga un solo módulo, y `services/__init__.py` reexporta la API pública con `__all__`, así `from apps.<app>.services import ...` no depende de la división. Reglas:
 
-- En una app con superficie pública y de panel, lo público va en `services/storefront.py` y lo del panel en `services/admin.py`. Si alguno pasa de ~400 líneas o mezcla temas, se parte además por tema con nombres claros: `checkout` separa `payments.py` (Stripe) y `webhooks.py` (conciliación) del checkout del storefront; `quotes` separa `lifecycle.py` (número, token y vencimiento), `rendering.py` (serialización, enlaces y HTML) y `pdf.py` (WeasyPrint), que usan las dos superficies.
+- En una app con superficie pública y de panel, lo público va en `services/storefront.py` y lo del panel en `services/admin.py`. Si alguno pasa de ~400 líneas o mezcla temas, se parte además por tema con nombres claros: `checkout` separa `payments.py` (Authorize.net) y `webhooks.py` (conciliación) del checkout del storefront; `quotes` separa `lifecycle.py` (número, token y vencimiento), `rendering.py` (serialización, enlaces y HTML) y `pdf.py` (WeasyPrint), que usan las dos superficies.
 - En una app con una sola superficie, un módulo por tema, nombrado por el tema (`rates.py`, `counts.py`, `login.py`), sin módulos de una sola función ni cajones de sastre. Nunca `common.py` o `helpers.py` dentro del paquete: un helper que comparten dos módulos vive en el módulo dueño de su tema y los demás lo importan de ahí.
-- Sin imports circulares entre los módulos del paquete: las dependencias van en una sola dirección y ninguno importa del `__init__`; se importan por el módulo concreto (`from apps.checkout.services.payments import start_stripe_payment`). Las otras apps importan del paquete (`from apps.checkout.services import start_stripe_payment`) o del módulo concreto.
+- Sin imports circulares entre los módulos del paquete: las dependencias van en una sola dirección y ninguno importa del `__init__`; se importan por el módulo concreto (`from apps.checkout.services.payments import start_payment`). Las otras apps importan del paquete (`from apps.checkout.services import start_payment`) o del módulo concreto.
 - Los tests parchean el módulo donde se USA la función, no el `__init__` que la reexporta: cada módulo tiene su propia referencia, así que parchear el reexport no cambia lo que llama el código. El logger de cada módulo es `logging.getLogger(__name__)`, así que `caplog` apunta al módulo concreto (`apps.checkout.services.payments`).
 
 `apps/authentication/services/` es el ejemplo:
@@ -212,7 +212,7 @@ La autenticación es `SessionAuthentication` de DRF, que drf-spectacular ya desc
 | Módulo | Funciones | Por qué vive aquí |
 |---|---|---|
 | `common/ids.py` | `random_id(prefix)` | Todos los ids de dominio (`OID…`, `C…`, `U…`, `PAY…`) tienen el mismo formato |
-| `common/numbers.py` | `to_number(value, default=0.0)`, `money(value)`, `money_decimal(value)`, `to_cents(value)` | Única coerción numérica, único redondeo de dinero (`ROUND_HALF_UP` a centavos; un `Decimal` se redondea sin pasar por `float`) y única conversión a centavos enteros para Stripe |
+| `common/numbers.py` | `to_number(value, default=0.0)`, `money(value)`, `money_decimal(value)`, `to_cents(value)` | Única coerción numérica, único redondeo de dinero (`ROUND_HALF_UP` a centavos; un `Decimal` se redondea sin pasar por `float`) y única conversión a centavos enteros |
 | `common/tokens.py` | `hash_token(token)` | SHA-256 de los tokens de enlace (`AccountToken`) |
 | `common/links.py` | `app_url(path)` | URL absoluta del SPA sin doble slash, con el respaldo de desarrollo en un solo lugar |
 | `common/emails.py` | `branded_email_html(body)`, `email_logo_url()` | Layout de marca de todos los correos de notificación (`authentication`, `checkout`, `quotes`); solo arma strings, sin I/O. El logo es el PNG del SPA, nunca SVG |
@@ -241,7 +241,7 @@ Quién la usa y cómo traduce los rechazos:
 | `create_storefront_checkout` (`checkout/services/storefront.py`) | por defecto | 400 `Item quantity must be a whole number from 1 to 99` | `UnpricedProducts` → 409 `These items have no valid price and cannot be purchased online: ...` |
 | `create_quote_from_request` (`quotes/services/storefront.py`) | por defecto | 400, mismo mensaje | `UnpricedProducts` → 409 `... cannot be quoted online: ...` |
 | `upsert_admin_quote` (`quotes/services/admin.py`) | `allow_custom_price=True, max_quantity=None` | 400 `Item quantity must be a whole number of at least 1` | `InvalidPrice` → 400 `Item prices must be amounts of 0 or more`; guarda las líneas normalizadas y el impuesto que recalcula `resolve_quote_tax` sobre el subtotal y el core repreciados |
-| `_quote_line` (`quotes/services/rendering.py`) y `_create_checkout_session` (`checkout/services/payments.py`) | `allow_custom_price=True, max_quantity=None` sobre líneas ya guardadas | la presentación muestra la línea sin total | Stripe cobra `to_cents` de cada línea: la suma es exactamente el `Payment.amount` |
+| `_quote_line` (`quotes/services/rendering.py`) y `_line_items` (`checkout/services/payments.py`) | `allow_custom_price=True, max_quantity=None` sobre líneas ya guardadas | la presentación muestra la línea sin total | el form de Authorize.net detalla líneas, impuesto y envío: la suma es exactamente el `Payment.amount` |
 
 El impuesto (`apps/tax/services/sales_tax.py`) también es `Decimal`: `FALLBACK_TAX_RATES` son `Decimal("0.06")` y `calculate_sales_tax` devuelve `tax` y `rate` en `Decimal`; `estimate_tax_for_customer` (y `estimate_tax`, que le pasa el perfil de la sesión) los serializa para el JSON y el adaptador de TaxJar convierte a `float` solo el body del request.
 
@@ -267,7 +267,7 @@ from apps.audit.services import record_activity
 record_activity(actor_email, "ORDER_STATUS_CHANGED", entity_type="ORDER", entity_id=order.pk, data={"status": status})
 ```
 
-`actor` es el email del staff o un actor de sistema (`"stripe"`), no una FK. Ninguna app fuera de `audit` importa `ActivityLog`; los tests de otras apps assertean la bitácora con `activity_count(**filters)` de `tests/factories.py`. `audit` no importa apps de dominio, así cualquier app puede registrar actividad sin crear ciclos. La respuesta de `/api/admin/activity/` es `{items, nextCursor}`, con las filas en camelCase (`actorId`, `entityType`, `entityId`, `createdAt`) de la más nueva a la más vieja; pagina con `?limit=` (50 por defecto, tope 250) y `?before=<nextCursor>`, un cursor por `(created_at, id)`. `list_activity_page(limit, before, can_view_payment_ids=...)` quita de `data`, a cualquier profundidad, las claves de `PAYMENT_ID_KEYS` (`sessionId`, `paymentIntent`) salvo que la view le pase `True`; la view lo resuelve con `has_role_permission(user, "payments.transaction_id")`, así `audit` sigue sin conocer los dominios.
+`actor` es el email del staff o un actor de sistema (`"authorize_net"`), no una FK. Ninguna app fuera de `audit` importa `ActivityLog`; los tests de otras apps assertean la bitácora con `activity_count(**filters)` de `tests/factories.py`. `audit` no importa apps de dominio, así cualquier app puede registrar actividad sin crear ciclos. La respuesta de `/api/admin/activity/` es `{items, nextCursor}`, con las filas en camelCase (`actorId`, `entityType`, `entityId`, `createdAt`) de la más nueva a la más vieja; pagina con `?limit=` (50 por defecto, tope 250) y `?before=<nextCursor>`, un cursor por `(created_at, id)`. `list_activity_page(limit, before, can_view_payment_ids=...)` quita de `data`, a cualquier profundidad, las claves de `PAYMENT_ID_KEYS` (`transactionId`, `providerRefundId` y las claves viejas de Stripe) salvo que la view le pase `True`; la view lo resuelve con `has_role_permission(user, "payments.transaction_id")`, así `audit` sigue sin conocer los dominios.
 
 `apps/dashboard/` es agregación de solo lectura (`get_dashboard_counts` en `services/counts.py`, `GET /api/admin/dashboard/` con `dashboard.view`). No tiene modelos ni migraciones: lee `Order`, `Payment`, `Refund`, `Quote` y `Cart` de sus apps dueñas. `salesToday` sale de `net_sales_between(start, end)`: subtotal + core + envío de `order.data.totals` por cada pago cobrado en el período (`Payment.paid_at`), menos los `Refund` `SUCCEEDED` creados en el período; la regla completa está en su docstring. Como no hay modelo propio, su permiso cuelga de `authorization.Role` (`view_dashboard`), el modelo que ya gobierna el acceso al panel de staff.
 
@@ -278,7 +278,7 @@ Un módulo por proveedor, agrupado por capacidad:
 | Adaptador | Funciones públicas | Lo usa |
 |---|---|---|
 | `email/resend.py` | `is_configured()`, `send_email(to, subject, html, attachments=None, reply_to=None)` | `authentication`, `checkout`, `quotes` |
-| `payments/stripe.py` | `is_configured()`, `create_checkout_session(...)`, `expire_checkout_session(id)`, `retrieve_payment_method(id)`, `create_refund(payment_intent, amount_cents, idempotency_key, metadata)`, `construct_webhook_event(payload, signature)` | `checkout`, `quotes` |
+| `payments/authorize_net.py` | `is_configured()`, `create_hosted_payment_token(...)`, `get_transaction(id)`, `void_transaction(id)`, `refund_transaction(...)`, `verify_webhook(payload, signature)` | `checkout`, `quotes` |
 | `shipping/easypost.py` | `is_configured()`, `get_rates(to_address, from_address, parcel)` | `shipping` |
 | `tax/taxjar.py` | `is_configured()`, `calculate_tax(from_zip, to_state, to_zip, to_city, to_street, amount, shipping)` | `tax` |
 | `vehicles/nhtsa.py` | `decode_vin(vin)` | `vin` |
@@ -289,7 +289,7 @@ Contrato de un adaptador:
 - Mapea la respuesta a dicts planos (sin objetos del SDK) y envuelve los errores de red, HTTP y JSON en `ProviderError` (`ProviderUnavailable` para un estado HTTP de error cuando el dominio lo distingue).
 - No importa modelos ni apps de dominio y no decide reglas de negocio.
 
-El dominio traduce: `apps/tax/services/sales_tax.py` cae a `FALLBACK_TAX_RATES` ante cualquier `ProviderError`; `apps/shipping/services/rates.py` registra el mensaje de EasyPost en el log y responde 502 con un mensaje genérico; `apps/vin/services/decoding.py` elige el mensaje de error; `apps/checkout/services/payments.py` arma líneas, URLs y metadata de la Checkout Session y devuelve `None` si no puede leer la tarjeta. Igual que en shipping, el texto de Stripe va al log: el checkout del storefront y el de cotizaciones responden 502 con `PAYMENT_START_FAILED` ("Payment could not be started. Please try again.") y el link de pago, el cobro y el reembolso del panel con `STRIPE_REQUEST_FAILED` ("Stripe request failed; see server logs.", definido en `apps/checkout/services/payments.py`). Un proveedor nuevo es un módulo nuevo aquí, sus tests en `apps/integrations/tests/` y su paquete en `PROVIDER_PACKAGES` de `tests/test_integrations_boundary.py`.
+El dominio traduce: `apps/tax/services/sales_tax.py` cae a `FALLBACK_TAX_RATES` ante cualquier `ProviderError`; `apps/shipping/services/rates.py` registra el mensaje de EasyPost en el log y responde 502 con un mensaje genérico; `apps/vin/services/decoding.py` elige el mensaje de error; `apps/checkout/services/payments.py` arma líneas, dirección y URLs del form de Accept Hosted. Igual que en shipping, el texto de la pasarela va al log: el checkout del storefront y el de cotizaciones responden 502 con `PAYMENT_START_FAILED` ("Payment could not be started. Please try again.") y el link de pago, el cobro y el reembolso del panel con `PAYMENT_REQUEST_FAILED` ("Payment provider request failed; see server logs.", definido en `apps/checkout/services/payments.py`). Un proveedor nuevo es un módulo nuevo aquí, sus tests en `apps/integrations/tests/` y su paquete en `PROVIDER_PACKAGES` de `tests/test_integrations_boundary.py`.
 
 ## Migraciones
 
@@ -337,20 +337,12 @@ class AdminProductDetailView(APIView):
 
 `HasRolePermission` traduce `required_permission` con `resolve_staff_permission` y pregunta `request.user.has_perm("app_label.codename")`; colapsa "sin sesión" y "sin permiso" en un solo 403 `{"error": "You do not have permission to perform this action."}`. Las views de gestión de usuarios, la de sesión, la cuenta del cliente, el `PATCH`/`DELETE` de pedidos y la exención de impuestos del panel en cambio separan el 401 del 403 para que el SPA distinga "sesión vencida" (redirige a `/login`) de "sin permiso": declaran `permission_classes = [AllowAny]` con un comentario y chequean a mano.
 
-## Reembolsos de Stripe: `apps/checkout/services/refunds.py`
+## Pagos y reembolsos con Authorize.net: `apps/checkout/services/`
 
-`Refund` (`models/refund.py`, tabla `refunds`) pertenece a un `Payment` (FK `CASCADE`, llevada a Postgres por `checkout/0002_db_on_delete`): `amount` (`Decimal`, 2 decimales), `status` (`RefundStatus`: `PENDING`, `SUCCEEDED`, `FAILED`, `CANCELED`), `reason`, `stripe_refund_id` (único, vacío hasta que Stripe responde), `created_by` (email del staff o `"stripe"`) y `data`. `tests/test_stripe_payment_boundary.py` falla si alguien fuera de `services/refunds.py` llama a `create_refund` o hace `Refund.objects.create`.
+Cobro (Accept Hosted): `start_payment(order, data=...)` (`payments.py`) crea el `Payment` PENDING (`provider="authorize_net"`, `provider_id` vacío) sin llamar a la pasarela y devuelve `url` = `/api/payments/<id>/pay/`. Ese puente (`views/payment_page.py`, throttle `payment_page`) pide el token con `create_payment_form` al abrirse (el token vence a los 15 minutos) y hace el POST al formulario de Authorize.net; un pago cobrado redirige a `/checkout-success`, uno cerrado responde 410. El `invoiceNumber` de la transacción es el id del `Payment`.
 
-Estados de cobro: `order.payment_status` (`OrderPaymentStatus`) y `Payment.status` (`PaymentStatus`) usan `PAID`, `PARTIALLY_REFUNDED` y `REFUNDED` (`CHARGED_PAYMENT_STATUSES` de `services/payments.py`). Los tres cuentan como "ya cobrado": el webhook no vuelve a marcar PAID un pago reembolsado, el link de pago y el cobro del panel responden 409 y una cotización con un pedido reembolsado no se vuelve a pagar. Solo cuenta lo reembolsado con `SUCCEEDED`; `order.status` no cambia al reembolsar.
+Webhook `POST /api/webhooks/authorize-net/` (`views/webhooks.py` → `handle_webhook_event` en `services/webhooks.py`): firma `X-ANET-Signature` (HMAC-SHA512 con `AUTHORIZE_NET_SIGNATURE_KEY`). Cada evento relee la transacción con `get_transaction`; si la pasarela no responde, 503 para que reintente. `authcapture.created` y `fraud.approved` → `reconcile_charge` (PAID, `provider_id` = transId, monto distinto → `PAYMENT_AMOUNT_MISMATCH`, pedido ya pagado → `DUPLICATE_PAYMENT_RECEIVED`, pedido cerrado → `PAYMENT_ON_CLOSED_ORDER`); `fraud.held` → `order.data.fraudWarning`; `fraud.declined` → pago FAILED; `refund.created` → `sync_provider_refund`; `void.created` → `sync_provider_void` (reembolso total). Authorize.net no avisa contracargos.
 
-Flujo de `POST /api/admin/orders/<id>/refunds/` (`payments.refund`, `refund_order`):
+Vencimiento: la tarea `apps.checkout.tasks.expire_pending_payments` (cada 15 minutos) vence los pagos PENDING de más de `PENDING_PAYMENT_TTL` (24 h) con `expire_pending_payment`: si el pedido sigue `PENDING_PAYMENT`, sin cobrar y sin otro pago pendiente, `cancel_unpaid_order(order, "PAYMENT_EXPIRED")` y bitácora `ORDER_EXPIRED`.
 
-1. Primera transacción: bloquea pedido y pagos (mismo orden que el webhook, `lock_order_and_payment`), exige `payment_status` `PAID` o `PARTIALLY_REFUNDED` y un pago con `payment_intent`, valida el monto contra el saldo (cobrado − `PENDING` − `SUCCEEDED`; sin `amount`, el saldo entero) y confirma la fila `Refund` `PENDING`.
-2. Fuera de la transacción llama a `create_refund` con el id de la fila como `idempotency_key` y `metadata.refund_id`. Un `ProviderError` marca la fila `FAILED` (devuelve el saldo), va al log, registra `REFUND_FAILED` y responde 502 `STRIPE_REQUEST_FAILED`.
-3. Segunda transacción: guarda `stripe_refund_id` y el estado que devolvió Stripe, recalcula `Payment.status`/`order.payment_status` (`apply_refund_totals`) y registra `REFUND_CREATED`.
-
-`checkout.session.expired` (`reconcile_expired_session`): el `Payment` PENDING de esa sesión pasa a `CANCELLED` (`cancelReason: SESSION_EXPIRED`) sin llamar a Stripe y, si el pedido sigue `PENDING_PAYMENT`, sin cobrar y sin otra sesión pendiente, `cancel_unpaid_order(order, "PAYMENT_EXPIRED")` y bitácora `ORDER_EXPIRED`. Un pedido pagado, del panel (`OPEN`) o con un link más nuevo no se toca; idempotente, mismo bloqueo pedido → pago, siempre 200. Una cotización con ese pedido vuelve a pagarse porque `checkout_from_quote` ignora los `CANCELLED`. `checkout.session.completed` guarda `Payment.paid_at`.
-
-Webhook (`services/webhooks.py` → `sync_stripe_refund`): `refund.created`, `refund.updated` y `refund.failed` crean o actualizan la fila, idempotente por `stripe_refund_id`; una fila nuestra que todavía no guardó su id se reconoce por `metadata.refund_id`; un reembolso del dashboard crea la fila con `created_by="stripe"`. Un `pending` atrasado no pisa un estado final informado por Stripe. `charge.refunded` solo sincroniza si el cargo trae la lista `refunds` (desde la API 2022-11-15 no viene). Siempre 200. La bitácora oculta `stripeRefundId` sin `payments.transaction_id` (`PAYMENT_ID_KEYS`).
-
-Avisos de fraude (`services/webhooks.py`): `radar.early_fraud_warning.created` guarda `order.data.fraudWarning` (bitácora `FRAUD_WARNING_RECEIVED`) y `charge.dispute.created` guarda `order.data.dispute` con `evidenceDueBy` (bitácora `DISPUTE_OPENED`). El pedido se encuentra por el `payment_intent`, nunca se reembolsa solo ni cambia de estado: decide el staff. Idempotente por el id del aviso; siempre 200. Para que Radar compare direcciones, la Checkout Session pide la facturación (`billing_address_collection=required`) y manda el envío del pedido en `payment_intent_data.shipping`.
+Reembolsos (`refunds.py`, único dueño de `Refund.objects.create`): `refund_order` relee el cobro; sin liquidar (`capturedPendingSettlement`) se anula con `void_transaction` y solo por el total (un parcial responde 409); liquidado (`settledSuccessfully`) se reembolsa con `refund_transaction` (últimos 4 de la tarjeta, `invoiceNumber` = id del `Refund`). La fila PENDING se confirma antes de llamar a la pasarela; `provider_refund_id` es el transId del reembolso o `VOID-<transId del cobro>`. Un `ProviderError` marca la fila FAILED y responde 502 `PAYMENT_REQUEST_FAILED`; un rechazo responde 502 "The payment provider declined the refund". `tests/test_payment_boundary.py` falla si alguien fuera de `refunds.py` llama a `refund_transaction` o crea filas `Refund`.

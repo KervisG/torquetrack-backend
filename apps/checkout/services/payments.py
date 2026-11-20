@@ -1,25 +1,36 @@
-"""Pagos de Stripe: único lugar que abre, registra, cancela y expira pagos,
-así el monto, su redondeo y el `provider_id` que concilia el webhook salen de
-un solo lugar."""
+"""Pagos con Authorize.net (Accept Hosted): único lugar que abre, registra,
+cancela y vence pagos, así el monto, su redondeo y el `invoiceNumber` que
+concilia el webhook salen de un solo lugar.
+
+Abrir un pago no llama a Authorize.net: el `Payment` nace PENDING y su `url`
+apunta al puente `GET /api/payments/<id>/pay/`, que pide el token del
+formulario recién al abrirse. El token vence a los 15 minutos; un link de
+pago enviado por correo sigue sirviendo mientras el pago esté PENDING.
+"""
 from __future__ import annotations
 
 import logging
+from datetime import timedelta
 from urllib.parse import quote
 
 from django.db import transaction
 from django.utils import timezone
 
+from apps.audit.services import record_activity
 from apps.catalog.services.pricing import price_lines
 from apps.checkout.models import Order, OrderStatus, Payment, PaymentStatus
 from apps.common.ids import random_id
 from apps.common.links import app_url
-from apps.common.numbers import money_decimal, to_cents
-from apps.integrations.exceptions import ProviderError
-from apps.integrations.payments import stripe as stripe_payments
+from apps.common.numbers import money_decimal
+from apps.integrations.exceptions import ProviderNotConfigured
+from apps.integrations.payments import authorize_net
 
 logger = logging.getLogger(__name__)
 
-# Estados de un pago (y de `order.payment_status`) en los que Stripe ya
+PROVIDER = "authorize_net"
+# Actor de la bitácora para lo que confirma la pasarela (webhook, vencimiento).
+PROVIDER_ACTOR = "authorize_net"
+# Estados de un pago (y de `order.payment_status`) en los que la pasarela ya
 # cobró. Un reembolso no convierte el cobro en "no pagado": el pedido no se
 # vuelve a cobrar ni el webhook lo marca PAID otra vez.
 CHARGED_PAYMENT_STATUSES = (
@@ -30,124 +41,138 @@ CHARGED_PAYMENT_STATUSES = (
 # Estados en los que el pedido ya no se va a cobrar ni despachar. Vive aquí
 # porque lo usan el panel y el webhook, y `webhooks` no importa `admin`.
 CLOSED_ORDER_STATUSES = {OrderStatus.CANCELLED, OrderStatus.REJECTED}
-# El staff sabe que falló Stripe (link de pago, cobro, reembolso), pero el
-# texto del proveedor queda en el log.
-STRIPE_REQUEST_FAILED = "Stripe request failed; see server logs."
+# El staff sabe que falló la pasarela (cobro, reembolso), pero el texto del
+# proveedor queda en el log.
+PAYMENT_REQUEST_FAILED = "Payment provider request failed; see server logs."
+# Lo mismo que duraba una Checkout Session de Stripe: pasado este plazo un
+# pago PENDING vence y su pedido de la tienda se cancela.
+PENDING_PAYMENT_TTL = timedelta(hours=24)
 
 
-def _line(name: str, unit_price, qty: int) -> dict:
-    return {"name": name, "unit_amount": to_cents(unit_price), "quantity": qty}
+def transaction_id(payment: Payment) -> str | None:
+    """Id de la transacción de Authorize.net que cobró este pago."""
+    return payment.provider_id or (payment.data or {}).get("transactionId") or None
 
 
 def _text(value) -> str:
     return value.strip() if isinstance(value, str) else ""
 
 
-def _stripe_shipping(customer: dict) -> dict | None:
-    """Dirección de envío del pedido con la forma de `PaymentIntent.shipping`,
-    para que Radar la compare con la tarjeta. Stripe exige `name` y `line1`:
-    sin ellos (un pedido del panel a medio cargar) se cobra igual sin
-    dirección. La tienda solo envía dentro de Estados Unidos."""
-    name, line1 = _text(customer.get("name")), _text(customer.get("address1"))
-    if not name or not line1:
+def _address(customer: dict) -> dict | None:
+    """Dirección del pedido para precargar facturación y envío del form, así
+    el AVS la compara con la tarjeta. La tienda solo envía dentro de EE. UU."""
+    name, street = _text(customer.get("name")), _text(customer.get("address1"))
+    if not name or not street:
         return None
-    address = {
-        "line1": line1,
-        "line2": _text(customer.get("address2")),
+    first, _, last = name.partition(" ")
+    line2 = _text(customer.get("address2"))
+    return {
+        "firstName": first,
+        "lastName": last.strip(),
+        "address": f"{street} {line2}".strip(),
         "city": _text(customer.get("city")),
         "state": _text(customer.get("state")),
-        "postal_code": _text(customer.get("zip")),
-        "country": "US",
+        "zip": _text(customer.get("zip")),
     }
-    shipping = {"name": name, "address": {key: value for key, value in address.items() if value}}
-    if phone := _text(customer.get("phone")):
-        shipping["phone"] = phone
-    return shipping
 
 
-def _create_checkout_session(order: dict) -> dict:
-    """Devuelve `{"id", "url"}`; lanza `ProviderError` o `ProviderNotConfigured`."""
-    totals = order.get("totals") or {}
-    # Las líneas guardadas ya pasaron por `price_lines` (checkout, solicitud o
-    # panel); se leen con la misma regla para que la suma de Stripe sea
-    # exactamente el `total` que guarda el `Payment`.
-    priced = price_lines(order.get("items") or [], allow_custom_price=True, max_quantity=None)
-    line_items = []
-    for line in priced.lines:
+def _line_items(order_data: dict) -> list[dict]:
+    """Las líneas guardadas ya pasaron por `price_lines` (checkout, solicitud
+    o panel); se leen con la misma regla para que el detalle coincida con el
+    `total` que guarda el `Payment`."""
+    priced = price_lines(order_data.get("items") or [], allow_custom_price=True, max_quantity=None)
+    lines = []
+    for index, line in enumerate(priced.lines, start=1):
         title = line.item.get("title") or line.item.get("partNumber") or "Diesel Part"
-        line_items.append(_line(title, line.unit_price, line.quantity))
+        item_id = str(line.item.get("partNumber") or line.item.get("productId") or f"LINE{index}")
+        lines.append(
+            {"id": item_id, "name": title, "quantity": line.quantity, "unitPrice": line.unit_price}
+        )
         if line.core_charge > 0:
-            line_items.append(_line(f"Core charge — {title}", line.core_charge, line.quantity))
-
-    for name, value in (
-        ("Shipping", money_decimal(totals.get("shipping"))),
-        ("Sales Tax", money_decimal(totals.get("tax"))),
-    ):
-        if value > 0:
-            line_items.append(_line(name, value, 1))
-
-    order_id = str(order["id"])
-    customer = order.get("customer") or {}
-    return stripe_payments.create_checkout_session(
-        client_reference_id=order_id,
-        line_items=line_items,
-        success_url=app_url(
-            f"/checkout-success?session_id={{CHECKOUT_SESSION_ID}}&order_id={quote(order_id)}"
-        ),
-        cancel_url=app_url("/checkout?canceled=1"),
-        metadata={"order_id": order_id, "order_number": order["number"]},
-        customer_email=customer.get("email") or None,
-        shipping=_stripe_shipping(customer),
-    )
+            lines.append(
+                {
+                    "id": f"CORE-{item_id}",
+                    "name": f"Core charge - {title}",
+                    "quantity": line.quantity,
+                    "unitPrice": line.core_charge,
+                }
+            )
+    return lines
 
 
-def start_stripe_payment(order: Order, *, data: dict | None = None) -> tuple[Payment, dict]:
-    """Única forma de cobrar con Stripe, así el monto, su redondeo y el
-    `provider_id` que busca el webhook (el id de la sesión) salen de un solo
-    lugar. Si Stripe falla lanza `ProviderError` sin dejar ningún `Payment`.
+def payment_page_url(payment: Payment) -> str:
+    return app_url(f"/api/payments/{quote(payment.pk)}/pay/")
+
+
+def start_payment(order: Order, *, data: dict | None = None) -> tuple[Payment, dict]:
+    """Única forma de abrir un cobro. Devuelve `(payment, {"id", "url"})`.
+
+    No llama a la pasarela; sin credenciales lanza `ProviderNotConfigured` sin
+    dejar ningún `Payment`. Un pedido tiene un solo pago cobrable: el anterior
+    (otro link, otro intento de checkout) se cancela al crear el nuevo.
     """
+    if not authorize_net.is_configured():
+        raise ProviderNotConfigured("Authorize.net credentials are not set")
     order_data = order.data or {}
-    # El id y el número van al final: un `id` guardado en el jsonb no puede
-    # desviar la sesión hacia otro pedido.
-    session = _create_checkout_session({**order_data, "id": order.pk, "number": order.number})
     with transaction.atomic():
         payment = Payment.objects.create(
             id=random_id("PAY"),
             order=order,
-            provider="stripe",
-            provider_id=session["id"],
+            provider=PROVIDER,
+            provider_id=None,
             status=PaymentStatus.PENDING,
             amount=money_decimal((order_data.get("totals") or {}).get("total")),
-            data={"sessionId": session["id"], **(data or {})},
+            data={**(data or {})},
         )
-        # Un pedido tiene una sola sesión cobrable: la anterior (otro link,
-        # otro intento de checkout) se expira solo cuando la nueva ya existe.
         previous = (
             Payment.objects.select_for_update()
-            .filter(order=order, provider="stripe", status=PaymentStatus.PENDING)
+            .filter(order=order, status=PaymentStatus.PENDING)
             .exclude(pk=payment.pk)
         )
         for other in previous:
-            cancel_pending_payment(other, "REPLACED", data={"replacedBy": session["id"]})
-    return payment, session
+            cancel_pending_payment(other, "REPLACED", data={"replacedBy": payment.pk})
+    return payment, {"id": payment.pk, "url": payment_page_url(payment)}
+
+
+def create_payment_form(payment: Payment) -> dict:
+    """Token de Accept Hosted para un pago PENDING. Devuelve `{"token",
+    "formUrl"}`; lanza `ProviderError` o `ProviderNotConfigured`.
+
+    El id y el número salen de las columnas del pedido, no del jsonb: un `id`
+    guardado en `data` no puede desviar el cobro hacia otro pedido.
+    """
+    order = payment.order
+    order_data = order.data or {}
+    totals = order_data.get("totals") or {}
+    customer = order_data.get("customer") or {}
+    return authorize_net.create_hosted_payment_token(
+        invoice_number=payment.pk,
+        description=f"TorqueTrack Order {order.number}",
+        amount=payment.amount,
+        line_items=_line_items(order_data),
+        tax=money_decimal(totals.get("tax")),
+        shipping=money_decimal(totals.get("shipping")),
+        customer_email=customer.get("email") or None,
+        address=_address(customer),
+        return_url=app_url(f"/checkout-success?order_id={quote(str(order.pk))}"),
+        cancel_url=app_url("/checkout?canceled=1"),
+    )
 
 
 def lock_order_and_payment(payment: Payment) -> tuple[Order | None, Payment]:
     """Bloquea primero el pedido y después el pago, siempre en ese orden
-    (webhook, reembolsos), y relee el pago ya bloqueado para ver lo que otro
-    evento acaba de confirmar."""
+    (webhook, reembolsos, vencimiento), y relee el pago ya bloqueado para ver
+    lo que otro evento acaba de confirmar."""
     order = Order.objects.select_for_update().filter(pk=payment.order_id).first()
     return order, Payment.objects.select_for_update().get(pk=payment.pk)
 
 
 def cancel_pending_payment(payment: Payment, reason: str, *, data: dict | None = None) -> None:
-    """Única forma de cancelar un pago PENDING, porque además expira su
-    Checkout Session para que el cliente ya no pueda pagarla.
-
-    La expiración corre en `on_commit`: si la transacción hace rollback, la
-    sesión sigue viva igual que el pago. Un error de Stripe solo se registra;
-    en el peor caso el cliente paga una sesión cancelada y el webhook la marca
-    para reembolso (`DUPLICATE_PAYMENT_RECEIVED`).
+    """Única forma de cancelar un pago PENDING. Desde ese momento el puente
+    ya no entrega el formulario. Un form abierto antes (token vigente hasta
+    15 minutos) todavía puede cobrarse: el webhook lo concilia y, si el
+    pedido ya estaba pagado, lo marca para reembolso
+    (`DUPLICATE_PAYMENT_RECEIVED`).
     """
     if payment.status != PaymentStatus.PENDING:
         return
@@ -155,31 +180,6 @@ def cancel_pending_payment(payment: Payment, reason: str, *, data: dict | None =
     payment.updated_at = timezone.now()
     payment.data = {**(payment.data or {}), "cancelReason": reason, **(data or {})}
     payment.save(update_fields=["status", "updated_at", "data"])
-
-    if payment.provider == "stripe" and payment.provider_id:
-        session_id, payment_id = payment.provider_id, payment.pk
-        transaction.on_commit(lambda: _expire_stripe_session(session_id, payment_id))
-
-
-def _expire_stripe_session(session_id: str, payment_id: str) -> None:
-    try:
-        result = stripe_payments.expire_checkout_session(session_id)
-    except ProviderError as exc:
-        logger.warning(
-            "Could not expire Stripe session %s of cancelled payment %s: %s",
-            session_id,
-            payment_id,
-            exc,
-        )
-        return
-    if result.get("status") == "complete":
-        # Se pagó antes de poder expirarla; el webhook la concilia y, si el
-        # pedido ya estaba pagado, la marca para reembolso.
-        logger.warning(
-            "Stripe session %s of cancelled payment %s was already complete",
-            session_id,
-            payment_id,
-        )
 
 
 def cancel_pending_payments(order: Order, reason: str) -> None:
@@ -200,12 +200,46 @@ def cancel_unpaid_order(order: Order, reason: str) -> None:
         cancel_pending_payments(order, reason)
 
 
-def get_stripe_payment_method(payment_intent_id) -> dict | None:
-    """Dato decorativo: sin key, sin PaymentIntent o con Stripe caído devuelve
-    `None` y el webhook concilia igual."""
-    if not payment_intent_id:
-        return None
-    try:
-        return stripe_payments.retrieve_payment_method(payment_intent_id)
-    except ProviderError:
-        return None
+def expire_pending_payment(payment: Payment) -> bool:
+    """Vence un pago PENDING que nadie pagó (`PAYMENT_EXPIRED`).
+
+    El pedido se cancela con `cancel_unpaid_order` solo si sigue
+    `PENDING_PAYMENT`, sin cobrar y sin otro pago pendiente: un pedido pagado,
+    uno del panel (`OPEN`) o uno con un link más nuevo no se toca. Con el
+    pedido cancelado, una cotización vuelve a poder pagarse porque
+    `checkout_from_quote` ignora los pedidos `CANCELLED`. Devuelve `True` si
+    canceló el pedido. Idempotente.
+    """
+    with transaction.atomic():
+        order, payment = lock_order_and_payment(payment)
+        if payment.status != PaymentStatus.PENDING:
+            return False
+        payment.status = PaymentStatus.CANCELLED
+        payment.updated_at = timezone.now()
+        payment.data = {**(payment.data or {}), "cancelReason": "PAYMENT_EXPIRED"}
+        payment.save(update_fields=["status", "updated_at", "data"])
+
+        if order is None or order.status != OrderStatus.PENDING_PAYMENT:
+            return False
+        if order.payment_status in CHARGED_PAYMENT_STATUSES:
+            return False
+        if Payment.objects.filter(order=order, status=PaymentStatus.PENDING).exists():
+            return False
+        cancel_unpaid_order(order, "PAYMENT_EXPIRED")
+
+    record_activity(
+        actor=PROVIDER_ACTOR,
+        action="ORDER_EXPIRED",
+        entity_type="ORDER",
+        entity_id=order.pk,
+        data={"paymentId": payment.pk},
+    )
+    return True
+
+
+def expire_stale_payments(now=None) -> int:
+    """Vence los pagos PENDING con más de `PENDING_PAYMENT_TTL`. Devuelve
+    cuántos pedidos canceló."""
+    cutoff = (now or timezone.now()) - PENDING_PAYMENT_TTL
+    stale = list(Payment.objects.filter(status=PaymentStatus.PENDING, created_at__lt=cutoff))
+    return sum(1 for payment in stale if expire_pending_payment(payment))

@@ -33,7 +33,6 @@ from apps.checkout.services.refunds import (
     FINAL_REFUND_STATUSES,
     HELD_REFUND_STATUSES,
     REFUNDABLE_ORDER_STATUSES,
-    STRIPE_REFUND_STATUSES,
 )
 from apps.customers.models import Customer, PortalStatus, TaxStatus
 from apps.quotes.models import Quote, QuoteStatus
@@ -172,7 +171,6 @@ def test_status_sets_are_built_from_the_enum_members():
     assert set(REFUNDABLE_ORDER_STATUSES) == {"PAID", "PARTIALLY_REFUNDED"}
     assert set(HELD_REFUND_STATUSES) == {"PENDING", "SUCCEEDED"}
     assert set(FINAL_REFUND_STATUSES) == {"SUCCEEDED", "FAILED", "CANCELED"}
-    assert set(STRIPE_REFUND_STATUSES.values()) <= set(RefundStatus.values)
     assert set(EXPIRABLE_QUOTE_STATUSES) == {"BUILDING", "ACTIVE", "CONTACTED"}
     assert set(PAYABLE_QUOTE_STATUSES) == {"ACTIVE", "CONTACTED", "CONVERTED"}
     assert set(CONVERTIBLE_QUOTE_STATUSES) == {"ACTIVE", "CONTACTED"}
@@ -197,7 +195,6 @@ def test_status_sets_are_built_from_the_enum_members():
         *REFUNDABLE_ORDER_STATUSES,
         *HELD_REFUND_STATUSES,
         *FINAL_REFUND_STATUSES,
-        *STRIPE_REFUND_STATUSES.values(),
         *EXPIRABLE_QUOTE_STATUSES,
         *PAYABLE_QUOTE_STATUSES,
         *CONVERTIBLE_QUOTE_STATUSES,

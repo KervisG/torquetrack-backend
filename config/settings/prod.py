@@ -30,7 +30,7 @@ if _is_weak_secret_key(SECRET_KEY):
         "in production."
     )
 
-# `APP_URL` arma el retorno de Stripe y los enlaces de los correos y de la
+# `APP_URL` arma el retorno de la pasarela y los enlaces de los correos y de la
 # cotización. Sin él caerían en `http://localhost:5173` (`apps/common/links.py`),
 # así que producción no arranca con un valor vacío o sin HTTPS.
 APP_URL = env("APP_URL", default="")  # noqa: F405

@@ -33,16 +33,19 @@ class AdminOrderRefundsViewExtension(OpenApiViewExtension):
                 tags=[ADMIN_ORDERS_TAG],
                 summary="Refund an order",
                 description=(
-                    "Requires `payments.refund`. Refunds the Stripe charge that paid the "
-                    "order, only while `paymentStatus` is `PAID` or `PARTIALLY_REFUNDED`.\n\n"
+                    "Requires `payments.refund`. Refunds the Authorize.net charge that paid "
+                    "the order, only while `paymentStatus` is `PAID` or "
+                    "`PARTIALLY_REFUNDED`.\n\n"
                     "- Without `amount` it refunds the remaining balance: the charged "
                     "amount minus `PENDING` and `SUCCEEDED` refunds.\n"
-                    "- The refund row is saved before calling Stripe and its id is the "
-                    "Stripe idempotency key.\n"
+                    "- An unsettled charge (usually the first 24 hours) can only be voided "
+                    "for the full amount; a partial amount answers 409.\n"
+                    "- The refund row is saved before calling Authorize.net and its id is "
+                    "sent as the refund `invoiceNumber`.\n"
                     "- A succeeded refund moves the order to `PARTIALLY_REFUNDED` or "
                     "`REFUNDED`; `status` is not changed.\n"
                     "- Logs `REFUND_CREATED` or `REFUND_FAILED` in the activity log.\n"
-                    "- `stripeRefundId` is returned only with `payments.transaction_id`."
+                    "- `providerRefundId` is returned only with `payments.transaction_id`."
                 ),
                 parameters=[
                     OpenApiParameter(
@@ -69,12 +72,20 @@ class AdminOrderRefundsViewExtension(OpenApiViewExtension):
                     404: OpenApiResponse(ErrorResponseSerializer, examples=[ex.ORDER_NOT_FOUND]),
                     409: OpenApiResponse(
                         ErrorResponseSerializer,
-                        examples=[ex.NOT_PAID, ex.NO_STRIPE_CHARGE, ex.NO_BALANCE],
+                        examples=[
+                            ex.NOT_PAID,
+                            ex.NO_CARD_CHARGE,
+                            ex.NO_BALANCE,
+                            ex.PARTIAL_BEFORE_SETTLEMENT,
+                            ex.NOT_REFUNDABLE_NOW,
+                        ],
                     ),
                     502: OpenApiResponse(
                         ErrorResponseSerializer,
-                        description="Stripe rejected or did not answer; details are in the logs.",
-                        examples=[ex.STRIPE_FAILED],
+                        description=(
+                            "Authorize.net declined or did not answer; details are in the logs."
+                        ),
+                        examples=[ex.PROVIDER_FAILED, ex.PROVIDER_DECLINED],
                     ),
                 },
             )
@@ -163,7 +174,7 @@ class AdminOrdersListViewExtension(OpenApiViewExtension):
                 tags=[ADMIN_ORDERS_TAG],
                 summary="List orders",
                 description=(
-                    "Requires `orders.view`. Stripe ids appear only with "
+                    "Requires `orders.view`. Payment provider ids appear only with "
                     "`payments.transaction_id`."
                 ),
                 parameters=[
@@ -300,7 +311,8 @@ class CheckoutViewExtension(OpenApiViewExtension):
                 tags=["storefront"],
                 summary="Start checkout",
                 description=(
-                    "Public. Creates a pending order and a Stripe Checkout session. "
+                    "Public. Creates a pending order and a pending payment; `url` opens the "
+                    "Authorize.net hosted payment form. "
                     "`vehicle` is optional; when it carries a `vin`, the VIN must have "
                     "17 valid characters and the cart must pass the fitment check.\n\n"
                     "`customer.state` is required and must be the 2-letter code of a US "
@@ -330,16 +342,20 @@ class CheckoutViewExtension(OpenApiViewExtension):
         return CheckoutView
 
 
-class StripeWebhookViewExtension(OpenApiViewExtension):
-    target_class = "apps.checkout.views.webhooks.StripeWebhookView"
+class AuthorizeNetWebhookViewExtension(OpenApiViewExtension):
+    target_class = "apps.checkout.views.webhooks.AuthorizeNetWebhookView"
 
     def view_replacement(self):
-        class StripeWebhookView(self.target_class):
+        class AuthorizeNetWebhookView(self.target_class):
             @extend_schema(
-                operation_id="stripe_webhook",
+                operation_id="authorize_net_webhook",
                 tags=["webhooks"],
-                summary="Stripe webhook",
-                description="Stripe signature required. Not a browser route.",
+                summary="Authorize.net webhook",
+                description=(
+                    "`X-ANET-Signature` (HMAC-SHA512 with the Signature Key) required. "
+                    "Not a browser route. Answers 503 when the transaction cannot be "
+                    "read back, so Authorize.net retries."
+                ),
                 auth=[],
                 request=None,
                 responses={
@@ -351,7 +367,42 @@ class StripeWebhookViewExtension(OpenApiViewExtension):
             def post(self, request):
                 return super().post(request)
 
-        return StripeWebhookView
+        return AuthorizeNetWebhookView
+
+
+class PaymentPageViewExtension(OpenApiViewExtension):
+    target_class = "apps.checkout.views.payment_page.PaymentPageView"
+
+    def view_replacement(self):
+        class PaymentPageView(self.target_class):
+            @extend_schema(
+                operation_id="payment_page",
+                tags=["storefront"],
+                summary="Open the hosted payment form",
+                description=(
+                    "Public browser route, returns HTML. While the payment is `PENDING` it "
+                    "requests a fresh Authorize.net form token and auto-posts it to the "
+                    "hosted payment form. A paid payment redirects to `/checkout-success`; "
+                    "an unknown one answers 404 and a cancelled or expired one 410."
+                ),
+                auth=[],
+                parameters=[
+                    OpenApiParameter(
+                        "payment_id", str, OpenApiParameter.PATH, description="Payment id."
+                    )
+                ],
+                responses={
+                    (200, "text/html"): OpenApiResponse(description="Auto-submitting form."),
+                    (302, "text/html"): OpenApiResponse(description="Already paid."),
+                    (404, "text/html"): OpenApiResponse(description="Unknown payment."),
+                    (410, "text/html"): OpenApiResponse(description="Payment no longer open."),
+                    (502, "text/html"): OpenApiResponse(description="Authorize.net failed."),
+                },
+            )
+            def get(self, request, payment_id):
+                return super().get(request, payment_id)
+
+        return PaymentPageView
 
 
 class AdminOrderNotesViewExtension(OpenApiViewExtension):

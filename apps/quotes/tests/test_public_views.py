@@ -17,7 +17,7 @@ from apps.quotes.models import Quote
 from tests.factories import guest_cart_client
 from tests.fakes import install_resend
 
-CREATE_SESSION = "apps.integrations.payments.stripe.create_checkout_session"
+CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 
 PRODUCT_ID = "cummins-5.9-turbo-holset-hx35"
 PRODUCT_DATA = {
@@ -74,13 +74,17 @@ def _make_quote(
     return quote
 
 
-def _fake_session(session_id="cs_test_quote", url="https://checkout.stripe.com/pay/cs_test_quote"):
+START_PAYMENT = "apps.quotes.services.storefront.start_payment"
+
+
+def _fake_session(session_id="cs_test_quote", url="https://example.test/pay"):
     return {"id": session_id, "url": url}
 
 
 @pytest.fixture(autouse=True)
 def _stripe_secret_key(settings):
-    settings.STRIPE_SECRET_KEY = "sk_test_fake_not_real"
+    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
     settings.RESEND_API_KEY = ""
     settings.SALES_EMAIL = ""
     return settings
@@ -342,7 +346,7 @@ def test_public_details_denies_expired_token(client):
 
 
 @pytest.mark.django_db
-def test_public_checkout_creates_order_and_stripe_session(client, monkeypatch):
+def test_public_checkout_creates_order_and_pending_payment(client, monkeypatch):
     token = "tok_" + "c" * 48
     _make_quote(quote_id="quo_checkout_1", number="Q10003", token=token)
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
@@ -352,7 +356,6 @@ def test_public_checkout_creates_order_and_stripe_session(client, monkeypatch):
     assert response.status_code == 200
     body = response.json()
     assert body["ok"] is True
-    assert body["url"] == "https://checkout.stripe.com/pay/cs_test_quote"
 
     order = Order.objects.get(number=body["orderNumber"])
     assert order.status == "PENDING_PAYMENT"
@@ -361,6 +364,7 @@ def test_public_checkout_creates_order_and_stripe_session(client, monkeypatch):
 
     payment = Payment.objects.get(order=order)
     assert payment.data["source"] == "PUBLIC_QUOTE"
+    assert body["url"] == f"http://localhost:5173/api/payments/{payment.pk}/pay/"
 
     quote = Quote.objects.get(pk="quo_checkout_1")
     assert quote.status == "CONVERTED"
@@ -382,14 +386,14 @@ def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
 
 
 @pytest.mark.django_db
-def test_public_checkout_hides_the_stripe_error_and_logs_it(client, monkeypatch, caplog):
+def test_public_checkout_hides_the_provider_error_and_logs_it(client, monkeypatch, caplog):
     token = "tok_" + "s" * 48
     _make_quote(quote_id="quo_checkout_err", number="Q10009", token=token)
 
-    def _boom(**kwargs):
+    def _boom(order, **kwargs):
         raise ProviderError("Invalid API Key for account acct_internal_123")
 
-    monkeypatch.setattr(CREATE_SESSION, _boom)
+    monkeypatch.setattr(START_PAYMENT, _boom)
 
     with caplog.at_level(logging.WARNING, logger="apps.quotes.services.storefront"):
         response = client.post(f"/api/quote/public/{token}/checkout/")
@@ -474,7 +478,7 @@ def test_public_checkout_replaces_an_order_with_stale_totals(client, monkeypatch
         data={"totals": {"subtotal": 1.0, "core": 0, "shipping": 0, "tax": 0, "total": 1.0}},
     )
     Payment.objects.create(
-        id="PAY_STALE", order=stale, provider="stripe", provider_id="cs_stale", status="PENDING"
+        id="PAY_STALE", order=stale, provider="authorize_net", provider_id=None, status="PENDING"
     )
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session("cs_fresh"))
 

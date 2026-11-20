@@ -1,10 +1,10 @@
 """Rate limit de las rutas públicas que cuestan: checkout y pago de una
-cotización (sesión de Stripe y pedido), solicitud de cotización (fila y dos
+cotización (pago pendiente y pedido), solicitud de cotización (fila y dos
 correos), PDF de la cotización (WeasyPrint), tarifas de envío (EasyPost),
 impuesto (TaxJar), decodificación de VIN (NHTSA) y fitment.
 
 Cada ruta responde 429 con `{"error": ...}` y `Retry-After` al pasar su tope,
-por IP del cliente. El webhook de Stripe NO tiene throttle: Stripe reintenta y
+por IP del cliente. El webhook de Authorize.net NO tiene throttle: la pasarela reintenta y
 la firma ya lo protege; perder un evento dejaría un pago sin reconciliar.
 El último test recorre el URLconf y exige que toda view `AllowAny` declare
 `throttle_classes` o figure, con su motivo, en `UNTHROTTLED_PUBLIC_VIEWS`.
@@ -19,7 +19,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient
 
 from apps.authentication.utils import throttling
-from apps.checkout.views.webhooks import StripeWebhookView
+from apps.checkout.views.webhooks import AuthorizeNetWebhookView
 from tests.fakes import forbid_resend
 from tests.test_view_permissions import _drf_view_class, _url_patterns
 
@@ -41,7 +41,7 @@ def _clear_throttle_history(db):
 def _no_providers(monkeypatch):
     forbid_resend(monkeypatch)
     for target in (
-        "apps.integrations.payments.stripe.create_checkout_session",
+        "apps.integrations.payments.authorize_net.create_hosted_payment_token",
         "apps.integrations.shipping.easypost.get_rates",
         "apps.integrations.tax.taxjar.calculate_tax",
         "apps.integrations.vehicles.nhtsa.decode_vin",
@@ -74,7 +74,7 @@ def _send(client, method, path, body, client_ip):
 def test_public_route_answers_429_after_its_limit(
     monkeypatch, settings, method, path, body, throttle_name
 ):
-    settings.STRIPE_SECRET_KEY = ""
+    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
     monkeypatch.setattr(getattr(throttling, throttle_name), "rate", f"{LIMIT}/min", raising=False)
     client = APIClient()
 
@@ -94,7 +94,7 @@ def test_public_route_answers_429_after_its_limit(
 def test_public_route_limit_is_per_client_ip(
     monkeypatch, settings, method, path, body, throttle_name
 ):
-    settings.STRIPE_SECRET_KEY = ""
+    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
     monkeypatch.setattr(getattr(throttling, throttle_name), "rate", "1/min", raising=False)
     client = APIClient()
 
@@ -103,23 +103,23 @@ def test_public_route_limit_is_per_client_ip(
     assert _send(client, method, path, body, "203.0.113.21").status_code != 429
 
 
-def test_stripe_webhook_declares_no_throttle():
+def test_payment_webhook_declares_no_throttle():
     # Explícito y vacío: un `DEFAULT_THROTTLE_CLASSES` futuro tampoco lo alcanza.
-    assert StripeWebhookView.throttle_classes == []
-    assert StripeWebhookView().get_throttles() == []
+    assert AuthorizeNetWebhookView.throttle_classes == []
+    assert AuthorizeNetWebhookView().get_throttles() == []
 
 
 @pytest.mark.django_db
-def test_stripe_webhook_is_never_throttled(settings):
-    settings.STRIPE_WEBHOOK_SECRET = "whsec_test_fake"
+def test_payment_webhook_is_never_throttled(settings):
+    settings.AUTHORIZE_NET_SIGNATURE_KEY = "anet_signature_fake"
     client = APIClient()
 
     statuses = {
         client.post(
-            "/api/webhooks/stripe/",
+            "/api/webhooks/authorize-net/",
             b"{}",
             content_type="application/json",
-            HTTP_STRIPE_SIGNATURE="t=1,v1=bad",
+            HTTP_X_ANET_SIGNATURE="sha512=BAD",
         ).status_code
         for _ in range(30)
     }
@@ -129,7 +129,7 @@ def test_stripe_webhook_is_never_throttled(settings):
 
 # Views `AllowAny` sin throttle, a propósito. Toda view nueva `AllowAny` tiene
 # que declarar `throttle_classes` o sumarse acá con su motivo. El webhook de
-# Stripe y el health check no figuran: declaran `throttle_classes = []`.
+# Authorize.net y el health check no figuran: declaran `throttle_classes = []`.
 UNTHROTTLED_PUBLIC_VIEWS = {
     # Lecturas baratas del catálogo que el SPA pide en cada pantalla.
     "apps.catalog.views.storefront.ProductPublicViewSet",

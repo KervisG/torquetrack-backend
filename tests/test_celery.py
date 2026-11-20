@@ -73,6 +73,10 @@ def test_beat_schedule_runs_the_maintenance_jobs_at_fixed_times():
             "task": "apps.quotes.tasks.expire_quotes",
             "schedule": crontab(minute=0),
         },
+        "expire-pending-payments": {
+            "task": "apps.checkout.tasks.expire_pending_payments",
+            "schedule": crontab(minute="*/15"),
+        },
         "purge-empty-carts": {
             "task": "apps.cart.tasks.purge_carts",
             "schedule": crontab(hour=3, minute=30),

@@ -24,7 +24,7 @@ from apps.checkout.services import (
     PAYMENT_START_FAILED,
     cancel_unpaid_order,
     next_order_number,
-    start_stripe_payment,
+    start_payment,
 )
 from apps.common.emails import branded_email_html
 from apps.common.errors import error_payload
@@ -245,7 +245,7 @@ def _matches_quote(order: Order, quote_data: dict) -> bool:
 
 
 # `CONVERTED` sigue siendo pagable: el checkout la convierte antes de abrir
-# Stripe, así que un reintento (Stripe caído, sesión abandonada) reusa el
+# el pago, así que un reintento (pasarela caída, pago abandonado) reusa el
 # pedido. Un pedido ya pagado se rechaza aparte.
 PAYABLE_QUOTE_STATUSES = frozenset(
     {QuoteStatus.ACTIVE, QuoteStatus.CONTACTED, QuoteStatus.CONVERTED}
@@ -341,11 +341,11 @@ def checkout_from_quote(quote: Quote) -> dict:
             quote.save(update_fields=["status", "data", "updated_at"])
 
     try:
-        _, session = start_stripe_payment(order, data={"source": "PUBLIC_QUOTE"})
+        _, session = start_payment(order, data={"source": "PUBLIC_QUOTE"})
     except ProviderError as exc:
         # El pedido queda sin pagar y coincide con la cotización: el próximo
         # intento lo reusa.
-        logger.warning("Stripe checkout for quote %s failed: %s", quote.number, exc)
+        logger.warning("Checkout payment for quote %s failed: %s", quote.number, exc)
         return {"error": PAYMENT_START_FAILED, "status": 502}
 
     return {"ok": True, "url": session["url"], "orderNumber": order.number}

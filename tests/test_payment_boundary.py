@@ -1,4 +1,4 @@
-"""Solo `apps/checkout/services/payments.py` abre, registra o expira pagos de Stripe:
+"""Solo `apps/checkout/services/payments.py` abre, registra o cancela pagos:
 así el monto, su redondeo y el `provider_id` que concilia el webhook salen de
 un único lugar."""
 import ast
@@ -8,8 +8,8 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 APPS_DIR = BACKEND_DIR / "apps"
 INTEGRATIONS_DIR = APPS_DIR / "integrations"
 OWNER = APPS_DIR / "checkout" / "services" / "payments.py"
-# Único dueño de los reembolsos: pide el reembolso a Stripe y crea las filas
-# `Refund`, también las que llegan por webhook desde el dashboard.
+# Único dueño de los reembolsos: pide el reembolso a la pasarela y crea las filas
+# `Refund`, también las que llegan por webhook desde el Merchant Interface.
 REFUNDS_OWNER = APPS_DIR / "checkout" / "services" / "refunds.py"
 
 
@@ -31,13 +31,13 @@ def _attribute_calls(path):
             yield ast.unparse(node.func)
 
 
-def test_only_checkout_services_opens_stripe_sessions_or_creates_payments():
+def test_only_checkout_services_creates_payments():
     offenders = []
     for path in _domain_modules():
         if path == OWNER:
             continue
         for call in _attribute_calls(path):
-            if call.endswith(".create_checkout_session") or call == "Payment.objects.create":
+            if call.endswith(".create_hosted_payment_token") or call == "Payment.objects.create":
                 offenders.append(f"{path.relative_to(BACKEND_DIR).as_posix()}: {call}")
 
     assert offenders == []
@@ -46,7 +46,7 @@ def test_only_checkout_services_opens_stripe_sessions_or_creates_payments():
 def test_checkout_services_still_owns_both_operations():
     calls = set(_attribute_calls(OWNER))
 
-    assert "stripe_payments.create_checkout_session" in calls
+    assert "authorize_net.create_hosted_payment_token" in calls
     assert "Payment.objects.create" in calls
 
 
@@ -66,33 +66,26 @@ def _status_bulk_updates(path):
 
 
 def test_pending_payments_are_cancelled_only_through_cancel_pending_payment():
-    # Un `update(status=...)` masivo cancelaría el pago sin expirar su
-    # Checkout Session, y el cliente podría seguir pagándola.
+    # Un `update(status=...)` masivo cancelaría el pago sin dejar su motivo
+    # ni pasar por la regla de un solo pago cobrable por pedido.
     offenders = []
     for path in _domain_modules():
         relative = path.relative_to(BACKEND_DIR).as_posix()
         offenders.extend(f"{relative}: {call}" for call in _status_bulk_updates(path))
-        if path != OWNER:
-            offenders.extend(
-                f"{relative}: {call}"
-                for call in _attribute_calls(path)
-                if call.endswith(".expire_checkout_session")
-            )
 
     assert offenders == []
-    assert "stripe_payments.expire_checkout_session" in set(_attribute_calls(OWNER))
 
 
-def test_only_checkout_refunds_creates_stripe_refunds_or_refund_rows():
+def test_only_checkout_refunds_creates_refunds_or_refund_rows():
     offenders = []
     for path in _domain_modules():
         if path == REFUNDS_OWNER:
             continue
         for call in _attribute_calls(path):
-            if call.endswith(".create_refund") or call == "Refund.objects.create":
+            if call.endswith(".refund_transaction") or call == "Refund.objects.create":
                 offenders.append(f"{path.relative_to(BACKEND_DIR).as_posix()}: {call}")
 
     assert offenders == []
     calls = set(_attribute_calls(REFUNDS_OWNER))
-    assert "stripe_payments.create_refund" in calls
+    assert "authorize_net.refund_transaction" in calls
     assert "Refund.objects.create" in calls

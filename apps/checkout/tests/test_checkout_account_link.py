@@ -14,7 +14,6 @@ from tests.factories import (
     create_user,
     session_client,
 )
-from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 
@@ -47,9 +46,6 @@ def _stripe(settings, monkeypatch):
         return {"id": "cs_test_acct", "url": "https://example.test/pay"}
 
     monkeypatch.setattr(CREATE_SESSION, _create)
-    captured["_selection"] = quote_shipping(
-        monkeypatch, settings, zip_code="33701", items=[{"id": PRODUCT_ID, "qty": 1}]
-    )
     return captured
 
 
@@ -73,7 +69,6 @@ def _checkout(client, customer):
             "items": [{"id": PRODUCT_ID, "qty": 1}],
             "vehicle": VEHICLE,
             "customer": {**CHECKOUT_CONTACT, "state": "FL", "zip": "33701", **customer},
-            "shipping": {"shipmentId": "shp_checkout", "rateId": "rate_ground"},
         },
         format="json",
     )

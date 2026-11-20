@@ -2,13 +2,12 @@
 `ProductFitment` cuando el producto las tiene y el texto de `data` cuando no.
 
 Stripe se parchea en `apps.integrations.payments.authorize_net.create_hosted_payment_token`
-y la tarifa de envío con `quote_shipping` de `tests/fakes.py`."""
+El envío es gratis: no hay tarifa que parchear."""
 import pytest
 from rest_framework.test import APIClient
 
 from apps.catalog.models import Application, Product
 from apps.checkout.models import Order
-from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 PRODUCT_ID = "ford-73-injector"
@@ -32,9 +31,7 @@ def _keys(settings, monkeypatch):
 
 @pytest.fixture
 def shipping(monkeypatch, settings):
-    return quote_shipping(
-        monkeypatch, settings, zip_code="33701", rate=10, items=[{"id": PRODUCT_ID, "qty": 1}]
-    )
+    return None
 
 
 def _insert_product(linked):

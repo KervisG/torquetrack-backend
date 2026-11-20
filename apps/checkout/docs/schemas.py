@@ -91,19 +91,11 @@ class CheckoutCustomerSerializer(serializers.Serializer):
     country = serializers.CharField(required=False, help_text="Only US addresses are shipped to.")
 
 
-class CheckoutShippingSelectionSerializer(serializers.Serializer):
-    shipmentId = serializers.CharField()
-    rateId = serializers.CharField()
-
-
 class CheckoutRequestSerializer(serializers.Serializer):
     items = CheckoutItemSerializer(many=True)
     customer = CheckoutCustomerSerializer(help_text="Shipping address and contact.")
     vehicle = serializers.DictField(
         required=False, help_text="Optional. With a `vin`, the cart must pass the fitment check."
-    )
-    shipping = CheckoutShippingSelectionSerializer(
-        help_text="A rate returned by `POST /api/shipping/rates/`."
     )
 
 

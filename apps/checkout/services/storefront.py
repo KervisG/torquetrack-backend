@@ -17,6 +17,7 @@ from apps.catalog.services.pricing import (
     serialize_totals,
 )
 from apps.checkout.models import Order, OrderPaymentStatus, OrderStatus
+from apps.checkout.services.admin import FREE_SHIPPING_METHOD, SHIPPING_METHOD_LABELS
 from apps.checkout.services.payments import cancel_unpaid_order, start_payment
 from apps.common.contact import is_plausible_phone, is_valid_email
 from apps.common.errors import error_payload
@@ -116,8 +117,8 @@ def _clean_contact(customer: dict) -> tuple[str, str] | None:
 
 def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, int]:
     """Nunca confía en montos del cliente: reprecia desde la base, vuelve a
-    chequear el fitment, cobra solo la tarifa de envío que el servidor cotizó
-    para ese ZIP y omite el impuesto únicamente con un perfil VERIFIED
+    chequear el fitment, no cobra envío (Regular Ground gratis; el `shipping`
+    del body se ignora) y omite el impuesto únicamente con un perfil VERIFIED
     vinculado a la sesión.
 
     El pedido se crea antes del pago porque el cobro necesita su id y su
@@ -130,7 +131,6 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
     carrito de otro.
     """
     from apps.fitment.services import applications_by_product, check_product_fitment
-    from apps.shipping.services import verify_shipping_selection
     from apps.tax.services import calculate_sales_tax, is_tax_exempt
 
     raw_items = body.get("items")
@@ -209,17 +209,14 @@ def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, in
         return error_payload(zip_error, "zip"), 400
     customer["zip"] = zip_code
 
-    selection = body.get("shipping")
-    if not (
-        isinstance(selection, dict) and selection.get("shipmentId") and selection.get("rateId")
-    ):
-        return error_payload("Select a shipping method before payment.", "shipping"), 400
-    shipping_rate = verify_shipping_selection(selection, customer.get("zip"), items=raw_items)
-    if shipping_rate is None:
-        return error_payload(
-            "Shipping rate could not be verified. Get shipping rates again.", "shipping"
-        ), 409
-    shipping = shipping_rate["rate"]
+    # El envío de la tienda es gratis: se guarda el mismo método que el panel
+    # usa para Regular Ground.
+    shipping = 0
+    shipping_rate = {
+        "method": FREE_SHIPPING_METHOD,
+        "service": SHIPPING_METHOD_LABELS[FREE_SHIPPING_METHOD],
+        "rate": shipping,
+    }
 
     # La exención sale solo del perfil de la sesión: un email tipeado por un
     # invitado no prueba que el comprador sea ese cliente exento.

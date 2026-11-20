@@ -28,7 +28,6 @@ EXPECTED_APPS = {
     "apps.quotes",
     "apps.audit",
     "apps.dashboard",
-    "apps.shipping",
     "apps.tax",
     "apps.vin",
     "apps.integrations",

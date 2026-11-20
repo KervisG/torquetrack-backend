@@ -7,8 +7,8 @@ redondear (3 × 19.995 = 59.99) mientras el storefront y Stripe cobraban
 3 × 20.00, y el webhook marcaba el pago como `PAYMENT_AMOUNT_MISMATCH`. Ahora
 todos pasan por `price_lines`/`build_totals` de `apps.catalog.services`.
 
-Mocking: Stripe en el adaptador (`create_checkout_session`), EasyPost con
-`quote_shipping` de `tests/fakes.py`; TaxJar sin key (tabla de respaldo).
+Mocking: Stripe en el adaptador (`create_checkout_session`), envío gratis;
+TaxJar sin key (tabla de respaldo).
 """
 
 import pytest
@@ -20,7 +20,6 @@ from apps.checkout.services.payments import create_payment_form
 from apps.common.numbers import to_cents
 from apps.quotes.models import Quote
 from tests.factories import CHECKOUT_CONTACT, create_staff_user, session_client
-from tests.fakes import quote_shipping
 
 CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
 PRODUCT_ID = "gm-65-glow-plug"
@@ -72,9 +71,7 @@ def _charged_cents(payment) -> int:
 
 
 def _checkout(monkeypatch, settings, qty):
-    selection = quote_shipping(
-        monkeypatch, settings, zip_code="33701", items=[{"id": PRODUCT_ID, "qty": qty}]
-    )
+    selection = None
     return APIClient().post(
         "/api/checkout/",
         {

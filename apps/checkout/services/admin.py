@@ -111,9 +111,10 @@ def _serialize_payment(payment: Payment, can_view_transaction_ids: bool) -> dict
 ORDER_DATE_FILTERS = ("today",)
 INVALID_ORDER_DATE_FILTER = "date must be today"
 
-# El checkout de la tienda guarda transportista y servicio de EasyPost. Un
-# pedido convertido desde una cotización solo trae el monto (`shipping` como
-# número) y en el panel el método sale vacío. Estas tres opciones las elige
+# El checkout de la tienda guarda Regular Ground gratis; un pedido antiguo
+# trae transportista y servicio de EasyPost. Uno convertido desde una
+# cotización solo trae el monto (`shipping` como número) y en el panel el
+# método sale vacío. Estas tres opciones las elige
 # el staff; Regular Ground no se cobra.
 SHIPPING_METHOD_LABELS = {
     "NEXT_DAY_AIR": "Next Day Air",

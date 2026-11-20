@@ -12,7 +12,6 @@ from apps.checkout.services.payments import create_payment_form
 from apps.customers.models import Customer
 from apps.integrations.exceptions import ProviderError
 from tests.factories import CHECKOUT_CONTACT, create_customer, guest_cart_client
-from tests.fakes import quote_shipping
 
 # El checkout no llama a la pasarela: el token se pide al abrir el link de
 # pago. Se parchea igual para probar que nunca se llama durante el checkout.
@@ -32,7 +31,6 @@ PRODUCT_DATA = {
     "engineFamily": "6.5",
 }
 VEHICLE = {"make": "Chevrolet", "year": 1996, "engine": "6.5"}
-SHIPPING_RATE = 12.5
 
 
 def _insert_product(product_id=PRODUCT_ID, data=None, active=True):
@@ -60,14 +58,9 @@ def _gateway_credentials(settings):
 
 
 @pytest.fixture
-def shipping(monkeypatch, settings):
-    return quote_shipping(
-        monkeypatch,
-        settings,
-        zip_code="33701",
-        rate=SHIPPING_RATE,
-        items=[{"id": PRODUCT_ID, "qty": 1}],
-    )
+def shipping():
+    # El envío es gratis: el checkout ignora cualquier `shipping` del body.
+    return None
 
 
 def _body(shipping, **overrides):
@@ -166,7 +159,7 @@ def test_returns_409_when_a_catalog_price_is_not_positive(price, monkeypatch, sh
 def test_reprices_from_db_ignoring_client_submitted_price(monkeypatch, settings):
     _insert_product()
     items = [{"id": PRODUCT_ID, "qty": 2, "price": 0.01}]
-    shipping = quote_shipping(monkeypatch, settings, zip_code="33701", items=items)
+    shipping = None
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = _post(_body(shipping, items=items))
@@ -186,7 +179,7 @@ def test_charges_the_current_price_even_when_the_cart_announced_an_older_one(mon
         {"items": [{"id": PRODUCT_ID, "qty": 1, "priceAtAdd": 150.0}], "stage": "CART"},
     )
     items = [{"id": PRODUCT_ID, "qty": 1, "priceAtAdd": 150.0, "previousPrice": 150.0}]
-    shipping = quote_shipping(monkeypatch, settings, zip_code="33701", items=items)
+    shipping = None
     sessions = []
     monkeypatch.setattr(
         CREATE_SESSION, lambda **kwargs: sessions.append(kwargs) or _fake_session()
@@ -258,7 +251,10 @@ def test_stores_the_submitted_vin_normalized(monkeypatch, shipping):
 
 
 @pytest.mark.django_db
-def test_charges_the_server_quoted_shipping_ignoring_the_client_amount(monkeypatch, shipping):
+@pytest.mark.parametrize(
+    "shipping_body", [None, {"rate": 25}, {"shipmentId": "shp", "rateId": "r"}]
+)
+def test_ships_free_ignoring_any_client_shipping(shipping_body, monkeypatch):
     _insert_product()
     captured = {}
 
@@ -268,86 +264,24 @@ def test_charges_the_server_quoted_shipping_ignoring_the_client_amount(monkeypat
 
     monkeypatch.setattr(CREATE_SESSION, _create)
 
-    response = _post(_body({**shipping, "rate": 0.01}))
+    response = _post(_body(shipping_body))
 
     assert response.status_code == 200
     order = Order.objects.get(pk=response.json()["orderId"])
-    assert order.data["totals"]["shipping"] == SHIPPING_RATE
-    assert order.data["shipping"]["rate"] == SHIPPING_RATE
-    # El form de pago se arma al abrir el link: ahí viaja el envío cotizado.
-    create_payment_form(Payment.objects.get(order=order))
-    assert captured["shipping"] == Decimal("12.50")
-
-
-@pytest.mark.django_db
-@pytest.mark.parametrize("shipping_body", [None, {"rate": 0}, 25, {"shipmentId": "shp_checkout"}])
-def test_returns_400_without_a_shipping_selection(shipping_body, monkeypatch):
-    _insert_product()
-    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
-
-    response = _post(_body(shipping_body))
-
-    assert response.status_code == 400
-    assert response.json() == {
-        "error": "Select a shipping method before payment.",
-        "field": "shipping",
+    assert order.data["totals"]["shipping"] == 0
+    assert order.data["shipping"] == {
+        "method": "GROUND",
+        "service": "Regular Ground (Free)",
+        "rate": 0,
     }
-    assert not Order.objects.exists()
-
-
-@pytest.mark.django_db
-@pytest.mark.parametrize(
-    "selection, state, zip_code",
-    [
-        ({"shipmentId": "shp_checkout", "rateId": "rate_forged"}, "FL", "33701"),
-        ({"shipmentId": "shp_other", "rateId": "rate_ground"}, "FL", "33701"),
-        ({"shipmentId": "shp_checkout", "rateId": "rate_ground"}, "CA", "90210"),
-    ],
-)
-def test_returns_409_when_the_shipping_rate_cannot_be_verified(
-    selection, state, zip_code, monkeypatch, shipping
-):
-    _insert_product()
-    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
-
-    response = _post(_body(selection, customer={"state": state, "zip": zip_code}))
-
-    assert response.status_code == 409
-    assert response.json()["error"] == (
-        "Shipping rate could not be verified. Get shipping rates again."
-    )
-    assert not Order.objects.exists()
-
-
-@pytest.mark.django_db
-@pytest.mark.parametrize(
-    "items",
-    [
-        [{"id": PRODUCT_ID, "qty": 3}],
-        [{"id": PRODUCT_ID, "qty": 1}, {"id": "heavy-block", "qty": 1}],
-    ],
-)
-def test_returns_409_when_the_rate_was_quoted_for_other_items(items, monkeypatch, shipping):
-    # La tarifa se cotizó para una sola unidad: no paga un carrito más pesado.
-    _insert_product()
-    _insert_product(product_id="heavy-block", data={**PRODUCT_DATA, "id": "heavy-block"})
-    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
-
-    response = _post(_body(shipping, items=items))
-
-    assert response.status_code == 409
-    assert response.json()["error"] == (
-        "Shipping rate could not be verified. Get shipping rates again."
-    )
-    assert not Order.objects.exists()
+    create_payment_form(Payment.objects.get(order=order))
+    assert captured["shipping"] == Decimal("0")
 
 
 @pytest.mark.django_db
 def test_accepts_the_quoted_items_split_in_several_lines(monkeypatch, settings):
     _insert_product()
-    shipping = quote_shipping(
-        monkeypatch, settings, zip_code="33701", items=[{"id": PRODUCT_ID, "qty": 2}]
-    )
+    shipping = None
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = _post(
@@ -517,23 +451,19 @@ def test_returns_400_when_the_zip_prefix_is_not_a_us_zip_we_ship_to(
 @pytest.mark.django_db
 def test_accepts_a_florida_zip_plus_four_with_florida(monkeypatch, settings):
     _insert_product()
-    selection = quote_shipping(
-        monkeypatch, settings, zip_code="33701-1234", items=[{"id": PRODUCT_ID, "qty": 1}]
-    )
+    selection = None
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = _post(_body(selection, customer={"state": "FL", "zip": "33701-1234"}))
 
     assert response.status_code == 200
-    assert response.json()["tax"] == 15.15
+    assert response.json()["tax"] == 14.4
 
 
 @pytest.mark.django_db
 def test_puerto_rico_zip_with_puerto_rico_is_accepted(monkeypatch, settings):
     _insert_product()
-    selection = quote_shipping(
-        monkeypatch, settings, zip_code="00901", items=[{"id": PRODUCT_ID, "qty": 1}]
-    )
+    selection = None
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = _post(_body(selection, customer={"state": "PR", "zip": "00901"}))
@@ -550,9 +480,9 @@ def test_the_shipping_state_is_normalized_before_tax_and_the_order(monkeypatch, 
     response = _post(_body(shipping, customer={"state": " fl ", "zip": " 33701 "}))
 
     assert response.status_code == 200
-    # 6 % de respaldo sobre 189.99 + 50 + 12.50: el estado en minúscula sigue
-    # siendo Florida.
-    assert response.json()["tax"] == 15.15
+    # 6 % de respaldo sobre 189.99 + 50: el estado en minúscula sigue siendo
+    # Florida.
+    assert response.json()["tax"] == 14.4
     order = Order.objects.get(pk=response.json()["orderId"])
     assert order.data["customer"]["state"] == "FL"
     assert order.data["customer"]["zip"] == "33701"
@@ -561,9 +491,7 @@ def test_the_shipping_state_is_normalized_before_tax_and_the_order(monkeypatch, 
 @pytest.mark.django_db
 def test_district_of_columbia_is_a_valid_shipping_state(monkeypatch, settings):
     _insert_product()
-    selection = quote_shipping(
-        monkeypatch, settings, zip_code="20001", items=[{"id": PRODUCT_ID, "qty": 1}]
-    )
+    selection = None
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
     response = _post(_body(selection, customer={"state": "DC", "zip": "20001"}))
@@ -604,7 +532,7 @@ def test_guest_never_inherits_the_exemption_of_a_verified_guest_profile(monkeypa
     assert response.status_code == 200
     body = response.json()
     # FL fallback 0.06 sobre partes + core + envío.
-    assert body["tax"] == round((239.99 + SHIPPING_RATE) * 0.06, 2)
+    assert body["tax"] == round(239.99 * 0.06, 2)
     order = Order.objects.get(pk=body["orderId"])
     assert order.data["taxSource"] != "Tax exempt"
     assert order.data["customer"]["name"] == "Mallory"
@@ -623,17 +551,14 @@ def test_non_verified_customer_gets_fallback_table_tax(monkeypatch, shipping):
     )
 
     assert response.status_code == 200
-    assert response.json()["tax"] == round((239.99 + SHIPPING_RATE) * 0.06, 2)
+    assert response.json()["tax"] == round(239.99 * 0.06, 2)
 
 
 @pytest.mark.django_db
 @pytest.mark.parametrize("state, zip_code", [("GA", "30301"), ("CA", "90001")])
 def test_checkout_outside_florida_charges_no_tax(state, zip_code, monkeypatch, settings):
     _insert_product()
-    selection = quote_shipping(
-        monkeypatch, settings, zip_code=zip_code, rate=SHIPPING_RATE,
-        items=[{"id": PRODUCT_ID, "qty": 1}],
-    )
+    selection = None
     settings.TAXJAR_API_KEY = "tj_test_fake"
 
     def _boom(**kwargs):

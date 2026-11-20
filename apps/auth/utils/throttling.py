@@ -4,7 +4,7 @@ Un pedido de reset sin tope convierte el formulario en un cañón de correos
 contra la casilla de un tercero.
 
 Las rutas públicas del storefront que cuestan (token de la pasarela, correos,
-WeasyPrint, EasyPost, TaxJar, NHTSA) también tienen tope por IP: sin él,
+WeasyPrint, TaxJar, NHTSA) también tienen tope por IP: sin él,
 cualquiera las usa para gastar la cuota paga de un proveedor o saturar los
 workers. Viven acá y no en cada app porque este módulo es la infraestructura
 de request que todas las views ya importan sin crear una dependencia de
@@ -146,10 +146,6 @@ class QuoteRequestRateThrottle(_IpRateThrottle):
 class QuotePdfRateThrottle(_IpRateThrottle):
     # WeasyPrint ocupa un worker varios segundos por PDF.
     scope = "quote_pdf"
-
-
-class ShippingRatesRateThrottle(_IpRateThrottle):
-    scope = "shipping_rates"
 
 
 class TaxEstimateRateThrottle(_IpRateThrottle):

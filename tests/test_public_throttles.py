@@ -1,7 +1,7 @@
 """Rate limit de las rutas públicas que cuestan: checkout y pago de una
 cotización (pago pendiente y pedido), solicitud de cotización (fila y dos
-correos), PDF de la cotización (WeasyPrint), tarifas de envío (EasyPost),
-impuesto (TaxJar), decodificación de VIN (NHTSA) y fitment.
+correos), PDF de la cotización (WeasyPrint), impuesto (TaxJar), decodificación
+de VIN (NHTSA) y fitment.
 
 Cada ruta responde 429 con `{"error": ...}` y `Retry-After` al pasar su tope,
 por IP del cliente. El webhook de Authorize.net NO tiene throttle: la pasarela reintenta y
@@ -42,7 +42,6 @@ def _no_providers(monkeypatch):
     forbid_resend(monkeypatch)
     for target in (
         "apps.integrations.payments.authorize_net.create_hosted_payment_token",
-        "apps.integrations.shipping.easypost.get_rates",
         "apps.integrations.tax.taxjar.calculate_tax",
         "apps.integrations.vehicles.nhtsa.decode_vin",
         "apps.quotes.views.pdf.render_quote_pdf_bytes",
@@ -56,7 +55,6 @@ THROTTLED_ROUTES = [
     ("post", "/api/quote/request/", {}, "QuoteRequestRateThrottle"),
     ("post", "/api/quote/public/missing-token/checkout/", {}, "QuoteCheckoutRateThrottle"),
     ("get", "/api/quote/public/missing-token/pdf/", None, "QuotePdfRateThrottle"),
-    ("post", "/api/shipping/rates/", {}, "ShippingRatesRateThrottle"),
     ("post", "/api/tax/estimate/", {}, "TaxEstimateRateThrottle"),
     ("get", "/api/vin/decode/", None, "VinDecodeRateThrottle"),
     ("post", "/api/fitment/check/", {}, "FitmentCheckRateThrottle"),

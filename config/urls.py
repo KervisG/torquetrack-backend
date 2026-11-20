@@ -14,7 +14,6 @@ api_urlpatterns = [
     path("", include("apps.cart.urls")),
     path("", include("apps.checkout.urls")),
     path("", include("apps.quotes.urls")),
-    path("", include("apps.shipping.urls")),
     path("", include("apps.tax.urls")),
     path("", include("apps.audit.urls")),
     path("", include("apps.dashboard.urls")),

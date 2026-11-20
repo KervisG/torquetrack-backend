@@ -3,8 +3,8 @@ válida del ZIP. La usan el checkout, la estimación de impuestos, la dirección
 de una cotización y el perfil del cliente; el SPA tiene su espejo en
 `src/lib/us-states.ts`.
 
-Entran los 50 estados, DC y los cinco territorios habitados (EasyPost cotiza
-con USPS los códigos postales de todos ellos). Quedan fuera los militares
+Entran los 50 estados, DC y los cinco territorios habitados (USPS entrega
+en todos ellos). Quedan fuera los militares
 (`AA`, `AE`, `AP`) y los estados libremente asociados (`FM`, `MH`, `PW`):
 UPS y FedEx no entregan allí. Solo se aceptan códigos: un nombre como
 "Florida" se rechaza en lugar de mapearse, así hay una sola forma canónica.

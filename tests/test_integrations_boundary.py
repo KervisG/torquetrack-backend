@@ -7,7 +7,7 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 INTEGRATIONS_DIR = BACKEND_DIR / "apps" / "integrations"
 SKIPPED_DIRS = {".venv", "__pycache__", "node_modules"}
 
-PROVIDER_PACKAGES = {"requests", "easypost", "resend", "taxjar"}
+PROVIDER_PACKAGES = {"requests", "resend", "taxjar"}
 TAX_CALCULATION_NAMES = {"calculate_sales_tax", "FALLBACK_TAX_RATES"}
 # `services/__init__.py` reexporta el cálculo desde su módulo, así que también
 # cuentan los submódulos del paquete.

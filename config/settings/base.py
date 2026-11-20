@@ -35,7 +35,6 @@ INSTALLED_APPS = [
     "apps.quotes",
     "apps.audit",
     "apps.dashboard",
-    "apps.shipping",
     "apps.tax",
     "apps.vin",
     "apps.integrations",
@@ -228,7 +227,6 @@ REST_FRAMEWORK = {
         "payment_page": "30/hour",
         "quote_request": "10/hour",
         "quote_pdf": "20/hour",
-        "shipping_rates": "30/min",
         "tax_estimate": "30/min",
         "vin_decode": "20/min",
         "fitment_check": "30/min",
@@ -277,11 +275,10 @@ TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 # fiscal del negocio, no de despliegue: por eso no sale del entorno. Fuera de
 # estos estados no se cobra impuesto ni se consulta TaxJar.
 SALES_TAX_NEXUS_STATES = ("FL",)
-# Origen de los envíos (EasyPost) y del impuesto (TaxJar). Un valor vacío
+# Origen del impuesto (TaxJar). Un valor vacío
 # cuenta como no definido, igual que `CACHE_URL`.
 SHIP_FROM_ZIP = env("SHIP_FROM_ZIP", default="") or "34241"
 APP_URL = env("APP_URL", default="http://localhost:5173")
-EASYPOST_API_KEY = env("EASYPOST_API_KEY", default="")
 # Fotos de producto en DigitalOcean Spaces. Sin las cuatro, subir una foto
 # responde 503 y el resto de la tienda funciona igual.
 SPACES_BUCKET = env("SPACES_BUCKET", default="")

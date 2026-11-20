@@ -41,7 +41,7 @@ Reglas:
 Excepciones documentadas:
 
 - `apps/common/` no es una app de Django (sin `apps.py`, modelos, views, urls ni migraciones): es un paquete de helpers sin estado y conserva sus módulos planos (`emails.py`, `ids.py`, `links.py`, `numbers.py`, `tokens.py`).
-- `apps/integrations/exceptions.py` queda en la raíz porque es el contrato compartido de todos los adaptadores; los adaptadores viven en carpetas por capacidad (`email/`, `payments/`, `shipping/`, `tax/`, `vehicles/`).
+- `apps/integrations/exceptions.py` queda en la raíz porque es el contrato compartido de todos los adaptadores; los adaptadores viven en carpetas por capacidad (`email/`, `payments/`, `tax/`, `vehicles/`).
 
 Ejemplo de una app con tres superficies (storefront, panel y webhook de Authorize.net):
 
@@ -150,12 +150,11 @@ apps/auth/             # quién puede qué; solo la consume el panel
 | `integrations` | `exceptions.py` (excepción documentada) | un paquete por capacidad con un módulo por proveedor |
 | `numbering` | — (sin endpoints ni `urls.py`) | `models/document_sequence.py`, `services/document_numbers.py` |
 | `quotes` | `tasks.py` (`expire_quotes`, cada hora) | `models/quote.py`; `services/lifecycle.py`, `services/rendering.py`, `services/storefront.py`, `services/admin.py`, `services/pdf.py`, `services/tax.py` (impuesto que calcula el servidor al guardar desde el panel, dirección de envío y override); `views/storefront.py`, `views/admin.py`, `views/pdf.py`; `templates/quotes/`; `management/commands/expire_quotes.py` |
-| `shipping` | `views.py` (storefront) | `services/rates.py` |
 | `tax` | `views.py` (storefront) | `services/sales_tax.py` |
 | `vin` | `views.py` (storefront) | `services/decoding.py` |
 | `health` | `views.py` (plataforma: `GET /api/health/`) | `services/database.py` (`database_is_available`), `docs/` |
 
-Apps sin tabla y por lo tanto sin `models/` ni `migrations/`: `fitment`, `shipping`, `tax`, `vin`, `dashboard`, `integrations`, `health`.
+Apps sin tabla y por lo tanto sin `models/` ni `migrations/`: `fitment`, `tax`, `vin`, `dashboard`, `integrations`, `health`.
 
 ### Cómo se parte `services/`
 
@@ -279,7 +278,6 @@ Un módulo por proveedor, agrupado por capacidad:
 |---|---|---|
 | `email/resend.py` | `is_configured()`, `send_email(to, subject, html, attachments=None, reply_to=None)` | `auth`, `checkout`, `quotes` |
 | `payments/authorize_net.py` | `is_configured()`, `create_hosted_payment_token(...)`, `get_transaction(id)`, `void_transaction(id)`, `refund_transaction(...)`, `verify_webhook(payload, signature)` | `checkout`, `quotes` |
-| `shipping/easypost.py` | `is_configured()`, `get_rates(to_address, from_address, parcel)` | `shipping` |
 | `tax/taxjar.py` | `is_configured()`, `calculate_tax(from_zip, to_state, to_zip, to_city, to_street, amount, shipping)` | `tax` |
 | `vehicles/nhtsa.py` | `decode_vin(vin)` | `vin` |
 
@@ -289,7 +287,7 @@ Contrato de un adaptador:
 - Mapea la respuesta a dicts planos (sin objetos del SDK) y envuelve los errores de red, HTTP y JSON en `ProviderError` (`ProviderUnavailable` para un estado HTTP de error cuando el dominio lo distingue).
 - No importa modelos ni apps de dominio y no decide reglas de negocio.
 
-El dominio traduce: `apps/tax/services/sales_tax.py` cae a `FALLBACK_TAX_RATES` ante cualquier `ProviderError`; `apps/shipping/services/rates.py` registra el mensaje de EasyPost en el log y responde 502 con un mensaje genérico; `apps/vin/services/decoding.py` elige el mensaje de error; `apps/checkout/services/payments.py` arma líneas, dirección y URLs del form de Accept Hosted. Igual que en shipping, el texto de la pasarela va al log: el checkout del storefront y el de cotizaciones responden 502 con `PAYMENT_START_FAILED` ("Payment could not be started. Please try again.") y el link de pago, el cobro y el reembolso del panel con `PAYMENT_REQUEST_FAILED` ("Payment provider request failed; see server logs.", definido en `apps/checkout/services/payments.py`). Un proveedor nuevo es un módulo nuevo aquí, sus tests en `apps/integrations/tests/` y su paquete en `PROVIDER_PACKAGES` de `tests/test_integrations_boundary.py`.
+El dominio traduce: `apps/tax/services/sales_tax.py` cae a `FALLBACK_TAX_RATES` ante cualquier `ProviderError`; `apps/vin/services/decoding.py` elige el mensaje de error; `apps/checkout/services/payments.py` arma líneas, dirección y URLs del form de Accept Hosted. El texto de la pasarela va al log: el checkout del storefront y el de cotizaciones responden 502 con `PAYMENT_START_FAILED` ("Payment could not be started. Please try again.") y el link de pago, el cobro y el reembolso del panel con `PAYMENT_REQUEST_FAILED` ("Payment provider request failed; see server logs.", definido en `apps/checkout/services/payments.py`). Un proveedor nuevo es un módulo nuevo aquí, sus tests en `apps/integrations/tests/` y su paquete en `PROVIDER_PACKAGES` de `tests/test_integrations_boundary.py`.
 
 ## Migraciones
 
@@ -312,11 +310,11 @@ Asignar `data` reparte los valores; `save(update_fields=[..., "data"])` funciona
 Preferir la tupla `(data, status)`, que deja la view mecánica:
 
 ```python
-# apps/shipping/services/rates.py
-def get_shipping_rates(payload: dict) -> tuple[dict, int]:
-    if not parcel:
-        return {"error": "Parcel information required"}, 400
-    return {"configured": True, ...}, 200
+# apps/checkout/services/storefront.py
+def create_storefront_checkout(user, body: dict, cart_id=None) -> tuple[dict, int]:
+    if not isinstance(raw_items, list) or not raw_items:
+        return {"error": "Cart is empty"}, 400
+    ...
 ```
 
 `apps/auth/services/` (`users.py` y `roles.py`) usa una forma más vieja que devuelve `{"error": ..., "status": ...}` dentro del dict del resultado. No tocarla, pero no propagarla a código nuevo.

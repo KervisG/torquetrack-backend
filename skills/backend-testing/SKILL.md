@@ -44,7 +44,7 @@ Correr desde la raíz del repo: `python -m pytest apps/<app>` para una app, `pyt
 |---|---|
 | Un proveedor desde un test de dominio | `monkeypatch.setattr` sobre la función del adaptador (`apps.integrations.<capacidad>.<proveedor>.<función>`) devolviendo el dict plano, o lanzando `ProviderError` |
 | Correo de Resend desde un test de dominio | `install_resend` / `forbid_resend` de `tests/fakes.py` |
-| El HTTP de un adaptador REST (TaxJar, EasyPost, Resend) | `monkeypatch` sobre `apps.integrations.<capacidad>.<proveedor>.requests.post` en `apps/integrations/tests/` |
+| El HTTP de un adaptador REST (TaxJar, Resend) | `monkeypatch` sobre `apps.integrations.<capacidad>.<proveedor>.requests.post` en `apps/integrations/tests/` |
 | El HTTP de NHTSA en su adaptador | la librería `responses` (`@responses.activate`) |
 | Firma del webhook de Authorize.net | HMAC-SHA512 real del body con la Signature Key en el header `X-ANET-Signature: sha512=<HEX>` |
 | El HTTP del adaptador de Authorize.net | `monkeypatch` sobre `apps.integrations.payments.authorize_net.requests.post` con `FakeResponse(..., bom=True)` |

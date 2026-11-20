@@ -19,13 +19,14 @@ Rama: `feat/authorize-net` en `torquetrack-backend` y `torquetrack-frontend`. En
 
 | ID | Specs | Ruta | Estado | Commit |
 |----|-------|------|--------|--------|
-| T1 | S2,S4,S6 | inline | pendiente | |
-| T2 | S1,S3,S5 | inline | pendiente | |
-| T3 | S6,S9 | inline | pendiente | |
-| T4 | S7 | inline | pendiente | |
-| T5 | S8 | inline | pendiente | |
-| T6 | S2 | inline | pendiente | |
-| T7 | S2 (frontend) | inline | pendiente | |
+| T1 | S2,S4,S6 | inline | hecho | backend e609648 |
+| T2 | S1,S3,S5 | inline | hecho | backend e609648 |
+| T3 | S6,S9 | inline | hecho | backend e609648 |
+| T4 | S7 | inline | hecho | backend e609648 |
+| T5 | S8 | inline | hecho | backend e609648 |
+| T6 | S2 | inline | hecho | backend e609648 |
+| T7 | S2 (frontend) | inline | hecho | frontend 15a42e4 |
+| T8 | S1,S6 | manual | pendiente | prueba real en sandbox |
 
 - T1: adaptador `apps/integrations/payments/authorize_net.py` + settings + tests; borrar adaptador y SDK de Stripe.
 - T2: `start_payment` + puente `GET /api/payments/<id>/pay/` + llamadores (storefront, cotización, panel).
@@ -42,3 +43,6 @@ Ruta: todo inline (preferencia del usuario: sin subagentes; ningún disparador d
 - L1 (2026-11-20): "quiero agregar la pasarela de pago ycambira a Authorize.net ya tengo mi key generada"
 - L2 (2026-11-20): "se elimina el stripe completo elimina el stripe completo"; integración "Accept Hosted (Recommended)"; credenciales "Sandbox".
 - L3: espejo Engram pendiente (proyecto ambiguo entre backend y frontend).
+- L4 (2026-11-20): "tantos text no son necesarios recuerdas que ahora trabajmos con odd" — se borraron los tests de Stripe y quedó un test por regla (`test_authorize_net_flow.py`, `test_admin_refunds_views.py`).
+- L5: verificación — backend 1724 passed, ruff limpio, `makemigrations --check` sin cambios; frontend 188 passed, tsc limpio.
+- L6: siguiente paso: T8, cargar las credenciales en `.env`, registrar el webhook en el Merchant Interface y pagar una orden de prueba en sandbox.

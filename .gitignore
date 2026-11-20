@@ -23,3 +23,6 @@ db.sqlite3
 .DS_Store
 .idea/
 .vscode/
+
+# uv lo genera solo; las dependencias viven en requirements/
+uv.lock

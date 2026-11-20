@@ -4,9 +4,9 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.models import User
-from apps.authentication.services import csrf_token_payload, serialize_session_user
-from apps.authentication.utils.throttling import (
+from apps.auth.models import User
+from apps.auth.services import csrf_token_payload, serialize_session_user
+from apps.auth.utils.throttling import (
     ActivateRateThrottle,
     RegisterRateThrottle,
     VerifyEmailRateThrottle,

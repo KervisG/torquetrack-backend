@@ -5,11 +5,6 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import (
-    HasRolePermission,
-    has_role_permission,
-    is_staff_user,
-)
 from apps.customers.services import (
     create_portal_invite,
     delete_admin_customer,
@@ -17,6 +12,11 @@ from apps.customers.services import (
     list_admin_customers,
     update_customer_tax_status,
     upsert_admin_customer,
+)
+from apps.roles.permissions import (
+    HasRolePermission,
+    has_role_permission,
+    is_staff_user,
 )
 from config.responses import service_response
 

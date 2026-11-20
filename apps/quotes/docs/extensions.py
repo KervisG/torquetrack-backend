@@ -8,7 +8,6 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
-from apps.authorization.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 from apps.quotes.docs.schemas import (
     CheckoutLinkSerializer,
     QuoteRequestSerializer,
@@ -17,6 +16,7 @@ from apps.quotes.docs.schemas import (
     QuoteWriteSerializer,
     VinRequestSerializer,
 )
+from apps.roles.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 
 ERR = OpenApiResponse(ErrorResponseSerializer)
 QUOTE_ID = OpenApiParameter("quote_id", str, OpenApiParameter.PATH)

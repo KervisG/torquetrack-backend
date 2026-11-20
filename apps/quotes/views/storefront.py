@@ -5,7 +5,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.utils.throttling import (
+from apps.auth.utils.throttling import (
     QuoteCheckoutRateThrottle,
     QuoteRequestRateThrottle,
 )

@@ -14,7 +14,7 @@ el salto `UNFULFILLED -> SHIPPED` permitido y corregir la guía estando
 import pytest
 from django.utils import timezone
 
-from apps.authentication.utils.background import run_in_background as real_run_in_background
+from apps.auth.utils.background import run_in_background as real_run_in_background
 from apps.checkout.models import Order
 from apps.common.emails import email_logo_url
 from tests.factories import activity_count, create_customer, create_staff_user, session_client

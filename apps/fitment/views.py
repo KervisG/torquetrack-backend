@@ -2,7 +2,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.utils.throttling import FitmentCheckRateThrottle
+from apps.auth.utils.throttling import FitmentCheckRateThrottle
 from apps.fitment.services import check_cart_fitment
 from config.responses import service_response
 

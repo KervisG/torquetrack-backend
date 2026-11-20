@@ -6,8 +6,8 @@ from django.core.cache import cache
 from django.utils import timezone
 from rest_framework.test import APIClient
 
-from apps.authentication.models import AccountToken, User
-from apps.authentication.utils.throttling import ActivateRateThrottle
+from apps.auth.models import AccountToken, User
+from apps.auth.utils.throttling import ActivateRateThrottle
 from apps.common.tokens import hash_token
 from apps.customers.models import Customer
 from tests.factories import create_customer, create_user

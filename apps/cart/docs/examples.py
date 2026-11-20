@@ -6,7 +6,7 @@ que cambiarlo aquí.
 """
 from drf_spectacular.utils import OpenApiExample
 
-from apps.authorization.docs.examples import error_example
+from apps.roles.docs.examples import error_example
 
 CART_REQUEST = OpenApiExample(
     "One line",

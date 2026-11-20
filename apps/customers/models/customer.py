@@ -1,4 +1,4 @@
-"""Perfil comercial; las credenciales viven solo en `apps.authentication.User` y un
+"""Perfil comercial; las credenciales viven solo en `apps.auth.User` y un
 cliente invitado no tiene cuenta."""
 from django.db import models
 from django.db.models import Q
@@ -31,7 +31,7 @@ PROFILE_COLUMNS = ("name", "company", "phone", "address1", "address2", "city", "
 class Customer(models.Model):
     id = models.TextField(primary_key=True)
     user = models.OneToOneField(
-        "authentication.User",
+        "accounts.User",
         null=True,
         blank=True,
         on_delete=models.SET_NULL,

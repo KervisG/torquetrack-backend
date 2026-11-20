@@ -21,7 +21,7 @@ from rest_framework.response import Response
 from rest_framework.test import APIClient, APIRequestFactory
 from rest_framework.views import APIView
 
-from apps.authentication.utils.throttling import LoginRateThrottle
+from apps.auth.utils.throttling import LoginRateThrottle
 from tests.factories import create_user, session_client
 from tests.fakes import forbid_resend
 

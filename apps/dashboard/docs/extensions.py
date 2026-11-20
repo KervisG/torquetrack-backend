@@ -2,9 +2,9 @@
 from drf_spectacular.extensions import OpenApiViewExtension
 from drf_spectacular.utils import OpenApiExample, OpenApiParameter, OpenApiResponse, extend_schema
 
-from apps.authorization.docs.schemas import ErrorResponseSerializer
 from apps.dashboard.docs.schemas import DashboardAnalyticsSerializer, DashboardSerializer
 from apps.dashboard.services import ANALYTICS_RANGES, DEFAULT_ANALYTICS_RANGE, INVALID_RANGE
+from apps.roles.docs.schemas import ErrorResponseSerializer
 
 
 class AdminDashboardViewExtension(OpenApiViewExtension):

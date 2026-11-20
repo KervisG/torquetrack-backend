@@ -81,8 +81,16 @@ python manage.py grant_role --email tu@correo.com --role admin
 
 ## Recrear la base de desarrollo
 
-Si `migrate` falla con `InconsistentMigrationHistory` (base anterior a la
-separación de `accounts`), borra la base y repite los pasos de arriba:
+Una base creada con las apps viejas `authentication` y `authorization`
+necesita pasar su historial a `accounts` y `roles` antes de
+`migrate`; la imagen de producción ya lo hace en cada arranque:
+
+```bash
+python manage.py rename_auth_history && python manage.py migrate
+```
+
+Si `migrate` igual falla con `InconsistentMigrationHistory`, borra la base y
+repite los pasos de arriba:
 
 ```bash
 docker compose down -v && docker compose up --build -d

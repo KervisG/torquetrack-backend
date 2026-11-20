@@ -3,10 +3,10 @@ subclase con `@extend_schema` solo al generar el esquema."""
 from drf_spectacular.extensions import OpenApiViewExtension
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
-from apps.authorization.docs import examples as shared_ex
-from apps.authorization.docs.schemas import ErrorResponseSerializer
 from apps.cart.docs import examples as ex
 from apps.cart.docs.schemas import AdminCartSerializer, CartRequestSerializer, CartSerializer
+from apps.roles.docs import examples as shared_ex
+from apps.roles.docs.schemas import ErrorResponseSerializer
 
 CART_TAG = "cart"
 

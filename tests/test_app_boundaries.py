@@ -12,14 +12,13 @@ BACKEND_DIR = Path(__file__).resolve().parent.parent
 APPS_DIR = BACKEND_DIR / "apps"
 SKIPPED_DIRS = {"tests", "migrations", "__pycache__"}
 
-# La permission class de `apps.authorization` y los throttles de
-# `apps.authentication`: todas las views los usan para cablearse, como usarían
-# DRF. No cuentan como dependencia de dominio;
+# La permission class de `apps.roles` y los throttles de `apps.auth`: todas
+# las views los usan para cablearse, como usarían DRF. No cuentan como dependencia de dominio;
 # `test_request_infrastructure_is_self_contained` garantiza que ignorarlos no
 # esconde un ciclo.
 REQUEST_INFRASTRUCTURE = {
-    "apps.authorization.permissions": "authorization",
-    "apps.authentication.utils.throttling": "authentication",
+    "apps.roles.permissions": "roles",
+    "apps.auth.utils.throttling": "auth",
 }
 
 # Paquetes hoja: cualquier app puede importarlos porque ellos no importan a nadie.
@@ -168,32 +167,23 @@ def test_the_graph_sees_the_real_dependencies():
 
     assert {"customers", "numbering", "common", "tax"} <= graph["checkout"]
     assert {"checkout", "customers"} <= graph["quotes"]
-    assert "authentication" in graph["customers"]
-    assert "authorization" in graph["authentication"]
-    assert "audit" in graph["authorization"]
+    assert "auth" in graph["customers"]
+    assert "roles" in graph["auth"]
+    assert "audit" in graph["roles"]
 
 
-def test_authorization_never_imports_authentication():
-    # `authorization` (roles, permisos y gestión de usuarios del panel) está
-    # debajo: `authentication.User.role` apunta a su `Role` y el login lee su
-    # catálogo. Llega al `User` con `get_user_model()` y la relación inversa
-    # `role.users`. Se revisa cada import, también los de la infraestructura
-    # de request que el grafo ignora.
+def test_roles_never_imports_auth():
+    # `roles` está debajo: `User.role` apunta a su `Role` y el login lee su
+    # catálogo. Llega al `User` con `get_user_model()` y `role.users`. Se
+    # revisa cada import, también los de la infraestructura de request.
     offenders = [
         f"{path.relative_to(BACKEND_DIR).as_posix()}: {module}"
-        for path in _source_files(APPS_DIR / "authorization")
+        for path in _source_files(APPS_DIR / "roles")
         for module, _name in _imports(path)
-        if _app_of(module) == "authentication"
+        if _app_of(module) == "auth"
     ]
 
     assert offenders == []
-
-
-def test_authentication_depends_on_authorization_only_one_way():
-    graph = _import_graph()
-
-    assert "authorization" in graph["authentication"]
-    assert "authentication" not in graph["authorization"]
 
 
 def test_migrations_only_import_generated_model_callables():

@@ -14,7 +14,7 @@ from django.core.cache import cache
 from django.db import connections
 from rest_framework.test import APIClient
 
-from apps.authentication.models import User
+from apps.auth.models import User
 from apps.cart.models import Cart
 from apps.cart.services import CART_SESSION_KEY, merge_session_cart
 from apps.catalog.models import Product

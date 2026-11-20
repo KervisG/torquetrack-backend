@@ -3,7 +3,7 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authentication.utils.throttling import CheckoutRateThrottle
+from apps.auth.utils.throttling import CheckoutRateThrottle
 from apps.cart.services import current_cart_id
 from apps.checkout.services import create_storefront_checkout
 from apps.integrations.payments import authorize_net

@@ -10,7 +10,7 @@ SKIPPED_DIRS = {".venv", "__pycache__", "node_modules"}
 AUDIT_TEST_SUPPORT = BACKEND_DIR / "tests" / "factories.py"
 
 ALLOWED_AUDIT_IMPORTS = {("apps.audit.services", "record_activity")}
-ALLOWED_AUDIT_DEPENDENCIES = ("apps.audit", "apps.authorization.permissions")
+ALLOWED_AUDIT_DEPENDENCIES = ("apps.audit", "apps.roles.permissions")
 
 
 def _python_modules():
@@ -75,4 +75,4 @@ def test_the_boundary_check_sees_the_real_callers():
     assert "apps/checkout/services/admin.py" in callers
     assert "apps/checkout/services/refunds.py" in callers
     assert "apps/quotes/services/admin.py" in callers
-    assert "apps/authorization/services/users.py" in callers
+    assert "apps/roles/services/users.py" in callers

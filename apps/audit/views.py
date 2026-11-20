@@ -1,7 +1,7 @@
 from rest_framework.views import APIView
 
 from apps.audit.services import list_activity_page
-from apps.authorization.permissions import HasRolePermission, has_role_permission
+from apps.roles.permissions import HasRolePermission, has_role_permission
 from config.responses import service_response
 
 

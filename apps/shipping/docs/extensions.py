@@ -2,7 +2,7 @@
 from drf_spectacular.extensions import OpenApiViewExtension
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
-from apps.authorization.docs.schemas import ErrorResponseSerializer
+from apps.roles.docs.schemas import ErrorResponseSerializer
 from apps.shipping.docs.schemas import ShippingRatesRequestSerializer, ShippingRatesSerializer
 
 

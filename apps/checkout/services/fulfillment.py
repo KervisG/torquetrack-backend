@@ -14,7 +14,7 @@ from django.utils import timezone
 from django.utils.html import format_html
 
 from apps.audit.services import record_activity
-from apps.authentication.utils.background import run_in_background
+from apps.auth.utils.background import run_in_background
 from apps.checkout.models import Carrier, FulfillmentStatus, Order, OrderPaymentStatus
 from apps.checkout.services.payments import CHARGED_PAYMENT_STATUSES, CLOSED_ORDER_STATUSES
 from apps.common.emails import branded_email_html

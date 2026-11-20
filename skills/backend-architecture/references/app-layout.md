@@ -9,7 +9,7 @@ En la raíz de `apps/<app>/` solo pueden quedar estos archivos:
 | `__init__.py` | siempre |
 | `apps.py` | siempre: `AppConfig` con `name = "apps.<domain>"` |
 | `urls.py` | si la app expone endpoints (`numbering` e `integrations` no tienen) |
-| `admin.py` | solo si registra modelos en el admin de Django (hoy, solo `authorization`) |
+| `admin.py` | solo si registra modelos en el admin de Django (hoy, solo `roles`) |
 | `views.py` | solo si la app tiene UNA sola superficie |
 | `tasks.py` | solo si la app tiene tareas de Celery (hoy, `cart` y `quotes`): `@shared_task` que envuelven un service de la app; `autodiscover_tasks()` busca justo este módulo |
 
@@ -21,7 +21,7 @@ Todo lo demás vive en carpetas:
 | `services/` | Reglas de negocio, un módulo por tema; `__init__.py` reexporta la API pública con `__all__` (ver "Cómo se parte `services/`") |
 | `views/` | SOLO con más de una superficie: `views/storefront.py`, `views/admin.py`, `views/webhooks.py`, `views/pdf.py`; `__init__.py` reexporta con `__all__` y no queda `views.py` en la raíz |
 | `serializers/` | Serializers de DRF de los `ModelViewSet`, un módulo por superficie (`serializers/storefront.py`) |
-| `permissions/` | Catálogo de permisos y clases DRF (`apps/authorization/permissions/`) |
+| `permissions/` | Catálogo de permisos y clases DRF (`apps/roles/permissions/`) |
 | `utils/` | Helpers que no son service ni view (hasher, throttle, hilos en segundo plano) |
 | `docs/` | Documentación OpenAPI (ver "Documentación OpenAPI") |
 | `migrations/` | Migraciones de `makemigrations` |
@@ -32,7 +32,7 @@ Todo lo demás vive en carpetas:
 
 Reglas:
 
-- **Superficie** es un consumidor distinto de la API: el storefront público (incluye el portal del cliente, `/api/account/**`), el panel (`/api/admin/**`), los webhooks de un proveedor y las descargas binarias (PDF, que además aíslan la dependencia de WeasyPrint). Con una sola superficie, sus endpoints van en `views.py` en la raíz, aunque sea el panel (`authorization`, `audit`, `dashboard`). Con más de una, cada superficie tiene su módulo en `views/` y nunca comparten módulo.
+- **Superficie** es un consumidor distinto de la API: el storefront público (incluye el portal del cliente, `/api/account/**`), el panel (`/api/admin/**`), los webhooks de un proveedor y las descargas binarias (PDF, que además aíslan la dependencia de WeasyPrint). Con una sola superficie, sus endpoints van en `views.py` en la raíz, aunque sea el panel (`roles`, `audit`, `dashboard`). Con más de una, cada superficie tiene su módulo en `views/` y nunca comparten módulo.
 - Ningún archivo de la raíz lleva prefijo de superficie (`admin_views.py`, `admin_services.py`, `webhook_views.py`, `pdf_views.py`): lo reemplazan `views/admin.py`, `views/webhooks.py`, `views/pdf.py` y `services/admin.py`. `pdf.py` y los demás módulos de lógica van a `services/`.
 - Nunca crear una carpeta vacía ni un `__init__.py` sin módulos al lado. Nunca `logic/`, `core/`, `domain/`, `helpers/` ni `constants/`: una constante vive en el módulo que la usa o que es dueño de su tema.
 - Mover un modelo entre módulos de `models/` no cambia su `app_label` (sale del paquete de la app) ni su `db_table` (explícito en `Meta`), así que no genera migraciones. Si `makemigrations` detecta un cambio, el movimiento está mal.
@@ -86,10 +86,10 @@ apps/dashboard/
 └── tests/
 ```
 
-`apps/authentication/` (solo storefront: login, sesión y enlaces por correo) y `apps/authorization/` (solo panel) siguen la misma regla:
+`apps/auth/` (solo storefront: login, sesión y enlaces por correo) y `apps/auth/` (solo panel) siguen la misma regla:
 
 ```text
-apps/authentication/            # quién es cada uno
+apps/auth/            # quién es cada uno
 ├── apps.py
 ├── urls.py
 ├── views.py                    # login, logout, sesión, reset, reenvío de verificación
@@ -111,7 +111,7 @@ apps/authentication/            # quién es cada uno
 ├── migrations/
 └── tests/
 
-apps/authorization/             # quién puede qué; solo la consume el panel
+apps/auth/             # quién puede qué; solo la consume el panel
 ├── admin.py                    # Role y User en /admin/ (única app con admin.py)
 ├── apps.py
 ├── urls.py
@@ -120,7 +120,7 @@ apps/authorization/             # quién puede qué; solo la consume el panel
 │   ├── __init__.py             # reexporta Role, ADMIN_ROLE_SLUG
 │   └── role.py
 ├── permissions/
-│   ├── __init__.py             # reexporta con __all__: las apps importan de apps.authorization.permissions
+│   ├── __init__.py             # reexporta con __all__: las apps importan de apps.roles.permissions
 │   ├── catalog.py              # STAFF_PERMISSIONS, DEFAULT_EMPLOYEE_PERMISSIONS, resolve_staff_permission
 │   └── classes.py              # clase DRF HasRolePermission, has_role_permission, is_staff_user
 ├── services/
@@ -139,8 +139,8 @@ apps/authorization/             # quién puede qué; solo la consume el panel
 | App | Raíz | Carpetas de código |
 |---|---|---|
 | `audit` | `views.py` (panel) | `models/activity_log.py`; `services/recording.py` (`record_activity`), `services/listing.py` (`list_activity_page`, `PAYMENT_ID_KEYS`) |
-| `authentication` | `views.py` (storefront) | `models/`, `services/`, `utils/`, `docs/` |
-| `authorization` | `admin.py`, `views.py` (panel) | `models/`, `permissions/`, `services/`, `management/commands/`, `docs/` |
+| `auth` (label `accounts`) | `views.py` (storefront) | `constants/`, `models/`, `services/`, `utils/`, `management/commands/`, `docs/` |
+| `roles` | `admin.py`, `views.py` (panel) | `constants/`, `models/`, `permissions/`, `services/`, `management/commands/`, `docs/` |
 | `cart` | `tasks.py` (`purge_carts`, diaria 03:30 UTC; `send_cart_recovery_emails`, cada hora) | `models/cart.py`; `services/storefront.py` (`get_cart`, `replace_cart`, `merge_session_cart`, `current_cart_id`, `CART_SESSION_KEY`), `services/admin.py` (listado, estado, contadores, `abandoned_carts` y purga), `services/recovery.py` (correo de carrito abandonado); `views/storefront.py`, `views/admin.py`; `docs/`; `management/commands/purge_carts.py`; `apps.py` conecta `user_logged_in` |
 | `catalog` | — | `models/product.py` (`slug` SEO único, generado en `save()` al crear y nunca cambiado al editar), `models/application.py`; `serializers/storefront.py`; `services/admin.py`, `services/pricing.py` (`price_lines`, `build_totals`, `serialize_totals`), `services/sitemap.py`; `views/storefront.py` (detalle por id o slug), `views/admin.py`, `views/sitemap.py` (`GET /api/sitemap.xml`, documento para buscadores); `management/commands/import_catalog.py`; `data/` |
 | `checkout` | — | `models/order.py`, `models/payment.py`, `models/refund.py`; `services/payments.py`, `services/storefront.py`, `services/webhooks.py`, `services/refunds.py`, `services/fulfillment.py` (envío, guía y correo "has shipped"), `services/admin.py`; `views/storefront.py`, `views/admin.py`, `views/webhooks.py`; `docs/` (solo `POST /api/admin/orders/<id>/refunds/` y `.../fulfillment/`) |
@@ -166,7 +166,7 @@ Apps sin tabla y por lo tanto sin `models/` ni `migrations/`: `fitment`, `shippi
 - Sin imports circulares entre los módulos del paquete: las dependencias van en una sola dirección y ninguno importa del `__init__`; se importan por el módulo concreto (`from apps.checkout.services.payments import start_payment`). Las otras apps importan del paquete (`from apps.checkout.services import start_payment`) o del módulo concreto.
 - Los tests parchean el módulo donde se USA la función, no el `__init__` que la reexporta: cada módulo tiene su propia referencia, así que parchear el reexport no cambia lo que llama el código. El logger de cada módulo es `logging.getLogger(__name__)`, así que `caplog` apunta al módulo concreto (`apps.checkout.services.payments`).
 
-`apps/authentication/services/` es el ejemplo:
+`apps/auth/services/` es el ejemplo:
 
 | Módulo | Contenido | Importa del paquete |
 |---|---|---|
@@ -176,7 +176,7 @@ Apps sin tabla y por lo tanto sin `models/` ni `migrations/`: `fitment`, `shippi
 | `password_reset.py` | `request_password_reset`, `confirm_password_reset` | `credentials`, `tokens` |
 | `email_verification.py` | `send_verification_email`, `send_existing_account_email` (aviso del registro con un email ya registrado, sin token), `resend_verification_email`, `consume_email_verification` | `tokens` |
 
-`apps/authorization/services/` sigue las mismas reglas:
+`apps/auth/services/` sigue las mismas reglas:
 
 | Módulo | Contenido | Importa del paquete |
 |---|---|---|
@@ -186,9 +186,9 @@ Apps sin tabla y por lo tanto sin `models/` ni `migrations/`: `fitment`, `shippi
 
 `apps/common/` no es una app de Django: es un paquete de helpers sin estado (ver más abajo) y no lleva `apps.py`, `urls.py` ni entrada en `INSTALLED_APPS`.
 
-`apps/authentication/` (label `authentication`) es quién es cada uno: login, logout, sesión, throttle, los modelos `User` y `AccountToken` con sus migraciones y los enlaces por correo (`AccountToken`: `/api/password-reset/`, `/api/password-reset/confirm/`, `/api/verify-email/resend/`, y los servicios `consume_email_verification`, `issue_activation_token` y `lock_activation_token` que usa `customers`). No importa `apps.customers`: `/api/register/`, `/api/verify-email/` y `/api/activate/` son views de `apps/customers/` porque crean o vinculan el perfil `Customer`. `create_account` siempre crea la cuenta sin Role. Los correos salen por `send_email` del adaptador `apps/integrations/email/resend.py`; los de cuenta, fuera del request con `run_in_background` (`apps/authentication/utils/background.py`), para que el tiempo de respuesta no revele qué correos tienen cuenta. La etiqueta Django sale del nombre del paquete; no se llama `auth` porque esa etiqueta ya es de `django.contrib.auth`. `User` es el `AUTH_USER_MODEL` (`authentication.User`) y la auth es la estándar de Django: el login es el `ModelBackend` por defecto; los permisos salen de `User.has_perm`, que lee solo el Role. No hay backend propio, `authenticate()`/`login()`/`logout()` en las views y `SessionAuthentication` de DRF. La sesión es la de Django (`django_session`, cookie `sessionid`; en producción `__Host-sessionid`) y no guarda nada propio del login: `csrf_token_payload` está en `apps/authentication/services/login.py` y `CART_SESSION_KEY` en `apps/cart/services/storefront.py`, porque el carrito es dueño de su clave de sesión. `UserManager.create_superuser` (`createsuperuser`, para desarrollo) asigna el Role `admin` importándolo de `apps.authorization.models`. Importar `services` desde las otras apps; nunca duplicarlos ni reimplementar sesiones o autenticación.
+`apps/auth/` (label `accounts`) es quién es cada uno: login, logout, sesión, throttle, los modelos `User` y `AccountToken` con sus migraciones y los enlaces por correo (`AccountToken`: `/api/password-reset/`, `/api/password-reset/confirm/`, `/api/verify-email/resend/`, y los servicios `consume_email_verification`, `issue_activation_token` y `lock_activation_token` que usa `customers`). No importa `apps.customers`: `/api/register/`, `/api/verify-email/` y `/api/activate/` son views de `apps/customers/` porque crean o vinculan el perfil `Customer`. `create_account` siempre crea la cuenta sin Role. Los correos salen por `send_email` del adaptador `apps/integrations/email/resend.py`; los de cuenta, fuera del request con `run_in_background` (`apps/auth/utils/background.py`), para que el tiempo de respuesta no revele qué correos tienen cuenta. El label es `accounts` porque `auth` ya es de `django.contrib.auth`. `User` es el `AUTH_USER_MODEL` (`accounts.User`) y la auth es la estándar de Django: el login es el `ModelBackend` por defecto; los permisos salen de `User.has_perm`, que lee solo el Role. No hay backend propio, `authenticate()`/`login()`/`logout()` en las views y `SessionAuthentication` de DRF. La sesión es la de Django (`django_session`, cookie `sessionid`; en producción `__Host-sessionid`) y no guarda nada propio del login: `csrf_token_payload` está en `apps/auth/services/login.py` y `CART_SESSION_KEY` en `apps/cart/services/storefront.py`, porque el carrito es dueño de su clave de sesión. `UserManager.create_superuser` (`createsuperuser`, para desarrollo) asigna el Role `admin` importándolo de `apps.auth.models`. Importar `services` desde las otras apps; nunca duplicarlos ni reimplementar sesiones o autenticación.
 
-`apps/authorization/` (label `authorization`) es quién puede qué: el modelo `Role` (`models/role.py`, tabla `roles`, M2M a `Permission`) y sus migraciones (`0001_initial` y `0002_seed_roles`, que siembra los permisos del panel, el Role `admin` de acceso total y `employee` con `DEFAULT_EMPLOYEE_PERMISSIONS`), `permissions/` (`catalog.py` con el catálogo y `classes.py` con la clase DRF `HasRolePermission`: `STAFF_PERMISSIONS`, `DEFAULT_EMPLOYEE_PERMISSIONS`, `CODE_TO_PERMISSION`, `PERMISSION_TO_CODE`, `resolve_staff_permission`, `ALL_PERMISSION_CODENAMES`, `is_staff_user` y `has_role_permission`), `views.py` y `services/` (`users.py`, `roles.py` con los helpers de Role como `role_grants_within` y `serialize_role`, y `grants.py`: `GET /api/admin/users/`, `PUT`/`DELETE /api/admin/users/<id>/` y `GET /api/admin/roles/`, con `users.manage`), `admin.py` (el registro de `User` y `Role` en `/django-admin/`), `management/commands/grant_role.py` y su `docs/`. **Nadie crea cuentas desde el panel; se asigna Role a cuentas registradas**: no hay `POST /api/admin/users/`, el `PUT` solo acepta `role` y `active` (otro campo es 400) y el primer admin sale de registrarse en la tienda (o `createsuperuser` en desarrollo) y `python manage.py grant_role --email ... --role admin` (`--role none` quita el Role). La dependencia va en un solo sentido, `authorization` ← `authentication`: `User.role` apunta a `authorization.Role` y el login usa `is_staff_user` de `apps.authorization.permissions` y `serialize_role`/`permission_codenames_for_role` de `apps.authorization.services`; `authorization` nunca importa `authentication`, llega al `User` con `get_user_model()` y la relación inversa `role.users`. Por eso los errores genéricos del esquema (`ErrorResponseSerializer`, `OkResponseSerializer`) y `RoleSummarySerializer` viven en `apps/authorization/docs/` y `apps/authentication/docs/` los importa de ahí.
+`apps/roles/` es quién puede qué: el modelo `Role` (`models/role.py`, tabla `roles`, M2M a `Permission`) y sus migraciones (`0001_initial` y `0002_seed_roles`, que siembra los permisos del panel, el Role `admin` de acceso total y `employee` con `DEFAULT_EMPLOYEE_PERMISSIONS`), `permissions/` (`catalog.py` con el catálogo y `classes.py` con la clase DRF `HasRolePermission`: `STAFF_PERMISSIONS`, `DEFAULT_EMPLOYEE_PERMISSIONS`, `CODE_TO_PERMISSION`, `PERMISSION_TO_CODE`, `resolve_staff_permission`, `ALL_PERMISSION_CODENAMES`, `is_staff_user` y `has_role_permission`), `views.py` y `services/` (`users.py`, `roles.py` con los helpers de Role como `role_grants_within` y `serialize_role`, y `grants.py`: `GET /api/admin/users/`, `PUT`/`DELETE /api/admin/users/<id>/` y `GET /api/admin/roles/`, con `users.manage`), `admin.py` (el registro de `User` y `Role` en `/django-admin/`), `management/commands/grant_role.py` y su `docs/`. **Nadie crea cuentas desde el panel; se asigna Role a cuentas registradas**: no hay `POST /api/admin/users/`, el `PUT` solo acepta `role` y `active` (otro campo es 400) y el primer admin sale de registrarse en la tienda (o `createsuperuser` en desarrollo) y `python manage.py grant_role --email ... --role admin` (`--role none` quita el Role). Por eso los errores genéricos del esquema (`ErrorResponseSerializer`, `OkResponseSerializer`) y `RoleSummarySerializer` viven en `apps/roles/docs/` y `apps/auth/docs/` los importa de ahí.
 
 ## Documentación OpenAPI: `apps/<app>/docs/`
 
@@ -197,7 +197,7 @@ drf-spectacular publica el esquema en `/api/schema/` (Swagger en `/api/docs/`, R
 | Archivo | Contenido |
 |---|---|
 | `docs/__init__.py` | Docstring del paquete |
-| `docs/schemas.py` | Serializers de DRF que solo describen bodies de request y response, más `{"error": str}` (`ErrorResponseSerializer` de `apps/authorization/docs/schemas.py`, también para los errores de DRF: CSRF, throttle, JSON mal formado, 415). Ninguna view los usa en runtime. Sin docstrings en las clases: drf-spectacular los publica como descripción; el porqué va en un comentario `#` |
+| `docs/schemas.py` | Serializers de DRF que solo describen bodies de request y response, más `{"error": str}` (`ErrorResponseSerializer` de `apps/roles/docs/schemas.py`, también para los errores de DRF: CSRF, throttle, JSON mal formado, 415). Ninguna view los usa en runtime. Sin docstrings en las clases: drf-spectacular los publica como descripción; el porqué va en un comentario `#` |
 | `docs/examples.py` | `OpenApiExample` con los mensajes de error literales del código |
 | `docs/extensions.py` | Una `OpenApiViewExtension` por view, con `target_class` como string con la ruta del módulo concreto de la view (`"apps.<app>.views.<View>"` en una app con `views.py`, `"apps.<app>.views.<superficie>.<View>"` en una con `views/`) y `view_replacement()` que devuelve una subclase decorada con `@extend_schema` (o `@extend_schema_view` si la view tiene varios métodos) |
 
@@ -215,7 +215,7 @@ La autenticación es `SessionAuthentication` de DRF, que drf-spectacular ya desc
 | `common/numbers.py` | `to_number(value, default=0.0)`, `money(value)`, `money_decimal(value)`, `to_cents(value)` | Única coerción numérica, único redondeo de dinero (`ROUND_HALF_UP` a centavos; un `Decimal` se redondea sin pasar por `float`) y única conversión a centavos enteros |
 | `common/tokens.py` | `hash_token(token)` | SHA-256 de los tokens de enlace (`AccountToken`) |
 | `common/links.py` | `app_url(path)` | URL absoluta del SPA sin doble slash, con el respaldo de desarrollo en un solo lugar |
-| `common/emails.py` | `branded_email_html(body)`, `email_logo_url()` | Layout de marca de todos los correos de notificación (`authentication`, `checkout`, `quotes`); solo arma strings, sin I/O. El logo es el PNG del SPA, nunca SVG |
+| `common/emails.py` | `branded_email_html(body)`, `email_logo_url()` | Layout de marca de todos los correos de notificación (`auth`, `checkout`, `quotes`); solo arma strings, sin I/O. El logo es el PNG del SPA, nunca SVG |
 | `numbering/services/document_numbers.py` | `next_document_number(key, prefix)` | La numeración la usan pedidos y cotizaciones, así que no es de `checkout`; tiene modelo, y `common` por diseño no tiene |
 
 `to_number` trata `None`, `False`, `""`, `0` y lo no numérico como "sin dato" y devuelve `default`. Un `"0"` escrito como texto sí es `0.0`; quien necesita un mínimo lo aplica (`max(1, int(to_number(qty, 1)))`, `to_number(qty, 1.0) or 1.0`).
@@ -252,10 +252,10 @@ El impuesto (`apps/tax/services/sales_tax.py`) también es `Decimal`: `FALLBACK_
 - hay un ciclo entre dos o más apps;
 - `common` o `numbering` importan otra app;
 - `common` tiene modelos, migraciones o views;
+- `roles` importa `auth`;
 - alguien importa `customer_for_user`, `resolve_guest_customer` o `link_guest_history` desde otro módulo que no sea `apps.customers.services`.
-- `authorization` importa `authentication`.
 
-La permission class de `apps.authorization` y los throttles de `apps.authentication` no cuentan como arista: todas las views los usan como usarían DRF, y el test verifica que esos módulos no importan otras apps. Para no cerrar un ciclo, `customers` llega a pedidos y cotizaciones por las relaciones inversas (`customer.orders`, `customer.quotes`) en lugar de importar `Order` o `Quote`.
+La permission class de `apps.roles` y los throttles de `apps.auth` no cuentan como arista: todas las views los usan como usarían DRF, y el test verifica que esos módulos no importan otras apps. Para no cerrar un ciclo, `customers` llega a pedidos y cotizaciones por las relaciones inversas (`customer.orders`, `customer.quotes`) en lugar de importar `Order` o `Quote`.
 
 ## Apps transversales: `audit` y `dashboard`
 
@@ -269,7 +269,7 @@ record_activity(actor_email, "ORDER_STATUS_CHANGED", entity_type="ORDER", entity
 
 `actor` es el email del staff o un actor de sistema (`"authorize_net"`), no una FK. Ninguna app fuera de `audit` importa `ActivityLog`; los tests de otras apps assertean la bitácora con `activity_count(**filters)` de `tests/factories.py`. `audit` no importa apps de dominio, así cualquier app puede registrar actividad sin crear ciclos. La respuesta de `/api/admin/activity/` es `{items, nextCursor}`, con las filas en camelCase (`actorId`, `entityType`, `entityId`, `createdAt`) de la más nueva a la más vieja; pagina con `?limit=` (50 por defecto, tope 250) y `?before=<nextCursor>`, un cursor por `(created_at, id)`. `list_activity_page(limit, before, can_view_payment_ids=...)` quita de `data`, a cualquier profundidad, las claves de `PAYMENT_ID_KEYS` (`transactionId`, `providerRefundId` y las claves viejas de Stripe) salvo que la view le pase `True`; la view lo resuelve con `has_role_permission(user, "payments.transaction_id")`, así `audit` sigue sin conocer los dominios.
 
-`apps/dashboard/` es agregación de solo lectura (`get_dashboard_counts` en `services/counts.py`, `GET /api/admin/dashboard/` con `dashboard.view`). No tiene modelos ni migraciones: lee `Order`, `Payment`, `Refund`, `Quote` y `Cart` de sus apps dueñas. `salesToday` sale de `net_sales_between(start, end)`: subtotal + core + envío de `order.data.totals` por cada pago cobrado en el período (`Payment.paid_at`), menos los `Refund` `SUCCEEDED` creados en el período; la regla completa está en su docstring. Como no hay modelo propio, su permiso cuelga de `authorization.Role` (`view_dashboard`), el modelo que ya gobierna el acceso al panel de staff.
+`apps/dashboard/` es agregación de solo lectura (`get_dashboard_counts` en `services/counts.py`, `GET /api/admin/dashboard/` con `dashboard.view`). No tiene modelos ni migraciones: lee `Order`, `Payment`, `Refund`, `Quote` y `Cart` de sus apps dueñas. `salesToday` sale de `net_sales_between(start, end)`: subtotal + core + envío de `order.data.totals` por cada pago cobrado en el período (`Payment.paid_at`), menos los `Refund` `SUCCEEDED` creados en el período; la regla completa está en su docstring. Como no hay modelo propio, su permiso cuelga de `roles.Role` (`view_dashboard`), el modelo que ya gobierna el acceso al panel de staff.
 
 ## Adaptadores de proveedores: `apps/integrations`
 
@@ -277,7 +277,7 @@ Un módulo por proveedor, agrupado por capacidad:
 
 | Adaptador | Funciones públicas | Lo usa |
 |---|---|---|
-| `email/resend.py` | `is_configured()`, `send_email(to, subject, html, attachments=None, reply_to=None)` | `authentication`, `checkout`, `quotes` |
+| `email/resend.py` | `is_configured()`, `send_email(to, subject, html, attachments=None, reply_to=None)` | `auth`, `checkout`, `quotes` |
 | `payments/authorize_net.py` | `is_configured()`, `create_hosted_payment_token(...)`, `get_transaction(id)`, `void_transaction(id)`, `refund_transaction(...)`, `verify_webhook(payload, signature)` | `checkout`, `quotes` |
 | `shipping/easypost.py` | `is_configured()`, `get_rates(to_address, from_address, parcel)` | `shipping` |
 | `tax/taxjar.py` | `is_configured()`, `calculate_tax(from_zip, to_state, to_zip, to_city, to_street, amount, shipping)` | `tax` |
@@ -295,7 +295,7 @@ El dominio traduce: `apps/tax/services/sales_tax.py` cae a `FALLBACK_TAX_RATES` 
 
 El ORM es dueño de todas las tablas. Para una tabla nueva o un cambio de columna: editar el modelo, correr `python manage.py makemigrations <app>` y revisar el archivo generado. Un default que también tiene que valer para un `INSERT` fuera del ORM va con `db_default` (por ejemplo `db_default=Now()` junto a `default=timezone.now`).
 
-Las migraciones se reiniciaron: cada app parte de `0001_initial` generado desde los modelos. A mano quedan solo `authentication/0003_cache_table` (tabla del cache), `authorization/0002_seed_roles` (Roles de partida) y una `*_db_on_delete` por app (el `ON DELETE` en Postgres). Una base creada antes del reinicio se marca como migrada insertando estas migraciones en `django_migrations` (sin `--fake`, que rechaza el historial anterior); su esquema es el mismo.
+Las migraciones se reiniciaron: cada app parte de `0001_initial` generado desde los modelos. A mano quedan solo `accounts/0003_cache_table` (tabla del cache), `roles/0002_seed_roles` (Roles de partida) y una `*_db_on_delete` por app (el `ON DELETE` en Postgres). Una base creada antes de unir `authentication` y `authorization` en `accounts` y `roles` corre `manage.py rename_auth_history` antes de `migrate` (el `CMD` de producción ya lo hace). Una base creada antes del reinicio se marca como migrada insertando estas migraciones en `django_migrations` (sin `--fake`, que rechaza el historial anterior); su esquema es el mismo.
 
 `Product`, `Application`, `Customer`, `Order` y `Quote` guardan lo tipado en columnas y filas, y `data` es una propiedad con la forma camelCase de la API:
 
@@ -319,7 +319,7 @@ def get_shipping_rates(payload: dict) -> tuple[dict, int]:
     return {"configured": True, ...}, 200
 ```
 
-`apps/authorization/services/` (`users.py` y `roles.py`) usa una forma más vieja que devuelve `{"error": ..., "status": ...}` dentro del dict del resultado. No tocarla, pero no propagarla a código nuevo.
+`apps/auth/services/` (`users.py` y `roles.py`) usa una forma más vieja que devuelve `{"error": ..., "status": ...}` dentro del dict del resultado. No tocarla, pero no propagarla a código nuevo.
 
 La view nunca desarma el resultado a mano: `service_response(result, success_status=...)` de `config/responses.py` traduce los dos contratos (tupla, o dict con `error`/`status`) a `Response`. Un dict de error pierde toda clave que no sea `error` o `field`. Un error de un campo del input se arma con `error_payload(message, field)` de `apps/common/errors.py`, que agrega `field` en snake_case (`{"error": ..., "field": "zip"}`); sin campo, la clave no aparece.
 

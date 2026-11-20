@@ -1,8 +1,8 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import HasRolePermission
 from apps.dashboard.services import get_dashboard_analytics, get_dashboard_counts
+from apps.roles.permissions import HasRolePermission
 from config.responses import service_response
 
 

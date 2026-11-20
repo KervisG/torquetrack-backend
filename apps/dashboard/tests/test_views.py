@@ -244,9 +244,9 @@ def test_dashboard_returns_zeros_on_an_empty_store():
 
 @pytest.mark.django_db
 def test_dashboard_view_permission_hangs_off_the_role_model():
-    # `dashboard` no tiene modelos: el permiso vive en `authorization.role`.
+    # `dashboard` no tiene modelos: el permiso vive en `roles.role`.
     assert Permission.objects.filter(
-        content_type__app_label="authorization",
+        content_type__app_label="roles",
         content_type__model="role",
         codename="view_dashboard",
     ).exists()

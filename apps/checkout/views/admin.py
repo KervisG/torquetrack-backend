@@ -5,11 +5,6 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import (
-    HasRolePermission,
-    has_role_permission,
-    is_staff_user,
-)
 from apps.checkout.models import OrderStatus
 from apps.checkout.services import (
     add_order_note,
@@ -20,6 +15,11 @@ from apps.checkout.services import (
     refund_order,
     take_admin_payment,
     update_order_fulfillment,
+)
+from apps.roles.permissions import (
+    HasRolePermission,
+    has_role_permission,
+    is_staff_user,
 )
 from config.responses import service_response
 

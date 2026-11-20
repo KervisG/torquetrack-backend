@@ -10,7 +10,7 @@ primer test falla.
 import pytest
 from django.db import connection
 
-from apps.authentication.models import AccountToken
+from apps.auth.models import AccountToken
 from apps.cart.models import Cart
 from apps.checkout.models import Order, Payment, Refund
 from apps.customers.models import Customer
@@ -28,7 +28,7 @@ EXPECTED_ON_DELETE = {
     # El carrito de la cuenta es dato personal y sin su dueño nadie puede
     # leerlo: ninguna sesión anónima apunta a un carrito con usuario.
     ("carts", "user_id"): "c",
-    # `admin.LogEntry` del `AUTH_USER_MODEL` (`authentication/0004_db_on_delete`).
+    # `admin.LogEntry` del `AUTH_USER_MODEL` (`accounts/0004_db_on_delete`).
     ("django_admin_log", "user_id"): "c",
     # `PROTECT` en el ORM: la base también rechaza borrar un Role en uso.
     ("users", "role_id"): "a",

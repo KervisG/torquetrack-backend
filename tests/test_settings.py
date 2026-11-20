@@ -17,8 +17,8 @@ from rest_framework.test import APIClient
 from tests.factories import DEFAULT_PASSWORD, create_user
 
 EXPECTED_APPS = {
-    "apps.authorization",
-    "apps.authentication",
+    "apps.roles.apps.RolesConfig",
+    "apps.auth.apps.AuthConfig",
     "apps.customers",
     "apps.catalog",
     "apps.fitment",
@@ -306,7 +306,7 @@ def test_every_throttle_scope_has_a_rate(monkeypatch, restore_base_settings):
     # en la primera request a la view y responde 500.
     from rest_framework.throttling import SimpleRateThrottle
 
-    from apps.authentication.utils import throttling
+    from apps.auth.utils import throttling
 
     base = _load_base(monkeypatch)
     rates = base.REST_FRAMEWORK["DEFAULT_THROTTLE_RATES"]

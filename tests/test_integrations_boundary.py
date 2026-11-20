@@ -99,7 +99,7 @@ def test_the_boundary_check_sees_the_real_callers():
             if (module, name) in set(_imports(path))
         }
 
-    assert "apps/authentication/services/tokens.py" in callers("apps.integrations.email", "resend")
+    assert "apps/auth/services/tokens.py" in callers("apps.integrations.email", "resend")
     assert "apps/checkout/services/storefront.py" in callers(
         "apps.tax.services", "calculate_sales_tax"
     )

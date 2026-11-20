@@ -24,8 +24,8 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     "rest_framework",
     "drf_spectacular",
-    "apps.authorization",
-    "apps.authentication",
+    "apps.roles.apps.RolesConfig",
+    "apps.auth.apps.AuthConfig",
     "apps.customers",
     "apps.catalog",
     "apps.fitment",
@@ -100,7 +100,7 @@ CACHES = {
 # Auth estándar de Django: el `User` propio es el modelo de cuentas (también
 # de `/django-admin/`). El login es el `ModelBackend` por defecto y los permisos
 # salen de `User.has_perm`, que lee solo el Role.
-AUTH_USER_MODEL = "authentication.User"
+AUTH_USER_MODEL = "accounts.User"
 
 PASSWORD_HASHERS = [
     "django.contrib.auth.hashers.PBKDF2PasswordHasher",
@@ -199,7 +199,7 @@ REST_FRAMEWORK = {
     # para staff. Igual toda view declara `permission_classes` explícito
     # (`AllowAny` las públicas); `tests/test_view_permissions.py` lo exige.
     "DEFAULT_PERMISSION_CLASSES": [
-        "apps.authorization.permissions.HasRolePermission",
+        "apps.roles.permissions.HasRolePermission",
     ],
     # Un solo formato de error: `{"error": ...}` también para los que arma DRF.
     "EXCEPTION_HANDLER": "config.exceptions.api_exception_handler",
@@ -248,7 +248,7 @@ SPECTACULAR_SETTINGS = {
     "SCHEMA_PATH_PREFIX": r"/api/(admin/)?",
     "SERVE_INCLUDE_SCHEMA": False,
     "SERVE_AUTHENTICATION": ["rest_framework.authentication.SessionAuthentication"],
-    "SERVE_PERMISSIONS": ["apps.authorization.permissions.HasRolePermission"],
+    "SERVE_PERMISSIONS": ["apps.roles.permissions.HasRolePermission"],
     # Varios campos se llaman `status` con conjuntos distintos. Sin esto
     # spectacular les pone un nombre con hash (`Status6b4Enum`) o reutiliza
     # `FulfillmentStatusEnum` para dos conjuntos.

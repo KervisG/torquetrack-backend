@@ -5,7 +5,7 @@ from __future__ import annotations
 from django.utils import timezone
 
 from apps.audit.services import record_activity
-from apps.authentication.services import invited_emails, issue_activation_token
+from apps.auth.services import invited_emails, issue_activation_token
 from apps.common.errors import error_payload
 from apps.common.ids import random_id
 from apps.common.links import app_url

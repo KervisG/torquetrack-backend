@@ -8,11 +8,11 @@ from django.utils import timezone
 from rest_framework.test import APIClient
 
 from apps.audit.models import ActivityLog
-from apps.authentication.models import User
-from apps.authorization.models import Role
-from apps.authorization.permissions import CODE_TO_PERMISSION
+from apps.auth.models import User
 from apps.cart.services import CART_SESSION_KEY
 from apps.customers.models import Customer
+from apps.roles.models import Role
+from apps.roles.permissions import CODE_TO_PERMISSION
 
 DEFAULT_PASSWORD = "diesel-pass-123"
 # Contacto mínimo que `POST /api/checkout/` exige (correo, calle y ciudad); los

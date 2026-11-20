@@ -1,7 +1,7 @@
 from rest_framework.permissions import AllowAny
 from rest_framework.views import APIView
 
-from apps.authentication.utils.throttling import ShippingRatesRateThrottle
+from apps.auth.utils.throttling import ShippingRatesRateThrottle
 from apps.shipping.services import get_shipping_rates
 from config.responses import service_response
 

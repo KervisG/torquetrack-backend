@@ -9,7 +9,7 @@ transacción siguen siendo los de DRF.
 
 Vive en `config/` y no en una app porque es cableado del framework que
 referencia `settings`, igual que `urls.py`: no es regla de ningún dominio,
-`apps/common/` no puede importar DRF y ponerlo en `authorization` mezclaría el
+`apps/common/` no puede importar DRF y ponerlo en `auth` mezclaría el
 formato de los errores con quién puede qué.
 """
 from rest_framework.views import exception_handler

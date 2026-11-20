@@ -3,7 +3,6 @@ literales de `services/refunds.py` y `services/fulfillment.py`; si uno cambia
 en el código, hay que cambiarlo aquí."""
 from drf_spectacular.utils import OpenApiExample
 
-from apps.authorization.docs.examples import error_example
 from apps.checkout.models import Carrier, FulfillmentStatus, RefundStatus
 from apps.common.us_addresses import (
     INVALID_SHIPPING_STATE,
@@ -12,6 +11,7 @@ from apps.common.us_addresses import (
     UNKNOWN_SHIPPING_ZIP,
     ZIP_STATE_MISMATCH,
 )
+from apps.roles.docs.examples import error_example
 
 REFUND_REQUEST = OpenApiExample(
     "Partial refund",

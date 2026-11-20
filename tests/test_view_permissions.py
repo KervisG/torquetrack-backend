@@ -46,7 +46,7 @@ def _declares_permissions(cls) -> bool:
 
 def test_default_permission_class_is_staff_only():
     assert settings.REST_FRAMEWORK["DEFAULT_PERMISSION_CLASSES"] == [
-        "apps.authorization.permissions.HasRolePermission"
+        "apps.roles.permissions.HasRolePermission"
     ]
 
 

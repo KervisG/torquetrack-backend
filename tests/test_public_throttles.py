@@ -18,7 +18,7 @@ from django.core.cache import cache
 from rest_framework.permissions import AllowAny
 from rest_framework.test import APIClient
 
-from apps.authentication.utils import throttling
+from apps.auth.utils import throttling
 from apps.checkout.views.webhooks import AuthorizeNetWebhookView
 from tests.fakes import forbid_resend
 from tests.test_view_permissions import _drf_view_class, _url_patterns
@@ -139,8 +139,8 @@ UNTHROTTLED_PUBLIC_VIEWS = {
     # Carrito: una fila por sesión, el SPA lo sincroniza en cada cambio.
     "apps.cart.views.storefront.CartView",
     # Sesión y logout: sin proveedor ni trabajo pesado.
-    "apps.authentication.views.SessionView",
-    "apps.authentication.views.LogoutView",
+    "apps.auth.views.SessionView",
+    "apps.auth.views.LogoutView",
     # Lecturas por token imposible de adivinar, sin proveedor.
     "apps.quotes.views.storefront.PublicQuoteDetailsView",
     # Exigen sesión (401 sin ella); `AllowAny` solo separa el 401 del 403/404.
@@ -151,10 +151,10 @@ UNTHROTTLED_PUBLIC_VIEWS = {
     "apps.customers.views.admin.AdminCustomerTaxExemptionView",
     "apps.customers.views.admin.AdminCustomerTaxStatusView",
     "apps.checkout.views.admin.AdminOrderDetailView",
-    "apps.authorization.views.AdminUsersView",
-    "apps.authorization.views.AdminUserDetailView",
-    "apps.authorization.views.AdminRolesView",
-    "apps.authorization.views.AdminRoleDetailView",
+    "apps.roles.views.AdminUsersView",
+    "apps.roles.views.AdminUserDetailView",
+    "apps.roles.views.AdminRolesView",
+    "apps.roles.views.AdminRoleDetailView",
 }
 
 

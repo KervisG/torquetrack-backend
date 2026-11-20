@@ -14,7 +14,7 @@ import logging
 from django.conf import settings
 from django.utils.html import format_html
 
-from apps.authentication.utils.background import run_in_background
+from apps.auth.utils.background import run_in_background
 from apps.checkout.models import CoreStatus, Order, ReturnStatus
 from apps.common.emails import branded_email_html
 from apps.common.numbers import money_decimal

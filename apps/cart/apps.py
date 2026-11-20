@@ -15,9 +15,9 @@ class CartConfig(AppConfig):
     name = "apps.cart"
 
     def ready(self):
-        # Una señal y no una llamada desde `apps.authentication`: así la
+        # Una señal y no una llamada desde `apps.auth`: así la
         # dependencia va de `cart` hacia la autenticación de Django y
-        # `authentication` no conoce el carrito.
+        # `auth` no conoce el carrito.
         from django.contrib.auth.signals import user_logged_in
 
         from apps.cart.docs import extensions  # noqa: F401

@@ -76,4 +76,4 @@ EXPOSE 8000
 # la semilla que aún no existen; nunca actualiza ni borra lo editado desde el
 # panel. Si falla (por ejemplo, un precio en 0) se registra y el servidor
 # arranca igual.
-CMD ["sh", "-c", "python manage.py migrate --noinput && (python manage.py import_catalog --only-missing || echo 'import_catalog failed: catalog not loaded') && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]
+CMD ["sh", "-c", "python manage.py rename_auth_history && python manage.py migrate --noinput && (python manage.py import_catalog --only-missing || echo 'import_catalog failed: catalog not loaded') && exec gunicorn config.wsgi:application --bind 0.0.0.0:${PORT:-8000} --workers ${WEB_CONCURRENCY:-3} --timeout 60 --access-logfile -"]

@@ -3,7 +3,6 @@ from rest_framework.parsers import JSONParser, MultiPartParser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import HasRolePermission, has_role_permission
 from apps.catalog.services import (
     build_catalog_export,
     create_admin_brand,
@@ -27,6 +26,7 @@ from apps.catalog.services.images import (
     reorder_product_images,
 )
 from apps.common.business_day import store_today
+from apps.roles.permissions import HasRolePermission, has_role_permission
 from config.responses import service_response
 
 

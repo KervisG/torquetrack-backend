@@ -1,8 +1,8 @@
 """Serializers que solo describen `GET /api/admin/activity/`.
 
-El error vive aquí y no en `apps.authorization`: authorization ya llama a
+El error vive aquí y no en `apps.auth`: `auth` ya llama a
 `record_activity`, y importar sus docs cerraría un ciclo entre apps. Lleva
-nombre propio para no chocar con el componente `ErrorResponse` de authorization.
+nombre propio para no chocar con el componente `ErrorResponse` de `auth`.
 """
 from rest_framework import serializers
 

@@ -1,7 +1,6 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import HasRolePermission, has_role_permission
 from apps.quotes.models import Quote
 from apps.quotes.services import (
     TAX_OVERRIDE_PERMISSION,
@@ -14,6 +13,7 @@ from apps.quotes.services import (
     send_quote_email,
     upsert_admin_quote,
 )
+from apps.roles.permissions import HasRolePermission, has_role_permission
 from apps.vin.services import decode_vehicle
 from config.responses import service_response
 

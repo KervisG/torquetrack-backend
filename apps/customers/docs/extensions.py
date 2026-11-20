@@ -7,7 +7,6 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
-from apps.authorization.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 from apps.customers.docs.schemas import (
     CustomerSerializer,
     MessageSerializer,
@@ -16,6 +15,7 @@ from apps.customers.docs.schemas import (
     TaxStatusRequestSerializer,
     TokenRequestSerializer,
 )
+from apps.roles.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 
 ERR = OpenApiResponse(ErrorResponseSerializer)
 CUSTOMER_ID = OpenApiParameter("customer_id", str, OpenApiParameter.PATH)

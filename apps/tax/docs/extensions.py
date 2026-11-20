@@ -2,13 +2,13 @@
 from drf_spectacular.extensions import OpenApiViewExtension
 from drf_spectacular.utils import OpenApiResponse, extend_schema
 
-from apps.authorization.docs.examples import error_example
-from apps.authorization.docs.schemas import ErrorResponseSerializer
 from apps.common.us_addresses import (
     INVALID_SHIPPING_STATE,
     SHIPPING_STATE_REQUIRED,
     ZIP_STATE_MISMATCH,
 )
+from apps.roles.docs.examples import error_example
+from apps.roles.docs.schemas import ErrorResponseSerializer
 from apps.tax.docs.schemas import TaxEstimateRequestSerializer, TaxEstimateSerializer
 
 

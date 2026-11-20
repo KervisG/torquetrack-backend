@@ -1,6 +1,6 @@
 """Layout de marca de los correos de notificación que salen por Resend.
 
-Vive en `apps/common/` porque lo usan `authentication`, `checkout` y `quotes`
+Vive en `apps/common/` porque lo usan `auth`, `checkout` y `quotes`
 y solo arma un string (sin I/O, sin modelos, sin importar apps). El logo es un
 PNG público: los clientes de correo bloquean el SVG, así que el SVG en línea
 queda para el PDF de la cotización."""

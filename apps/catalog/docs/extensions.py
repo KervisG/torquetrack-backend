@@ -7,7 +7,6 @@ from drf_spectacular.utils import (
     extend_schema_view,
 )
 
-from apps.authorization.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 from apps.catalog.docs.schemas import (
     AdminBrandActiveSerializer,
     AdminBrandCreateSerializer,
@@ -25,6 +24,7 @@ from apps.catalog.docs.schemas import (
     ProductImageUploadSerializer,
     ProductPageSerializer,
 )
+from apps.roles.docs.schemas import ErrorResponseSerializer, OkResponseSerializer
 
 
 class ProductPublicViewSetExtension(OpenApiViewExtension):

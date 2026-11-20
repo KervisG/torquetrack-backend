@@ -14,9 +14,9 @@ import re
 from django.db import IntegrityError, transaction
 from django.utils import timezone
 
-from apps.authentication.models import User, split_full_name
-from apps.authentication.services import (
-    EMAIL_ALREADY_EXISTS,
+from apps.auth.constants.messages import EMAIL_ALREADY_EXISTS
+from apps.auth.models import User, split_full_name
+from apps.auth.services import (
     consume_email_verification,
     create_account,
     lock_activation_token,

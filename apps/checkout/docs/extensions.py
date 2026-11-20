@@ -3,7 +3,6 @@ una subclase con `@extend_schema` solo al generar el esquema."""
 from drf_spectacular.extensions import OpenApiViewExtension
 from drf_spectacular.utils import OpenApiParameter, OpenApiResponse, extend_schema
 
-from apps.authorization.docs.schemas import ErrorResponseSerializer
 from apps.checkout.docs import examples as ex
 from apps.checkout.docs.schemas import (
     CheckoutRequestSerializer,
@@ -19,6 +18,7 @@ from apps.checkout.docs.schemas import (
     RefundSerializer,
     WebhookAckSerializer,
 )
+from apps.roles.docs.schemas import ErrorResponseSerializer
 
 ADMIN_ORDERS_TAG = "admin: orders"
 

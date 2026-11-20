@@ -1,8 +1,8 @@
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.authorization.permissions import HasRolePermission
 from apps.cart.services import list_admin_carts
+from apps.roles.permissions import HasRolePermission
 
 
 class AdminCartsView(APIView):

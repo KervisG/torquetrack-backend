@@ -53,8 +53,8 @@ def _fake_session(session_id="cs_test_123", url="https://checkout.stripe.com/pay
 
 @pytest.fixture(autouse=True)
 def _gateway_credentials(settings):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     return settings
 
@@ -89,12 +89,12 @@ def _post(body, client=None):
 
 @pytest.mark.django_db
 def test_returns_503_when_the_gateway_is_not_configured(settings):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
+    settings.AUTHORIZE_NET_ACCOUNT_ID = ""
 
     response = _post({"items": []})
 
     assert response.status_code == 503
-    assert "AUTHORIZE_NET_API_LOGIN_ID" in response.json()["error"]
+    assert "AUTHORIZE_NET_ACCOUNT_ID" in response.json()["error"]
     assert not Order.objects.exists()
 
 

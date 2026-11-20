@@ -36,8 +36,8 @@ PROFILE = {"name": "Pat Fleet", "company": "Fleet LLC", "city": "Tampa"}
 
 @pytest.fixture(autouse=True)
 def _stripe(settings, monkeypatch):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     Product.objects.create(id=PRODUCT_ID, data=PRODUCT_DATA, active=True)
     captured = {}

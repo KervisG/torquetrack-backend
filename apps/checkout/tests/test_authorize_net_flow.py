@@ -21,14 +21,14 @@ from apps.integrations.exceptions import ProviderError
 from tests.factories import activity_count
 
 ADAPTER = "apps.integrations.payments.authorize_net"
-SIGNATURE_KEY = "anet_signature_fake"
+WEBHOOK_SECRET = "anet_signature_fake"
 
 
 @pytest.fixture(autouse=True)
 def _gateway(settings, db):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
-    settings.AUTHORIZE_NET_SIGNATURE_KEY = SIGNATURE_KEY
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
+    settings.AUTHORIZE_NET_WEBHOOK_SECRET = WEBHOOK_SECRET
     settings.RESEND_API_KEY = ""
     cache.clear()
     yield
@@ -61,7 +61,7 @@ def _webhook(event_type, trans_id="60001"):
             "payload": {"entityName": "transaction", "id": trans_id},
         }
     ).encode()
-    signature = hmac.new(SIGNATURE_KEY.encode(), body, hashlib.sha512).hexdigest().upper()
+    signature = hmac.new(WEBHOOK_SECRET.encode(), body, hashlib.sha512).hexdigest().upper()
     return APIClient().post(
         "/api/webhooks/authorize-net/",
         body,

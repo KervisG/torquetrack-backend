@@ -442,8 +442,8 @@ def test_converting_inherits_the_recalculated_tax(taxjar_seven):
 
 @pytest.mark.django_db
 def test_the_public_checkout_inherits_the_recalculated_tax(taxjar_seven, monkeypatch, settings):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
     sessions = []
 
     def _fake_session(**kwargs):

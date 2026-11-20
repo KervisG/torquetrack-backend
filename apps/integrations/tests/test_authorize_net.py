@@ -18,8 +18,8 @@ from apps.integrations.payments import authorize_net
 from apps.integrations.tests.support import FakeResponse, RecordingPost
 
 LOGIN_ID = "anet_login_fake"
-TRANSACTION_KEY = "anet_key_fake"
-SIGNATURE_KEY = "ANET_SIGNATURE_FAKE_0123456789ABCDEF"
+API_SECRET = "anet_key_fake"
+WEBHOOK_SECRET = "ANET_SIGNATURE_FAKE_0123456789ABCDEF"
 OK = {"messages": {"resultCode": "Ok", "message": [{"code": "I00001", "text": "Successful."}]}}
 TOKEN_ARGS = {
     "invoice_number": "PAY0123456789AB",
@@ -46,14 +46,14 @@ TOKEN_ARGS = {
 
 @pytest.fixture
 def configured(settings):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = LOGIN_ID
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = TRANSACTION_KEY
-    settings.AUTHORIZE_NET_SIGNATURE_KEY = SIGNATURE_KEY
+    settings.AUTHORIZE_NET_ACCOUNT_ID = LOGIN_ID
+    settings.AUTHORIZE_NET_API_SECRET = API_SECRET
+    settings.AUTHORIZE_NET_WEBHOOK_SECRET = WEBHOOK_SECRET
     settings.AUTHORIZE_NET_ENVIRONMENT = "sandbox"
     return settings
 
 
-def _sign(body: bytes, key: str = SIGNATURE_KEY) -> str:
+def _sign(body: bytes, key: str = WEBHOOK_SECRET) -> str:
     return "sha512=" + hmac.new(key.encode(), body, hashlib.sha512).hexdigest().upper()
 
 
@@ -61,8 +61,8 @@ def _sign(body: bytes, key: str = SIGNATURE_KEY) -> str:
 
 
 def test_not_configured_raises_without_calling_the_provider(settings, monkeypatch):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = ""
+    settings.AUTHORIZE_NET_ACCOUNT_ID = ""
+    settings.AUTHORIZE_NET_API_SECRET = ""
 
     def _boom(*args, **kwargs):
         raise AssertionError("Authorize.net must not be called without credentials")
@@ -127,7 +127,7 @@ def test_hosted_token_request_shape(configured, monkeypatch):
     ]
     assert request["merchantAuthentication"] == {
         "name": LOGIN_ID,
-        "transactionKey": TRANSACTION_KEY,
+        "transactionKey": API_SECRET,
     }
     tx = request["transactionRequest"]
     assert list(tx) == [
@@ -354,7 +354,7 @@ def test_declined_refund_is_not_approved(configured, monkeypatch):
 
 
 def test_webhook_without_signature_key_is_not_configured(settings):
-    settings.AUTHORIZE_NET_SIGNATURE_KEY = ""
+    settings.AUTHORIZE_NET_WEBHOOK_SECRET = ""
     with pytest.raises(ProviderNotConfigured):
         authorize_net.verify_webhook(b"{}", "sha512=00")
 

@@ -45,7 +45,7 @@ TIMEOUT_SECONDS = 20
 
 
 def is_configured() -> bool:
-    return bool(settings.AUTHORIZE_NET_API_LOGIN_ID and settings.AUTHORIZE_NET_TRANSACTION_KEY)
+    return bool(settings.AUTHORIZE_NET_ACCOUNT_ID and settings.AUTHORIZE_NET_API_SECRET)
 
 
 def _environment() -> str:
@@ -60,11 +60,11 @@ def hosted_form_url() -> str:
 def _merchant_authentication() -> dict:
     if not is_configured():
         raise ProviderNotConfigured(
-            "AUTHORIZE_NET_API_LOGIN_ID or AUTHORIZE_NET_TRANSACTION_KEY is not set"
+            "AUTHORIZE_NET_ACCOUNT_ID or AUTHORIZE_NET_API_SECRET is not set"
         )
     return {
-        "name": settings.AUTHORIZE_NET_API_LOGIN_ID,
-        "transactionKey": settings.AUTHORIZE_NET_TRANSACTION_KEY,
+        "name": settings.AUTHORIZE_NET_ACCOUNT_ID,
+        "transactionKey": settings.AUTHORIZE_NET_API_SECRET,
     }
 
 
@@ -302,9 +302,9 @@ def refund_transaction(*, trans_id: str, amount, last4: str, invoice_number: str
 def verify_webhook(payload: bytes, signature_header: str) -> dict:
     """`X-ANET-Signature: sha512=<HEX>` es el HMAC-SHA512 del body con la
     Signature Key. Sin firma válida no se parsea nada."""
-    key = settings.AUTHORIZE_NET_SIGNATURE_KEY
+    key = settings.AUTHORIZE_NET_WEBHOOK_SECRET
     if not key:
-        raise ProviderNotConfigured("AUTHORIZE_NET_SIGNATURE_KEY is not set")
+        raise ProviderNotConfigured("AUTHORIZE_NET_WEBHOOK_SECRET is not set")
     body = payload if isinstance(payload, bytes) else payload.encode("utf-8")
     received = (signature_header or "").strip()
     if received.lower().startswith("sha512="):

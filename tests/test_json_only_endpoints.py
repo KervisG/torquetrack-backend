@@ -38,8 +38,8 @@ def _clear_throttle_history(db):
 def _no_providers(settings, monkeypatch):
     # Con key configurada el checkout pasa el chequeo de Stripe y llega a leer
     # el body; `forbid_resend` prueba que ningún correo sale.
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
     forbid_resend(monkeypatch)
 
 

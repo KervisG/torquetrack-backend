@@ -264,11 +264,13 @@ SPECTACULAR_SETTINGS = {
     },
 }
 
-# Authorize.net: `sandbox` (apitest.authorize.net) o `production`. La
-# Signature Key firma los webhooks; sin ella el webhook responde 503.
-AUTHORIZE_NET_API_LOGIN_ID = env("AUTHORIZE_NET_API_LOGIN_ID", default="")
-AUTHORIZE_NET_TRANSACTION_KEY = env("AUTHORIZE_NET_TRANSACTION_KEY", default="")
-AUTHORIZE_NET_SIGNATURE_KEY = env("AUTHORIZE_NET_SIGNATURE_KEY", default="")
+# Authorize.net (Account → Settings → API Credentials & Keys):
+# ACCOUNT_ID = API Login ID, API_SECRET = Transaction Key,
+# WEBHOOK_SECRET = Signature Key (sin ella el webhook responde 503).
+# ENVIRONMENT: `sandbox` (apitest.authorize.net) o `production`.
+AUTHORIZE_NET_ACCOUNT_ID = env("AUTHORIZE_NET_ACCOUNT_ID", default="")
+AUTHORIZE_NET_API_SECRET = env("AUTHORIZE_NET_API_SECRET", default="")
+AUTHORIZE_NET_WEBHOOK_SECRET = env("AUTHORIZE_NET_WEBHOOK_SECRET", default="")
 AUTHORIZE_NET_ENVIRONMENT = env("AUTHORIZE_NET_ENVIRONMENT", default="sandbox")
 TAXJAR_API_KEY = env("TAXJAR_API_KEY", default="")
 # Estados donde TorqueTrack tiene nexo de impuesto de venta. Es una decisión

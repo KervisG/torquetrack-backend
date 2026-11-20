@@ -22,8 +22,8 @@ FORD_73_EARLY = {"id": "ford-73-powerstroke-1994-1997", "make": "Ford", "yearFro
 
 @pytest.fixture(autouse=True)
 def _keys(settings, monkeypatch):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     monkeypatch.setattr(
         CREATE_SESSION, lambda **kwargs: {"id": "cs_test_1", "url": "https://stripe.test/cs"}

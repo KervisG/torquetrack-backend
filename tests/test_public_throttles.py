@@ -74,7 +74,7 @@ def _send(client, method, path, body, client_ip):
 def test_public_route_answers_429_after_its_limit(
     monkeypatch, settings, method, path, body, throttle_name
 ):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
+    settings.AUTHORIZE_NET_ACCOUNT_ID = ""
     monkeypatch.setattr(getattr(throttling, throttle_name), "rate", f"{LIMIT}/min", raising=False)
     client = APIClient()
 
@@ -94,7 +94,7 @@ def test_public_route_answers_429_after_its_limit(
 def test_public_route_limit_is_per_client_ip(
     monkeypatch, settings, method, path, body, throttle_name
 ):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = ""
+    settings.AUTHORIZE_NET_ACCOUNT_ID = ""
     monkeypatch.setattr(getattr(throttling, throttle_name), "rate", "1/min", raising=False)
     client = APIClient()
 
@@ -111,7 +111,7 @@ def test_payment_webhook_declares_no_throttle():
 
 @pytest.mark.django_db
 def test_payment_webhook_is_never_throttled(settings):
-    settings.AUTHORIZE_NET_SIGNATURE_KEY = "anet_signature_fake"
+    settings.AUTHORIZE_NET_WEBHOOK_SECRET = "anet_signature_fake"
     client = APIClient()
 
     statuses = {

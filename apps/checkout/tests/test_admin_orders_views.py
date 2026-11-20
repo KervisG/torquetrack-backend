@@ -46,8 +46,8 @@ def _make_order(order_id="ord_1", number="O20001", data=None, payment_status="UN
 
 @pytest.fixture(autouse=True)
 def _gateway_credentials(settings):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
 
 
 def _fake_session(session_id="cs_test_admin", url="https://example.test/pay"):

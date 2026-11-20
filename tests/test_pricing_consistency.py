@@ -43,8 +43,8 @@ STOREFRONT_QUANTITY_ERROR = "Item quantity must be a whole number from 1 to 99"
 
 @pytest.fixture(autouse=True)
 def _providers(settings, monkeypatch):
-    settings.AUTHORIZE_NET_API_LOGIN_ID = "anet_login_fake"
-    settings.AUTHORIZE_NET_TRANSACTION_KEY = "anet_key_fake"
+    settings.AUTHORIZE_NET_ACCOUNT_ID = "anet_login_fake"
+    settings.AUTHORIZE_NET_API_SECRET = "anet_key_fake"
     settings.TAXJAR_API_KEY = ""
     settings.SALES_EMAIL = ""
     sessions = _SESSIONS

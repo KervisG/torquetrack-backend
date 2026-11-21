@@ -194,7 +194,12 @@ def test_update_keeps_the_public_link_and_the_linked_order():
     _insert_user("usr_update_keep", permissions=["quotes.create", "quotes.edit"])
     quote = _make_quote(
         number="Q40006",
-        data={"publicToken": "tok-sent", "orderNumber": "O50001", "memo": "old"},
+        data={
+            "publicToken": "tok-sent",
+            "orderNumber": "O50001",
+            "memo": "old",
+            "customerAcceptance": {"acceptedAt": "2026-11-20T18:00:00Z", "ip": "203.0.113.7"},
+        },
     )
 
     client = _admin_client("usr_update_keep")
@@ -208,6 +213,7 @@ def test_update_keeps_the_public_link_and_the_linked_order():
     quote.refresh_from_db()
     assert quote.data["publicToken"] == "tok-sent"
     assert quote.data["orderNumber"] == "O50001"
+    assert quote.data["customerAcceptance"]["ip"] == "203.0.113.7"
     assert quote.data["memo"] == "new"
 
 

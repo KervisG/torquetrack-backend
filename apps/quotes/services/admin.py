@@ -45,8 +45,15 @@ from apps.tax.services import estimate_tax_for_customer
 
 # Claves que escribe el sistema y no el editor del panel. El editor manda la
 # cotización completa; sin conservarlas, un update rompería el enlace ya
-# enviado y el convert idempotente (`orderNumber`).
-_SYSTEM_QUOTE_KEYS = ("publicToken", "orderNumber", "lastEmailedAt", "lastEmailedTo", "source")
+# enviado, el convert idempotente (`orderNumber`) y la conformidad del cliente.
+_SYSTEM_QUOTE_KEYS = (
+    "publicToken",
+    "orderNumber",
+    "lastEmailedAt",
+    "lastEmailedTo",
+    "source",
+    "customerAcceptance",
+)
 
 # El staff convierte solo una cotización lista para vender. No se reusa la
 # regla del checkout público: sus mensajes son para el cliente y allí

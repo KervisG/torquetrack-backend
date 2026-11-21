@@ -27,6 +27,14 @@ from tests.factories import (
 
 TAXJAR = "apps.integrations.tax.taxjar.calculate_tax"
 CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
+# El cliente marca la casilla de conformidad antes de pagar.
+ACCEPT = {"acceptTerms": True}
+
+
+def _checkout(client, token):
+    return client.post(
+        f"/api/quote/public/{token}/checkout/", ACCEPT, content_type="application/json"
+    )
 FL_ADDRESS = {"address1": "100 Main St", "city": "Tampa", "state": "FL", "zip": "33701"}
 OVERRIDE_FORBIDDEN = {"error": "Overriding tax requires tax_exemptions.review"}
 ADDRESS_REQUIRED = {"error": "Shipping state and ZIP are required to calculate tax"}
@@ -456,7 +464,7 @@ def test_the_public_checkout_inherits_the_recalculated_tax(taxjar_seven, monkeyp
     link = client.post(f"/api/admin/quotes/{saved['id']}/preview/").json()["url"]
     token = link.rstrip("/").rsplit("/", 1)[-1]
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 200
     order = Order.objects.get(number=response.json()["orderNumber"])

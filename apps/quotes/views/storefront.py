@@ -8,6 +8,7 @@ from rest_framework.views import APIView
 from apps.auth.utils.throttling import (
     QuoteCheckoutRateThrottle,
     QuoteRequestRateThrottle,
+    get_client_ip,
 )
 from apps.cart.services import current_cart_id
 from apps.quotes.models import Quote
@@ -67,4 +68,9 @@ class PublicQuoteCheckoutView(APIView):
         if quote is None:
             return Response({"error": "Quote not found"}, status=404)
 
-        return service_response(checkout_from_quote(quote))
+        # Solo `true` cuenta: la casilla tiene que haberse marcado de verdad.
+        body = request.data if isinstance(request.data, dict) else {}
+        accepted = body.get("acceptTerms") is True
+        return service_response(
+            checkout_from_quote(quote, accepted=accepted, ip=get_client_ip(request) or "")
+        )

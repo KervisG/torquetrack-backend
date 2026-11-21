@@ -18,6 +18,14 @@ from tests.factories import guest_cart_client
 from tests.fakes import install_resend
 
 CREATE_SESSION = "apps.integrations.payments.authorize_net.create_hosted_payment_token"
+# El cliente marca la casilla de conformidad antes de pagar.
+ACCEPT = {"acceptTerms": True}
+
+
+def _checkout(client, token):
+    return client.post(
+        f"/api/quote/public/{token}/checkout/", ACCEPT, content_type="application/json"
+    )
 
 PRODUCT_ID = "cummins-5.9-turbo-holset-hx35"
 PRODUCT_DATA = {
@@ -351,7 +359,7 @@ def test_public_checkout_creates_order_and_pending_payment(client, monkeypatch):
     _make_quote(quote_id="quo_checkout_1", number="Q10003", token=token)
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 200
     body = response.json()
@@ -378,7 +386,7 @@ def test_public_checkout_reuses_existing_unpaid_order(client, monkeypatch):
     existing_order = _insert_quote_order(quote, "OID_EXISTING", "O99999")
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 200
     assert response.json()["orderNumber"] == existing_order.number
@@ -396,7 +404,7 @@ def test_public_checkout_hides_the_provider_error_and_logs_it(client, monkeypatc
     monkeypatch.setattr(START_PAYMENT, _boom)
 
     with caplog.at_level(logging.WARNING, logger="apps.quotes.services.storefront"):
-        response = client.post(f"/api/quote/public/{token}/checkout/")
+        response = _checkout(client, token)
 
     assert response.status_code == 502
     assert response.json() == {"error": "Payment could not be started. Please try again."}
@@ -442,7 +450,7 @@ def test_public_checkout_refuses_a_quote_that_is_already_paid(client, monkeypatc
     _insert_quote_order(quote, "OID_PAID", "O20001", payment_status=payment_status, status="OPEN")
     _forbid_stripe(monkeypatch)
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 409
     assert response.json() == {"error": "This quote has already been paid"}
@@ -456,10 +464,10 @@ def test_public_checkout_twice_after_payment_does_not_charge_again(client, monke
     _make_quote(quote_id="quo_paid_2", number="Q10021", token=token)
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    first = client.post(f"/api/quote/public/{token}/checkout/")
+    first = _checkout(client, token)
     Order.objects.filter(number=first.json()["orderNumber"]).update(payment_status="PAID")
     _forbid_stripe(monkeypatch)
-    second = client.post(f"/api/quote/public/{token}/checkout/")
+    second = _checkout(client, token)
 
     assert second.status_code == 409
     assert Order.objects.filter(details__quoteNumber="Q10021").count() == 1
@@ -482,7 +490,7 @@ def test_public_checkout_replaces_an_order_with_stale_totals(client, monkeypatch
     )
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session("cs_fresh"))
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 200
     number = response.json()["orderNumber"]
@@ -504,7 +512,7 @@ def test_public_checkout_never_reuses_a_cancelled_order(client, monkeypatch):
     _insert_quote_order(quote, "OID_CANCELLED", "O20003", status="CANCELLED")
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 200
     assert response.json()["orderNumber"] != "O20003"
@@ -521,7 +529,7 @@ def test_public_checkout_returns_410_for_expired_quote(client, monkeypatch):
     )
     _forbid_stripe(monkeypatch)
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 410
     assert response.json() == {"error": "This quote has expired"}
@@ -534,7 +542,7 @@ def test_public_checkout_returns_410_for_expired_status_even_before_the_date(cli
     _make_quote(quote_id="quo_status_expired", number="Q10006", token=token, status="EXPIRED")
     _forbid_stripe(monkeypatch)
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 410
     assert response.json() == {"error": "This quote has expired"}
@@ -555,7 +563,7 @@ def test_public_checkout_rejects_non_payable_statuses(client, monkeypatch, statu
     _make_quote(quote_id="quo_not_payable", number="Q10007", token=token, status=status)
     _forbid_stripe(monkeypatch)
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 409
     assert response.json() == {"error": message}
@@ -570,7 +578,7 @@ def test_public_checkout_accepts_payable_statuses(client, monkeypatch, status):
     _make_quote(quote_id="quo_payable", number="Q10008", token=token, status=status)
     monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
 
-    response = client.post(f"/api/quote/public/{token}/checkout/")
+    response = _checkout(client, token)
 
     assert response.status_code == 200
     assert Quote.objects.get(pk="quo_payable").status == "CONVERTED"
@@ -616,3 +624,65 @@ def test_quote_request_emails_escape_customer_and_product_data(client, settings,
     assert "&lt;b&gt;555&lt;/b&gt;" in staff_html
     assert "&lt;b&gt;Turbo&lt;/b&gt;" in staff_html
     assert "&lt;i&gt;HX35&lt;/i&gt;" in staff_html
+
+
+FORD = {"year": 2006, "make": "Ford", "model": "F-250", "vin": "1FTSW21P56EA12345"}
+
+
+@pytest.mark.django_db
+def test_public_details_include_the_statement_the_customer_accepts(client):
+    _make_quote(data={"vehicle": FORD})
+
+    body = client.get(f"/api/quote/public/{'tok_' + 'a' * 48}/details/").json()
+
+    assert "1FTSW21P56EA12345" in body["acceptanceStatement"]
+    assert "2006 Ford F-250" in body["acceptanceStatement"]
+
+
+@pytest.mark.django_db
+@pytest.mark.parametrize("payload", [{}, {"acceptTerms": False}, {"acceptTerms": "yes"}])
+def test_public_checkout_requires_the_customer_acceptance(client, monkeypatch, payload):
+    token = "tok_" + "n" * 48
+    _make_quote(quote_id="quo_no_accept", number="Q10050", token=token)
+    _forbid_stripe(monkeypatch)
+
+    response = client.post(
+        f"/api/quote/public/{token}/checkout/", payload, content_type="application/json"
+    )
+
+    assert response.status_code == 400
+    assert response.json()["field"] == "accept_terms"
+    assert not Order.objects.filter(details__quoteNumber="Q10050").exists()
+    quote = Quote.objects.get(pk="quo_no_accept")
+    assert quote.status == "ACTIVE"
+    assert "customerAcceptance" not in quote.data
+
+
+@pytest.mark.django_db
+def test_public_checkout_records_the_acceptance_on_quote_and_order(client, monkeypatch):
+    token = "tok_" + "y" * 48
+    _make_quote(
+        quote_id="quo_accept",
+        number="Q10051",
+        token=token,
+        data={"vehicle": FORD},
+    )
+    monkeypatch.setattr(CREATE_SESSION, lambda **kwargs: _fake_session())
+
+    response = client.post(
+        f"/api/quote/public/{token}/checkout/",
+        ACCEPT,
+        content_type="application/json",
+        REMOTE_ADDR="203.0.113.7",
+    )
+
+    assert response.status_code == 200
+    quote = Quote.objects.get(pk="quo_accept")
+    acceptance = quote.data["customerAcceptance"]
+    assert acceptance["ip"] == "203.0.113.7"
+    assert acceptance["vin"] == "1FTSW21P56EA12345"
+    assert acceptance["total"] == 579.0
+    assert "1FTSW21P56EA12345" in acceptance["statement"]
+    assert acceptance["acceptedAt"]
+    order = Order.objects.get(number=response.json()["orderNumber"])
+    assert order.data["customerAcceptance"] == acceptance

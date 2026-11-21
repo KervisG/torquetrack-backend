@@ -42,6 +42,28 @@ logger = logging.getLogger(__name__)
 
 _PUBLIC_LINE_KEYS = ("title", "partNumber", "quantity", "unitPrice", "coreCharge", "lineTotal")
 
+ACCEPTANCE_REQUIRED = "Confirm the vehicle and parts on this quote before checkout"
+
+
+def acceptance_statement(quote: Quote) -> str:
+    """El texto exacto que el cliente acepta antes de pagar. Se guarda tal cual
+    con la aceptación: si luego reclama que la pieza no era la suya, queda
+    constancia de qué vehículo y qué cotización confirmó."""
+    data = quote.data or {}
+    vehicle = data.get("vehicle") or {}
+    name = " ".join(
+        str(vehicle.get(key) or "").strip() for key in ("year", "make", "model", "engine")
+    ).strip()
+    vin = str(vehicle.get("vin") or "").strip().upper()
+    described = ", ".join(part for part in (name, f"VIN {vin}" if vin else "") if part)
+    target = f"my vehicle ({described})" if described else "my vehicle"
+    return (
+        f"I confirm that the vehicle information on quote {quote.number} is correct and "
+        f"that I reviewed every part listed. I understand these parts were selected for "
+        f"{target}, and I authorize this purchase. Returns are subject to the "
+        f"TorqueTrack return policy."
+    )
+
 
 def serialize_public_quote(quote: Quote) -> dict:
     """Sin token, memo interno, vendedor ni email, porque el enlace se reenvía."""
@@ -61,6 +83,7 @@ def serialize_public_quote(quote: Quote) -> dict:
         "items": [{key: line.get(key) for key in _PUBLIC_LINE_KEYS} for line in lines],
         "totals": serialized.get("totals") or {},
         "payable": is_quote_payable(quote),
+        "acceptanceStatement": acceptance_statement(quote),
     }
 
 
@@ -279,16 +302,21 @@ def is_quote_payable(quote: Quote) -> bool:
     ).exists()
 
 
-def checkout_from_quote(quote: Quote) -> dict:
+def checkout_from_quote(quote: Quote, *, accepted: bool = False, ip: str = "") -> dict:
     """El token sigue vivo después de pagar, así que una cotización con un
     pedido PAID se rechaza con 409 en vez de abrir otro cobro. Se reusa el
     pedido sin pagar que coincide con la cotización; uno viejo (la cotización
     cambió) se cancela junto con sus sesiones pendientes. La cotización y sus
     pedidos se bloquean para que dos clics no creen dos pedidos.
+
+    Sin la casilla de conformidad no se abre el cobro. Cada pago guarda en la
+    cotización y en el pedido qué aceptó el cliente, cuándo y desde qué IP.
     """
     refusal = _checkout_refusal(quote)
     if refusal is not None:
         return refusal
+    if not accepted:
+        return error_payload(ACCEPTANCE_REQUIRED, "acceptTerms", status=400)
 
     with transaction.atomic():
         quote = Quote.objects.select_for_update().get(pk=quote.pk)
@@ -307,6 +335,13 @@ def checkout_from_quote(quote: Quote) -> dict:
             return {"error": "This quote has already been paid", "status": 409}
 
         data = quote.data or {}
+        acceptance = {
+            "acceptedAt": timezone.now().isoformat(),
+            "ip": ip,
+            "vin": str((data.get("vehicle") or {}).get("vin") or "").strip().upper(),
+            "total": (data.get("totals") or {}).get("total"),
+            "statement": acceptance_statement(quote),
+        }
         order = None
         for candidate in orders:
             if (
@@ -332,13 +367,16 @@ def checkout_from_quote(quote: Quote) -> dict:
                     "customer": serialized.get("customer") or data.get("customer") or {},
                     "quoteNumber": quote.number,
                     "salesRep": data.get("createdBy") or "Online Quote",
+                    "customerAcceptance": acceptance,
                 },
             )
-        if quote.status != QuoteStatus.CONVERTED or data.get("orderNumber") != order.number:
-            quote.status = QuoteStatus.CONVERTED
-            quote.data = {**data, "orderNumber": order.number}
-            quote.updated_at = timezone.now()
-            quote.save(update_fields=["status", "data", "updated_at"])
+        else:
+            order.data = {**(order.data or {}), "customerAcceptance": acceptance}
+            order.save(update_fields=["data"])
+        quote.status = QuoteStatus.CONVERTED
+        quote.data = {**data, "orderNumber": order.number, "customerAcceptance": acceptance}
+        quote.updated_at = timezone.now()
+        quote.save(update_fields=["status", "data", "updated_at"])
 
     try:
         _, session = start_payment(order, data={"source": "PUBLIC_QUOTE"})
